@@ -2103,3 +2103,19 @@ The full synthetic HTTP driver hit one local ProxyWorker connection-loss
 during PATCH after its prior GETs passed; a direct retry of that same Item
 PATCH returned 200 and persisted the event. This is local runtime evidence,
 not a full driver pass or CF2 verification. Port 8797 was stopped.
+
+## RepositoryService authorized detail GET (2026-09-24 continuation)
+
+Red tests preceded the Candidate `GET /api/v1/repositories/{id}/service` route.
+It returns the shared RepositoryService DTO and revision ETag only when one D1
+read batch contains a current Cookie/API key/user, owner service, accessible
+unexpired repository discovery proof tied to the service installation, and a
+matching persisted GitHub App repositoryItem. It applies `repositoryIds`
+restrictions and fails closed on account change before the batch. Four
+focused tests pass. Synthetic local workerd/D1 in the fresh
+`server-http-repository-detail-state` returned 200 for Cookie/scoped key,
+401 anonymously, and the Cookie result persisted after a real restart.
+No repository list/write, live GitHub verification, remote D1 or model call
+was enabled.
+The Server CI target plus shared-watch contracts passes **750 tests,
+73 subtests** locally; the candidate package sync check passes.

@@ -32,6 +32,7 @@ MODULES = (
     "product_domain",
     "product_item_filters",
     "product_job_filters",
+    "product_repository_access",
     "product_billing_projection",
     "product_public_catalog_rules",
     "product_source_filters",

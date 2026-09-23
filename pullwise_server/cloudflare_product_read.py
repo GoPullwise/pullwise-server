@@ -12,7 +12,7 @@ from .product_entitlement_rules import (
     entitlements_for_user,
     product_usage_payload_from_usage,
 )
-from .product_dto_rules import watch_dto
+from .product_dto_rules import repository_service_dto, watch_dto
 from .cloudflare_source_read import D1SourceReads
 from .cloudflare_item_read import D1ItemReads
 from .cloudflare_item_handling import D1ItemHandling
@@ -21,6 +21,7 @@ from .product_source_filters import apply_source_restrictions, filter_sources
 from .product_item_filters import apply_item_restrictions, filter_items
 from .product_usage_events import parse_usage_events_query, usage_events_page
 from .product_job_filters import job_resource_allowed
+from .product_repository_access import account_can_read_repository_service
 
 SESSION_COOKIE = "pw_session"
 API_KEY_PREFIX = "pwk_"
@@ -201,6 +202,28 @@ async def _watches(binding: Any, user: dict, restrictions: dict,
             "requestId": _header(headers, "X-Request-Id") or f"req_{uuid.uuid4().hex}"}
 
 
+async def _repository_service(binding: Any, user: dict, restrictions: dict,
+                              headers: Mapping[str, object], now: int,
+                              repository_id: str) -> dict | None:
+    allowed = restrictions.get("repositoryIds") if restrictions else None
+    if restrictions and (not isinstance(allowed, list) or repository_id not in allowed):
+        return None
+    auth, validate = _resource_auth_snapshot(binding, headers, user,
+        restrictions, now, "repositories:read")
+    snapshot = await binding.batch([*auth, binding.prepare("""SELECT s.*
+        FROM repository_services s WHERE s.repository_id=? AND s.billing_owner_id=?
+        AND EXISTS(SELECT 1 FROM discovery_targets d
+            WHERE d.resource_kind='repository' AND d.resource_id=s.repository_id
+              AND d.repository_id=s.repository_id AND d.billing_owner_id=s.billing_owner_id
+              AND d.module IN ('pr','ci') AND d.installation_id=s.installation_id
+              AND d.accessible=1 AND d.valid_until>=?)""").bind(
+                  repository_id, user["id"], now)])
+    validate([part.results for part in snapshot[:len(auth)]])
+    rows = snapshot[-1].results
+    return (repository_service_dto(rows[0]) if len(rows) == 1
+            and account_can_read_repository_service(user, rows[0]) else None)
+
+
 async def _usage_events(binding: Any, user: dict, restrictions: dict,
                         headers: Mapping[str, object], now: int,
                         params: Mapping[str, object]) -> dict:
@@ -338,10 +361,13 @@ async def read_product(*, binding: Any, path: str, headers: Mapping[str, object]
     item_path = path == "/api/v1/items" or path.startswith("/api/v1/items/")
     watch_path = path.startswith("/api/v1/watches/")
     job_path = path.startswith("/api/v1/jobs/")
-    if path not in {"/api/v1/me", "/api/v1/usage", "/api/v1/usage/events", "/api/v1/watches"} and not source_path and not item_path and not job_path and not watch_path:
+    repository_service_path = (path.startswith("/api/v1/repositories/")
+                               and path.endswith("/service"))
+    if path not in {"/api/v1/me", "/api/v1/usage", "/api/v1/usage/events", "/api/v1/watches"} and not source_path and not item_path and not job_path and not watch_path and not repository_service_path:
         return 404, {"error": {"code": "NOT_FOUND"}}
     scope = ("profile:read" if path.endswith("/me") else "usage:read"
              if path in {"/api/v1/usage", "/api/v1/usage/events"}
+             else "repositories:read" if repository_service_path
              else "items:read" if source_path or item_path or job_path else "watches:read")
     try:
         user, restrictions = await _principal(binding, headers, scope=scope, now=now)
@@ -362,6 +388,18 @@ async def read_product(*, binding: Any, path: str, headers: Mapping[str, object]
         return 200, {"id": user["id"], "name": user.get("name") or "",
                      "email": user.get("email") or "",
                      "modules": ["pr", "ci", "updates"]}
+    if repository_service_path:
+        repository_id = path[len("/api/v1/repositories/"):-len("/service")]
+        if not repository_id or "/" in repository_id:
+            return 404, {"error": {"code": "NOT_FOUND"}}
+        try:
+            service = await _repository_service(binding, user, restrictions,
+                headers, now, repository_id)
+        except ProductReadAuthError as error:
+            return error.status, {"error": {"code": error.code,
+                "message": error.message, "retryable": False},
+                "requestId": f"req_{uuid.uuid4().hex}"}
+        return (200, service) if service else (404, {"error": {"code": "NOT_FOUND"}})
     if path == "/api/v1/usage/events":
         try:
             return 200, await _usage_events(binding, user, restrictions,

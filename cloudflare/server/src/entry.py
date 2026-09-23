@@ -57,6 +57,8 @@ class Default(WorkerEntrypoint):
         if (status == 200 and isinstance(payload, dict)
                 and type(payload.get("revision")) is int
                 and (path.startswith("/api/v1/items/")
-                     or path.startswith("/api/v1/watches/"))):
+                     or path.startswith("/api/v1/watches/")
+                     or (path.startswith("/api/v1/repositories/")
+                         and path.endswith("/service")))):
             response_headers = {"ETag": f'"{payload["revision"]}"'}
         return Response.json(payload, status=status, headers=response_headers)

@@ -41,6 +41,17 @@ def _get(binding, path, headers, now, params=None):
         creem_secret="", configured_products={}, now=now, params=params))
 
 
+def _grant_repository_access(fixture, *, installation_id="inst-1"):
+    with fixture.store._immediate() as db:
+        users = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])
+        users["owner"]["githubRepositoryAccess"] = {
+            "mode": "github-app", "authorizedUserId": "owner",
+            "authorizedGithubId": "author", "repositoriesNeedSync": False,
+            "repositoryItems": [{"id": "repo", "installationId": installation_id}],
+        }
+        db.execute("UPDATE app_state SET payload=? WHERE name='users'", (json.dumps(users),))
+
+
 def test_cookie_me_and_api_key_usage_match_existing_read_dtos(tmp_path):
     fixture, _, frozen = seed(tmp_path / "domain.db")
     _seed_auth(fixture)
@@ -761,3 +772,107 @@ def test_shared_watch_sync_job_hides_when_parent_service_is_disabled(tmp_path):
     with fixture.store._immediate() as db:
         db.execute("UPDATE repository_services SET enabled=0,status='paused' WHERE repository_id='repo'")
     assert _get(binding, f"/api/v1/jobs/{job['id']}", cookie, fixture.now)[0] == 404
+
+
+def test_repository_service_detail_requires_current_discovery_proof(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("repositories:read",))
+    fixture.store.put_repository_service(repository_id="repo", installation_id="inst-1",
+        billing_owner_id="owner", expected_revision=0, enabled=True,
+        modules={"pr": True, "ci": False}, analysis_enabled={"pr": False, "ci": False},
+        allow_member_sync=False, default_assignee_id=None, priority_order=0)
+    binding = D1ShapedSQLite(fixture.store)
+    path = "/api/v1/repositories/repo/service"
+    cookie = {"Cookie": "pw_session=session-local"}
+    assert _get(binding, path, cookie, fixture.now)[0] == 404
+    fixture.store.set_discovery_authorization(resource_kind="repository",
+        resource_id="repo", module="pr", github_repository_id="101",
+        installation_id="inst-1", app_id="app", authorization_revision=1,
+        accessible=True, valid_until=fixture.now + 300, observed_at=fixture.now)
+    _grant_repository_access(fixture)
+    status, service = _get(binding, path, cookie, fixture.now)
+    assert status == 200 and service == fixture.store.get_repository_service("repo")
+    assert _get(binding, path, cookie, fixture.now + 301)[0] == 404
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE repository_services SET installation_id='inst-2' WHERE repository_id='repo'")
+    assert _get(binding, path, cookie, fixture.now)[0] == 404
+
+
+def test_repository_service_detail_rechecks_key_and_resource_in_one_batch(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("repositories:read",),
+        restrictions='{"repositoryIds":["other"]}')
+    fixture.store.put_repository_service(repository_id="repo", installation_id="inst-1",
+        billing_owner_id="owner", expected_revision=0, enabled=True,
+        modules={"pr": True, "ci": False}, analysis_enabled={"pr": False, "ci": False},
+        allow_member_sync=False, default_assignee_id=None, priority_order=0)
+    fixture.store.set_discovery_authorization(resource_kind="repository",
+        resource_id="repo", module="pr", github_repository_id="101",
+        installation_id="inst-1", app_id="app", authorization_revision=1,
+        accessible=True, valid_until=fixture.now + 300, observed_at=fixture.now)
+    _grant_repository_access(fixture)
+    binding = D1ShapedSQLite(fixture.store)
+    path = "/api/v1/repositories/repo/service"
+    key = {"Authorization": f"Bearer {TOKEN}"}
+    assert _get(binding, path, key, fixture.now)[0] == 404
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE api_keys SET restrictions=? WHERE id='key-local'",
+            (json.dumps({"repositoryIds": ["repo"]}),))
+    assert _get(binding, path, key, fixture.now)[0] == 200
+
+    def revoke_before_snapshot():
+        with fixture.store._immediate() as db:
+            db.execute("UPDATE api_keys SET revoked_at=? WHERE id='key-local'", (fixture.now,))
+
+    binding.before_batch = revoke_before_snapshot
+    assert _get(binding, path, key, fixture.now)[0] == 401
+
+
+def test_repository_service_detail_hides_when_account_repository_access_is_removed(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("repositories:read",))
+    fixture.store.put_repository_service(repository_id="repo", installation_id="inst-1",
+        billing_owner_id="owner", expected_revision=0, enabled=True,
+        modules={"pr": True, "ci": False}, analysis_enabled={"pr": False, "ci": False},
+        allow_member_sync=False, default_assignee_id=None, priority_order=0)
+    fixture.store.set_discovery_authorization(resource_kind="repository",
+        resource_id="repo", module="pr", github_repository_id="101",
+        installation_id="inst-1", app_id="app", authorization_revision=1,
+        accessible=True, valid_until=fixture.now + 300, observed_at=fixture.now)
+    binding = D1ShapedSQLite(fixture.store)
+    path = "/api/v1/repositories/repo/service"
+    cookie = {"Cookie": "pw_session=session-local"}
+    assert _get(binding, path, cookie, fixture.now)[0] == 404
+    _grant_repository_access(fixture)
+    assert _get(binding, path, cookie, fixture.now)[0] == 200
+    with fixture.store._immediate() as db:
+        users = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])
+        users["owner"].pop("githubRepositoryAccess")
+        db.execute("UPDATE app_state SET payload=? WHERE name='users'", (json.dumps(users),))
+    assert _get(binding, path, cookie, fixture.now)[0] == 404
+
+
+def test_repository_service_detail_rechecks_account_before_result_snapshot(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("repositories:read",))
+    fixture.store.put_repository_service(repository_id="repo", installation_id="inst-1",
+        billing_owner_id="owner", expected_revision=0, enabled=True,
+        modules={"pr": True, "ci": False}, analysis_enabled={"pr": False, "ci": False},
+        allow_member_sync=False, default_assignee_id=None, priority_order=0)
+    fixture.store.set_discovery_authorization(resource_kind="repository",
+        resource_id="repo", module="pr", github_repository_id="101",
+        installation_id="inst-1", app_id="app", authorization_revision=1,
+        accessible=True, valid_until=fixture.now + 300, observed_at=fixture.now)
+    _grant_repository_access(fixture)
+    binding = D1ShapedSQLite(fixture.store)
+
+    def revoke_before_snapshot():
+        with fixture.store._immediate() as db:
+            users = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])
+            users["owner"].pop("githubRepositoryAccess")
+            db.execute("UPDATE app_state SET payload=? WHERE name='users'", (json.dumps(users),))
+
+    binding.before_batch = revoke_before_snapshot
+    status, _ = _get(binding, "/api/v1/repositories/repo/service",
+        {"Cookie": "pw_session=session-local"}, fixture.now)
+    assert status == 401 and binding.batch_count == 1

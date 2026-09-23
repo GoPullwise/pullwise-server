@@ -206,6 +206,13 @@ revision; pending or incomplete assessment must not silently close an item.
   release queued work and, on installation change, revoke authorization and
   cancel running work. A real caller still needs current GitHub App repository
   authorization before this command can be mounted.
+  Candidate `GET /api/v1/repositories/{id}/service` is owner-only and requires
+  current stored GitHub App repositoryItems bound to the service installation,
+  a non-expired accessible repository discovery proof, and any API-key
+  `repositoryIds` restriction. Cookie/key/user, service and proof are read
+  in one D1 batch; changing the account before that batch fails closed.
+  This detail route does not imply the repository list or write routes are
+  mapped, and GET performs no provider/model work or D1 write.
   `GET /api/v1/watches/{id}` is now shared by local REST and the candidate;
   resolve only an unarchived owner watch, apply API-key watchIds restrictions,
   and keep the candidate's identity and watch row in one D1 read snapshot.

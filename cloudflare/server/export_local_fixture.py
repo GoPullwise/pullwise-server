@@ -1,6 +1,7 @@
 """Export synthetic Server-owned account tables for local D1 HTTP validation."""
 from __future__ import annotations
 
+import argparse
 import os
 import hashlib
 import json
@@ -38,6 +39,9 @@ TABLES = (
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--repository-read", action="store_true")
+    options = parser.parse_args()
     server_root = Path(__file__).resolve().parents[2]
     sys.path.insert(0, str(server_root))
     sys.path.insert(0, str(server_root / "tests"))
@@ -45,7 +49,8 @@ def main() -> None:
     from pullwise_server.product_jobs import ProductJobScheduler
     from pullwise_server.product_entitlement_rules import PLAN_ENTITLEMENTS
 
-    output = Path(__file__).resolve().parent / ".wrangler" / "local-seed.sql"
+    output = Path(__file__).resolve().parent / ".wrangler" / (
+        "local-repository-seed.sql" if options.repository_read else "local-seed.sql")
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=os.environ.get("TEMP")) as directory:
         fixture, _, _ = seed(Path(directory) / "synthetic.db")
@@ -107,7 +112,26 @@ def main() -> None:
         with fixture.store._immediate() as db:
             db.execute("UPDATE background_jobs SET id='sync-local' WHERE id=?",
                 (sync_job["id"],))
+        if options.repository_read:
+            fixture.store.put_repository_service(repository_id="repo",
+                installation_id="inst-1", billing_owner_id="owner", expected_revision=0,
+                enabled=True, modules={"pr": True, "ci": False},
+                analysis_enabled={"pr": False, "ci": False},
+                allow_member_sync=False, default_assignee_id=None, priority_order=0)
+            fixture.store.set_discovery_authorization(resource_kind="repository",
+                resource_id="repo", module="pr", github_repository_id="101",
+                installation_id="inst-1", app_id="synthetic-app",
+                authorization_revision=1, accessible=True,
+                valid_until=fixture.now + 300, observed_at=fixture.now)
         with fixture.store._immediate() as db:
+            if options.repository_read:
+                users = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])
+                users["owner"]["githubRepositoryAccess"] = {
+                    "mode": "github-app", "authorizedUserId": "owner",
+                    "authorizedGithubId": "author", "repositoriesNeedSync": False,
+                    "repositoryItems": [{"id": "repo", "installationId": "inst-1"}],
+                }
+                db.execute("UPDATE app_state SET payload=? WHERE name='users'", (json.dumps(users),))
             db.execute("INSERT INTO app_state(name,payload,updated_at) VALUES('sessions',?,?)",
                 (json.dumps({"session-local": {"userId": "owner",
                     "expiresAt": fixture.now + 86400}}), fixture.now))
@@ -120,8 +144,11 @@ def main() -> None:
             db.execute("INSERT INTO api_keys VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                 ("key-local", "owner", "Synthetic", token[:16],
                  hashlib.sha256(token.encode()).hexdigest(),
-                 '["profile:read","usage:read","watches:read","items:read"]', fixture.now + 86400,
-                 json.dumps({"watchIds": [first_watch["id"]]}),
+                 json.dumps(["profile:read", "usage:read", "watches:read", "items:read"]
+                            + (["repositories:read"] if options.repository_read else [])),
+                 fixture.now + 86400,
+                 json.dumps({"watchIds": [first_watch["id"]],
+                             **({"repositoryIds": ["repo"]} if options.repository_read else {})}),
                  fixture.now, None, None))
         with closing(fixture.store.connect()) as db:
             statements = []

@@ -15,6 +15,8 @@ public `GET /billing/plan` from a fresh trusted D1 catalog projection,
 `PATCH /api/v1/watches/{id}` and `DELETE /api/v1/watches/{id}` for owner public
 watch configuration/archive, and
 `GET /api/v1/jobs/{id}` for requester-owned manual sync status, and
+`GET /api/v1/repositories/{id}/service` for a currently authorized owner
+service with a fresh D1 repository proof, and
 `POST /webhooks/creem`; other routes return 404 until the shared product-v1 REST
 contract has been adapted. It has no probe/reset route,
 no cron, no public route or Workers subdomain, and a synthetic `remote: false`
@@ -27,6 +29,10 @@ revision, cancels queued repository analysis, releases reservations and fences
 Source configuration in one D1 batch. Parent changes also fence linked shared
 watches; changing installation revokes their current authorization. Real GitHub
 App repository authority remains a prerequisite for a write route.
+The detail GET also requires the persisted account's GitHub App repository
+item bound to the service installation and any API-key repositoryIds scope.
+It reads account, service and discovery proof in one D1 snapshot and emits
+the saved revision ETag. No repository list or write route is exposed.
 
 `src/entry.py` calls Server-owned `cloudflare_http_contract.py`. The latter
 requires raw request bytes, checks the 64 KiB bound and signature before D1,
@@ -155,6 +161,12 @@ reads compiled and returned saved data with the linked-parent SQL present.
 The full HTTP driver hit one local ProxyWorker connection loss during its Item
 PATCH; a direct retry returned 200 and saved the handling event. This is
 local runtime evidence rather than a full clean HTTP driver pass.
+The separate `server-http-repository-detail-state` uses
+`export_local_fixture.py --repository-read` to seed only synthetic GitHub App
+account access, service and repository proof. Cookie and scoped API-key GETs
+returned the same service and `ETag: "1"`; anonymous GET returned 401. The
+Cookie read passed again after a real local workerd restart. The default
+fixture is unchanged.
 
 ## Remaining gates
 

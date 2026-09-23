@@ -536,6 +536,15 @@ hid the Source after pausing the parent, including after process restart in
 `server-map-repository-source-state`. These are local authorization proofs,
 not live GitHub revocation evidence.
 
+Candidate RepositoryService detail GET now adds the service row and accessible,
+unexpired repository discovery proof to the same D1 batch as Cookie/API-key
+and stored user. The service installation must match that proof and the
+storage-form user's GitHub App repositoryItem; API-key repositoryIds must
+include it. A changed account before the batch fails closed. The local
+Worker returned DTO/ETag for a synthetic Cookie and scoped key, rejected
+anonymous access, and retained the result across process restart. The
+repository list, write authority and real GitHub refresh remain unmapped.
+
 - Full ProductStore async reads and consistent authorization-filtered list/count
   snapshots; no use of a Worker/Container local SQLite file as durable storage.
 - Source-only and cached publication, thread membership CAS for projections

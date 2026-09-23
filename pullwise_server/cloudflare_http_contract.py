@@ -109,7 +109,8 @@ async def handle_http_request(*, method: str, path: str,
             method == "GET" and (path.startswith("/api/v1/sources/")
                 or path == "/api/v1/items" or path.startswith("/api/v1/items/")
                 or path.startswith("/api/v1/jobs/")
-                or path.startswith("/api/v1/watches/"))):
+                or path.startswith("/api/v1/watches/")
+                or path.startswith("/api/v1/repositories/"))):
         try:
             return await read_product(binding=binding, path=path,
                 headers=headers, now=now, params=params)
