@@ -28,6 +28,7 @@ class Default(WorkerEntrypoint):
             "X-Pullwise-Api-Key": request.headers.get("x-pullwise-api-key") or "",
             "X-Request-Id": request.headers.get("x-request-id") or "",
             "If-Match": request.headers.get("if-match") or "",
+            "Idempotency-Key": request.headers.get("idempotency-key") or "",
             "Origin": request.headers.get("origin") or "",
             "Referer": request.headers.get("referer") or "",
         }

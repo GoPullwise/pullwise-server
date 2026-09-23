@@ -14,7 +14,9 @@ public `GET /billing/plan` from a fresh trusted D1 catalog projection,
 `PATCH /api/v1/items/{id}` for handling, and
 `PATCH /api/v1/watches/{id}` and `DELETE /api/v1/watches/{id}` for owner public
 watch configuration/archive, and
-`GET /api/v1/jobs/{id}` for requester-owned manual sync status, and
+`GET /api/v1/jobs/{id}` for requester-owned manual sync status,
+`POST /api/v1/watches/{id}/sync` for owner public watches and
+`POST /api/v1/repositories/{id}/sync` for managed owner repositories, and
 `GET /api/v1/repositories/{id}/service` for a currently authorized owner
 service with a fresh D1 repository proof, and
 `POST /webhooks/creem`; other routes return 404 until the shared product-v1 REST
@@ -37,16 +39,18 @@ The package also carries unmounted `D1ManualSyncTransactions` for an owner
 public watch or managed repository. It checks the exact persisted account,
 active resource and logical Job, plus the GitHub App account item and fresh
 installation proof for repository sync, then enqueues a fact-only Job without
-a model attempt or processing reservation. POST sync, request idempotency,
-member sync and private/shared watches remain unported.
+a model attempt or processing reservation. Member sync and private/shared
+watches remain unported.
 The trusted enqueue accepts a validated Cookie/API-key proof and rechecks the
 exact session/key and account in the D1 write batch. It rejects expired proofs
 and keys without read plus `sync:write` scope or the resource restriction;
 product POST routing and idempotency are still unmounted.
 The trusted `request_idempotent` command now commits the fact-only Job and
 completed response row atomically. Same-key replay returns the saved response;
-another key reuses the active Job. The command remains unmounted from product
-HTTP while body, Origin and route composition are completed.
+another key reuses the active Job. Candidate POST sync now requires `{}` and
+`Idempotency-Key`, validates current Cookie/API-key and resource permissions,
+enforces SameSite=None Origin for Cookie requests, then returns the saved 202
+response. It never enqueues model work or increments processing usage.
 
 `src/entry.py` calls Server-owned `cloudflare_http_contract.py`. The latter
 requires raw request bytes, checks the 64 KiB bound and signature before D1,

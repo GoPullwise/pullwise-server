@@ -17,6 +17,7 @@ from .cloudflare_source_read import D1SourceReads
 from .cloudflare_item_read import D1ItemReads
 from .cloudflare_item_handling import D1ItemHandling
 from .cloudflare_watch_adapter import D1WatchTransactions
+from .cloudflare_manual_sync import D1ManualSyncTransactions
 from .product_source_filters import apply_source_restrictions, filter_sources
 from .product_item_filters import apply_item_restrictions, filter_items
 from .product_usage_events import parse_usage_events_query, usage_events_page
@@ -601,6 +602,40 @@ async def patch_item(*, binding: Any, item_id: str, headers: Mapping[str, object
         return error(412, "REVISION_MISMATCH", "Item or authority changed.")
     return await read_product(binding=binding, path=f"/api/v1/items/{item_id}",
                               headers=headers, now=now)
+
+
+async def post_manual_sync(*, binding: Any, resource_kind: str,
+                           resource_id: str, headers: Mapping[str, object],
+                           idempotency_key: str, now: int) -> tuple[int, dict]:
+    request_id = _header(headers, "X-Request-Id") or f"req_{uuid.uuid4().hex}"
+
+    def error(status: int, code: str, message: str) -> tuple[int, dict]:
+        return status, {"error": {"code": code, "message": message,
+            "retryable": False}, "requestId": request_id}
+
+    read_scope = "watches:read" if resource_kind == "watch" else "repositories:read"
+    try:
+        user, restrictions = await _principal(binding, headers,
+            scope="sync:write", now=now)
+        proof: dict = {}
+        auth, validate = _resource_auth_snapshot(binding, headers, user,
+            restrictions, now, (read_scope, "sync:write"), proof)
+        snapshot = await binding.batch(auth)
+        validate([part.results for part in snapshot])
+        payload = await D1ManualSyncTransactions(binding).request_idempotent(
+            resource_kind=resource_kind, resource_id=resource_id,
+            owner_id=user["id"], job_id=f"job_{uuid.uuid4().hex}", now=now,
+            idempotency_key=idempotency_key, request_id=request_id, proof=proof)
+    except ProductReadAuthError as failure:
+        return error(failure.status, failure.code, failure.message)
+    except ValueError as failure:
+        code = str(failure)
+        return error(409 if code.startswith("IDEMPOTENCY_") else 404,
+            code if code.startswith("IDEMPOTENCY_") else "NOT_FOUND",
+            "Manual sync request was not accepted.")
+    except Exception:
+        return error(409, "RESOURCE_CHANGED", "Manual sync resource changed.")
+    return 202, payload
 
 
 async def patch_watch(*, binding: Any, watch_id: str,

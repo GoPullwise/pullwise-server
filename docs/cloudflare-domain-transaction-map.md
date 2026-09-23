@@ -578,7 +578,16 @@ same-key replay returns the saved response. A watch archive racing before
 commit rolls back both Job and receipt. Local workerd/D1 persisted one Job,
 two completed keys and the original response through process restart without
 model attempts or added reservation. Public POST body/Origin handling and
-route composition remain unported.
+Candidate Server now routes owner public-watch and managed owner-repository
+`POST .../sync` through this transaction. HTTP requires an empty JSON object,
+an Idempotency-Key, valid Cookie/API-key read plus sync scopes, and an allowed
+Origin for SameSite=None Cookie requests. The Worker entry forwards the key;
+the first local HTTP probe exposed that missing header. Workerd/D1 returned
+202 and the saved same-key response for a public watch and a fresh repository
+proof, including replay after restart. A later five-minute proof expiry
+returned 404. Local D1 inspection found one repository sync Job, one
+completed response, zero provider attempts and no additional reservation.
+Member/private/shared sync and actual GitHub execution remain unported.
 
 - Full ProductStore async reads and consistent authorization-filtered list/count
   snapshots; no use of a Worker/Container local SQLite file as durable storage.

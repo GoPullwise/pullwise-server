@@ -2177,3 +2177,26 @@ responses through a real restart with zero model attempts and no added
 reservation. Product HTTP POST remains closed pending body/Origin routing.
 The expanded local Server target passes **768 tests, 73 subtests**; the
 candidate package sync check passes.
+
+## Candidate manual fact-sync HTTP (2026-09-24 continuation)
+
+Candidate `POST /api/v1/watches/{id}/sync` and
+`POST /api/v1/repositories/{id}/sync` now accept only `{}` with an
+`Idempotency-Key`, current Cookie/API-key read plus sync scope, and the
+resource proof checked by the atomic D1 transaction. SameSite=None Cookie
+requests require an allowed Origin before body read. GET and manual sync never
+enqueue `analyze_source` or add intelligent-processing usage. Focused HTTP
+tests cover replay, body/Origin/key validation, repository authority and key
+revocation before enqueue. A real local Worker probe initially returned 400
+because its entry omitted `Idempotency-Key`; after forwarding it, a synthetic
+public watch created one fact-sync Job and replay returned 202. Fresh
+repository proof then yielded 202 and replay through workerd restart; an
+expired proof yielded 404. Read-only local D1 inspection found one repository
+sync Job, one completed idempotency row, zero provider attempts and no extra
+reservation. One local ProxyWorker request lost its connection before a retry
+succeeded; this is not remote CF2 evidence. Ports 8796/8797 were stopped.
+Member/private/shared sync and live GitHub remain closed.
+The expanded local Server CI target plus shared-watch contracts passes
+**773 tests, 73 subtests**; exact candidate module sync and diff checks pass.
+Web `npm run check` was rerun without Web edits: 49 files/616 tests, lint and
+build passed. Its untracked `output/` screenshots remain untouched.

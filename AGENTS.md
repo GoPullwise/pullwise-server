@@ -230,8 +230,15 @@ revision; pending or incomplete assessment must not silently close an item.
   `request_idempotent` now commits a manual Job and completed
   `request_idempotency` response in one guarded D1 batch. Same-key replay
   returns the saved response; a second key can reuse one active Job and save
-  its own response. Archive/authority races roll back both rows. HTTP body,
-  Origin and endpoint wiring remain open.
+  its own response. Archive/authority races roll back both rows. Candidate
+  `POST /api/v1/watches/{id}/sync` and
+  `POST /api/v1/repositories/{id}/sync` now bind that transaction to a current
+  Cookie or scoped API key. They require `{}` and `Idempotency-Key`, enforce
+  SameSite=None Origin for Cookie requests, and return 202 with a fact-only
+  Job. The Worker forwards `Idempotency-Key`. GET/manual sync never queues
+  analysis or spends intelligent-processing units. Owner public watches and
+  managed owner repositories are the routed scope; member/private/shared
+  sync remains closed.
   `GET /api/v1/watches/{id}` is now shared by local REST and the candidate;
   resolve only an unarchived owner watch, apply API-key watchIds restrictions,
   and keep the candidate's identity and watch row in one D1 read snapshot.

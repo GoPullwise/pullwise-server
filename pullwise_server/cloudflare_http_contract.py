@@ -10,7 +10,7 @@ from .cloudflare_creem_handler import (
     accept_signed_creem_webhook,
 )
 from .creem_signature import verify_creem_signature
-from .cloudflare_product_read import read_product, patch_item, patch_watch, delete_watch, _cookie_sessions
+from .cloudflare_product_read import read_product, patch_item, patch_watch, delete_watch, post_manual_sync, _cookie_sessions
 from .cloudflare_api_key_read import list_api_keys
 from .cloudflare_api_key_write import revoke_api_key, create_api_key
 from .cloudflare_billing_read import read_billing
@@ -43,10 +43,10 @@ async def handle_http_request(*, method: str, path: str,
                     'update_watches','source_records','source_versions',
                     'source_contexts','source_assessment_publications',
                     'items','item_versions','item_handling_events',
-                    'background_jobs','repository_services',
+                    'background_jobs','repository_services','request_idempotency',
                     'processing_controls','discovery_targets',
                     'billing_public_catalog')""").first()
-            if row and row.get("table_count") == 22:
+            if row and row.get("table_count") == 23:
                 return 200, {"ok": True, "service": "pullwise-server",
                              "database": {"type": "d1", "configured": True}}
         except Exception:
@@ -82,7 +82,7 @@ async def handle_http_request(*, method: str, path: str,
             if not isinstance(raw, bytes) or len(raw) != int(length_text):
                 raise ValueError("invalid body length")
             body = json.loads(raw)
-        except (ValueError, UnicodeError):
+        except Exception:
             return 400, {"error": {"code": "INVALID_REQUEST"}}
         try:
             return await create_api_key(binding=binding, headers=headers,
@@ -102,6 +102,36 @@ async def handle_http_request(*, method: str, path: str,
         try:
             return await revoke_api_key(binding=binding, key_id=key_id,
                 headers=headers, now=now)
+        except Exception:
+            return 503, {"error": {"code": "SERVER_UNAVAILABLE"}}
+    segments = path.strip("/").split("/")
+    if method == "POST" and len(segments) == 5 and segments[:2] == ["api", "v1"] and segments[2] in {"watches", "repositories"} and segments[4] == "sync":
+        resource_id = segments[3]
+        if not resource_id:
+            return 404, {"error": {"code": "NOT_FOUND"}}
+        if cookie_same_site.casefold() == "none" and _cookie_sessions(headers):
+            claimed_origin = _header(headers, "Origin") or _header(headers, "Referer")
+            parsed = urlsplit(claimed_origin)
+            origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else ""
+            if origin not in (trusted_origins or set()):
+                return 403, {"error": {"code": "UNTRUSTED_ORIGIN"}}
+        key = _header(headers, "Idempotency-Key")
+        if not key or len(key) > 128:
+            return 400, {"error": {"code": "INVALID_REQUEST"}}
+        length_text = _header(headers, "Content-Length")
+        if not length_text.isdigit() or int(length_text) > 8192:
+            return 400, {"error": {"code": "INVALID_REQUEST"}}
+        try:
+            raw = await read_body()
+            if not isinstance(raw, bytes) or len(raw) != int(length_text) or json.loads(raw) != {}:
+                return 400, {"error": {"code": "INVALID_REQUEST"}}
+        except Exception:
+            return 400, {"error": {"code": "INVALID_REQUEST"}}
+        try:
+            return await post_manual_sync(binding=binding,
+                resource_kind="watch" if segments[2] == "watches" else "repository",
+                resource_id=resource_id, headers=headers,
+                idempotency_key=key, now=now)
         except Exception:
             return 503, {"error": {"code": "SERVER_UNAVAILABLE"}}
     if method == "GET" and path in {"/api/v1/me", "/api/v1/usage", "/api/v1/usage/events",

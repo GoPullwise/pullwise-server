@@ -876,3 +876,142 @@ def test_repository_service_detail_rechecks_account_before_result_snapshot(tmp_p
     status, _ = _get(binding, "/api/v1/repositories/repo/service",
         {"Cookie": "pw_session=session-local"}, fixture.now)
     assert status == 401 and binding.batch_count == 1
+
+
+def test_manual_watch_sync_http_is_idempotent_fact_only(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("watches:read", "sync:write"))
+    watch = fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=False)
+    binding = D1ShapedSQLite(fixture.store)
+    path = f"/api/v1/watches/{watch['id']}/sync"
+    body = b"{}"
+
+    async def read_body():
+        return body
+
+    async def post(request_id):
+        return await handle_http_request(method="POST", path=path,
+            headers={"Cookie": "pw_session=session-local", "Content-Length": "2",
+                "Idempotency-Key": "sync-one", "X-Request-Id": request_id},
+            read_body=read_body, binding=binding, creem_secret="",
+            configured_products={}, now=fixture.now)
+
+    first_status, first = asyncio.run(post("req-first"))
+    replay_status, replay = asyncio.run(post("req-retry"))
+    assert first_status == replay_status == 202 and first == replay
+    assert first["operation"] == "sync_watch" and first["requestId"] == "req-first"
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT COUNT(*) FROM background_jobs WHERE job_type='sync_watch'").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM background_jobs WHERE job_type='analyze_source'").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM provider_attempts").fetchone()[0] == 0
+        assert db.execute("SELECT reserved FROM processing_usage_buckets LIMIT 1").fetchone()[0] == 1
+
+
+def test_manual_sync_http_rejects_nonempty_body_missing_key_and_foreign_origin(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("watches:read", "sync:write"))
+    watch = fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=False)
+    binding = D1ShapedSQLite(fixture.store)
+    path = f"/api/v1/watches/{watch['id']}/sync"
+    reads = 0
+
+    async def no_body():
+        nonlocal reads
+        reads += 1
+        return b"{}"
+
+    base = {"Cookie": "pw_session=session-local", "Content-Length": "2",
+            "Idempotency-Key": "sync-one"}
+    async def post(headers, body=no_body):
+        return await handle_http_request(method="POST", path=path,
+            headers=headers, read_body=body, binding=binding,
+            creem_secret="", configured_products={}, now=fixture.now,
+            cookie_same_site="None", trusted_origins={"https://app.pullwise.dev"})
+
+    assert asyncio.run(post(base))[0] == 403 and reads == 0
+    good_origin = {**base, "Origin": "https://app.pullwise.dev"}
+    assert asyncio.run(post({k: v for k, v in good_origin.items()
+                             if k != "Idempotency-Key"}))[0] == 400
+    async def nonempty():
+        return b'{"force":true}'
+    assert asyncio.run(post({**good_origin, "Content-Length": "14"}, nonempty))[0] == 400
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT COUNT(*) FROM background_jobs WHERE job_type='sync_watch'").fetchone()[0] == 0
+
+
+def test_manual_repository_sync_http_requires_current_account_and_proof(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("repositories:read", "sync:write"))
+    fixture.store.put_repository_service(repository_id="repo", installation_id="inst-1",
+        billing_owner_id="owner", expected_revision=0, enabled=True,
+        modules={"pr": True, "ci": False}, analysis_enabled={"pr": False, "ci": False},
+        allow_member_sync=False, default_assignee_id=None, priority_order=0)
+    binding = D1ShapedSQLite(fixture.store)
+    path = "/api/v1/repositories/repo/sync"
+    async def read_body():
+        return b"{}"
+    async def post():
+        return await handle_http_request(method="POST", path=path,
+            headers={"Cookie": "pw_session=session-local", "Content-Length": "2",
+                "Idempotency-Key": "repo-sync"}, read_body=read_body, binding=binding,
+            creem_secret="", configured_products={}, now=fixture.now)
+    assert asyncio.run(post())[0] == 404
+    fixture.store.set_discovery_authorization(resource_kind="repository",
+        resource_id="repo", module="pr", github_repository_id="101",
+        installation_id="inst-1", app_id="app", authorization_revision=1,
+        accessible=True, valid_until=fixture.now + 300, observed_at=fixture.now)
+    _grant_repository_access(fixture)
+    status, payload = asyncio.run(post())
+    assert status == 202 and payload["operation"] == "sync_repository"
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT COUNT(*) FROM background_jobs WHERE job_type='sync_repository'").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM provider_attempts").fetchone()[0] == 0
+
+
+def test_manual_sync_http_rechecks_key_in_enqueue_batch(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("watches:read", "sync:write"))
+    watch = fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=False)
+    binding = D1ShapedSQLite(fixture.store)
+    batches = 0
+    def revoke_before_write():
+        nonlocal batches
+        batches += 1
+        if batches == 4:
+            with fixture.store._immediate() as db:
+                db.execute("UPDATE api_keys SET revoked_at=? WHERE id='key-local'", (fixture.now,))
+    binding.before_batch = revoke_before_write
+    async def read_body():
+        return b"{}"
+    status, _ = asyncio.run(handle_http_request(method="POST",
+        path=f"/api/v1/watches/{watch['id']}/sync",
+        headers={"Authorization": f"Bearer {TOKEN}", "Content-Length": "2",
+            "Idempotency-Key": "key-sync"}, read_body=read_body,
+        binding=binding, creem_secret="", configured_products={}, now=fixture.now))
+    assert status == 409
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT COUNT(*) FROM background_jobs WHERE job_type='sync_watch'").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM request_idempotency").fetchone()[0] == 0
+
+
+def test_manual_sync_http_body_read_failure_is_invalid_request(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("watches:read", "sync:write"))
+    watch = fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=False)
+    async def broken_body():
+        raise OSError("synthetic read failure")
+    status, payload = asyncio.run(handle_http_request(method="POST",
+        path=f"/api/v1/watches/{watch['id']}/sync",
+        headers={"Cookie": "pw_session=session-local", "Content-Length": "2",
+            "Idempotency-Key": "broken-body"}, read_body=broken_body,
+        binding=D1ShapedSQLite(fixture.store), creem_secret="",
+        configured_products={}, now=fixture.now))
+    assert status == 400 and payload["error"]["code"] == "INVALID_REQUEST"
