@@ -1469,3 +1469,30 @@ The watch/health and ProductStore focused test set passed **44 tests**;
 the full `tests/test_product_*.py` selection passed **198 tests, 8 subtests**
 after extracting the shared watch DTO. Server CI remains blocked before tests
 by the retired Worker checkout; Web Actions are empty.
+
+## Source read snapshot groundwork (2026-09-23 continuation)
+
+Moved Source/context DTOs and UTC timestamp projection into
+`product_dto_rules.py`, shared by ProductStore and the local async D1 reader.
+`D1SourceReads.list_sources_for_billing_owner` uses a four-SELECT D1 `batch()`
+to read visible sources, publications, current source revisions and context
+fences in one transaction. It follows ProductStore's saved-assessment validity
+checks, including secondary sources and authorization expiry; incomplete or
+unclassified Release sources remain visible even without an Item. It performs
+no D1 writes, GitHub reads or model calls.
+
+The missing-module test failed first. Subsequent tests compared exact SQLite
+list/detail DTOs, withdrew a PR assessment after its secondary source changed,
+kept an unclassified Release row without an Item, and hid a revoked context.
+The isolated local Worker initially returned 409 because the generated fixture
+omitted `update_watches`; after exporting the real watch-control/watch table
+definitions, `verify_server_mapping.py` passed with current-to-stale Source
+assertions on local workerd/D1. The probe was stopped. This read is not yet
+mounted at candidate `/api/v1/sources`: session/API-key validity must be
+rechecked in the same D1 read snapshot, then query filtering/detail parity
+must be verified before exposing protected content. No remote D1 or cron.
+Combined Cloudflare/Product regression after this change: **279 passed,
+8 subtests**. The remote Server `origin/main` advanced externally to the
+previous local head during this work; this agent did not push. Latest visible
+CI run 35848982912 still fails while checking out the retired Worker before
+tests. Web Actions remain empty, and Web `output/` stays untracked.

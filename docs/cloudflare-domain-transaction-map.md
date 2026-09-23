@@ -100,6 +100,15 @@ only to repositories sees no personal watches. A local workerd/D1 HTTP run
 and process restart covered a full Cookie list and a one-watch restricted
 list without a D1 write. Source/Item authorization and publication snapshots
 remain separate CF2 work.
+The next Source read mapping batches four SELECTs as one D1 read transaction:
+currently authorized source/context rows, saved publications, source versions
+and owner-context fences. It applies the same DTOs as ProductStore and drops
+saved assessments when any secondary source or permission/context fence is
+stale. Unit tests compare list/detail bytes with SQLite for PR and an
+unclassified Release without an Item; local workerd/D1 also verified the
+secondary-source invalidation. It is intentionally not routed as
+`/api/v1/sources` yet: request identity and source rows must share the final
+read snapshot to fence concurrent API-key/session revocation.
 
 The finite local mapping now has `account_entitlement_authority` and
 `d1_claim_authority`. A previously accepted synthetic event updates the matching

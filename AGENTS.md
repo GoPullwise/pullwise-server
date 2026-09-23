@@ -116,6 +116,15 @@ revision; pending or incomplete assessment must not silently close an item.
   `watchIds` restrictions and returns an empty list for a key restricted only
   by repositories. Its GET has no D1 batch write/model side effect. Source and
   Item reads still require multi-source, permission and publication fences.
+- `product_dto_rules.source_context_dto` and `source_record_dto` now own the
+  exact SQLite/D1 Source projection. `D1SourceReads` reads authorized source
+  rows, publications, source revisions and context fences as four SELECTs in
+  one D1 `batch()` snapshot; it exposes a saved assessment only while every
+  dependency remains current. Unclassified Release rows remain visible
+  without an Item and inaccessible contexts do not return. The isolated
+  `/server-map/source-read` proves this on local workerd/D1. Do not route the
+  candidate `/api/v1/sources` until Cookie/API-key authority is rechecked
+  inside that same read snapshot and REST filtering/detail parity is tested.
 - `cloudflare/server` is a separate **local-only candidate** for the actual
   Server Python Worker HTTP entry. `src/entry.py` routes read-only `/health`,
   authenticated `GET /api/v1/me`, `/api/v1/usage`, `/api/v1/watches`, and raw-byte

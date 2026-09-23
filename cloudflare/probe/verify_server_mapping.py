@@ -91,6 +91,12 @@ def main():
     assert sorted(statuses) == [200, 409], statuses
     assert call("publish")[0] == 200
     assert call("publish")[0] == 409
+    status, source = call("source-read", "GET")
+    assert status == 200 and len(source["items"]) == 1, source
+    assert source["items"][0]["contexts"][0]["assessments"], source
+    assert call("edit-parent")[0] == 200
+    status, stale = call("source-read", "GET")
+    assert status == 200 and stale["items"][0]["contexts"][0]["assessments"] == [], stale
     assert call("reset")[0] == 200
     assert call("reserve-first")[0] == 200
     assert call("reserve-first")[0] == 409

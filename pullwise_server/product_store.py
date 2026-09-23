@@ -5,13 +5,15 @@ import json
 import sqlite3
 import time
 import uuid
-from datetime import datetime, timezone
 from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Iterator, Mapping, Sequence
 
 from .product_domain import context_hash, validate_watch_interests, watch_scope_key
-from .product_dto_rules import watch_dto
+from .product_dto_rules import (
+    iso_timestamp as _iso_timestamp,
+    source_context_dto, source_record_dto, watch_dto,
+)
 from .update_filter import project_saved_updates
 
 
@@ -39,10 +41,6 @@ def _now() -> int:
 
 def _json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True)
-
-
-def _iso_timestamp(value: int) -> str:
-    return datetime.fromtimestamp(value, tz=timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _identifier(value: object, field: str) -> str:
@@ -3693,37 +3691,11 @@ class ProductStore:
 
     @staticmethod
     def _source_context_dto(row: sqlite3.Row) -> dict:
-        return {
-            "id": row["context_id"],
-            "watchId": row["watch_id"],
-            "targetRepositoryId": row["target_repository_id"],
-            "itemId": row["item_id"],
-            "contextVersion": int(row["context_version"]),
-            "processingStatus": row["processing_status"],
-            "analysisEnabled": bool(row["analysis_enabled"]),
-            "contextStale": bool(row["context_stale"]),
-            "coverage": json.loads(row["coverage_json"]),
-        }
+        return source_context_dto(row)
 
     @staticmethod
     def _source_record_dto(row: sqlite3.Row, contexts: list[dict]) -> dict:
-        updated_at = int(row["updated_at"])
-        last_synced_at = int(row["last_synced_at"] or updated_at)
-        return {
-            "id": row["source_id"],
-            "type": row["source_type"],
-            "repositoryId": row["repository_id"],
-            "sourceVersion": row["latest_version"],
-            "sourceRevision": int(row["source_revision"]),
-            "processingMode": row["processing_mode"],
-            "completeness": row["completeness"],
-            "sourceFacts": json.loads(row["source_facts_json"] or "{}"),
-            "sourceUrl": row["source_url"],
-            "lifecycle": row["lifecycle"],
-            "updatedAt": _iso_timestamp(updated_at),
-            "lastSyncedAt": _iso_timestamp(last_synced_at),
-            "contexts": contexts,
-        }
+        return source_record_dto(row, contexts)
 
     @staticmethod
     def _item_read_dto(

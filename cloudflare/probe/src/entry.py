@@ -50,9 +50,18 @@ class Default(WorkerEntrypoint):
         from pullwise_server.cloudflare_analysis_adapter import D1AnalysisTransactions
         from pullwise_server.cloudflare_webhook_receipts import D1WebhookReceipts
         from pullwise_server.cloudflare_creem_handler import accept_signed_creem_webhook
+        from pullwise_server.cloudflare_source_read import D1SourceReads
         from pullwise_server import creem_event_rules
         import server_mapping as mapping
         name = url.path.removeprefix('/server-map/')
+        if request.method == 'GET' and name == 'source-read':
+            try:
+                items = await D1SourceReads(self.env.DB).list_sources_for_billing_owner(
+                    owner_id='owner', source_id='1', include_content=True,
+                    now=DATA['claim']['now'])
+                return Response.json({'items': items})
+            except Exception:
+                return Response.json({'error': 'read failed'}, status=409)
         if request.method == 'GET' and name == 'state':
             return Response.json(await self.env.DB.prepare('''SELECT
                 (SELECT used FROM processing_usage_buckets LIMIT 1) AS used,

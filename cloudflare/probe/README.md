@@ -158,6 +158,12 @@ composition with a synthetic paid upgrade: raw bytes and signature enter the
 local Worker, the stored account and receipt settle, and the existing bucket
 limit refreshes without resetting usage. Exact replay does not bump revision.
 This is probe-only and is not a product webhook route.
+`/server-map/source-read` exercises Server-owned Source DTO projection and
+multi-source publication fences through one read-only D1 batch. The local
+fixture includes empty watch-control/watch tables because Source reads join
+watch context; the driver verifies a current PR assessment disappears after
+its secondary source revision changes. This route is probe-only, not the
+candidate product `/api/v1/sources` endpoint.
 After `/server-map/schedule-enable`, the local Wrangler scheduled test URL
 invokes the Server async due-job selector once, then disables that probe flag.
 `wrangler.jsonc` declares no cron; the test URL invokes the handler manually

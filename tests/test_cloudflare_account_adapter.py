@@ -3,6 +3,7 @@ import asyncio
 import json
 import sqlite3
 from contextlib import closing
+from types import SimpleNamespace
 
 import pytest
 
@@ -47,9 +48,16 @@ class D1ShapedSQLite:
         if self.before_batch:
             self.before_batch()
         with self.store._immediate() as connection:
+            results = []
             for statement in statements:
-                connection.execute(statement.sql, statement.params)
-        return [{"success": True}]
+                cursor = connection.execute(statement.sql, statement.params)
+                if cursor.description:
+                    columns = [column[0] for column in cursor.description]
+                    rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+                else:
+                    rows = []
+                results.append(SimpleNamespace(success=True, results=rows))
+        return results
 
 
 def test_async_account_adapter_dirties_and_refreshes_persisted_owner(tmp_path):

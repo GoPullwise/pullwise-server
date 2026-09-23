@@ -12,7 +12,8 @@ def main():
         publish = publication_args(f, job, frozen)
         claim = claim_args(f, job, frozen)
         f.source("3", "Queued source")
-        names = ["source_records", "source_versions", "source_contexts", "assessments",
+        names = ["watch_controls", "update_watches",
+                 "source_records", "source_versions", "source_contexts", "assessments",
                  "source_assessment_publications", "items", "item_versions", "provider_attempts",
                  "processing_usage_buckets", "processing_usage_ledger", "background_jobs",
                  "analysis_claim_owners", "app_state", "account_entitlement_authority",
@@ -39,7 +40,8 @@ def main():
         for name in ("account_cycle_rules", "product_entitlement_rules", "billing_account_rules", "cloudflare_d1_batch",
                      "cloudflare_d1_mapping", "cloudflare_account_adapter", "cloudflare_analysis_adapter",
                      "creem_signature", "creem_event_rules", "cloudflare_webhook_receipts",
-                     "cloudflare_creem_handler"):
+                     "cloudflare_creem_handler", "cloudflare_source_read",
+                     "product_dto_rules", "update_filter", "product_domain"):
             source = Path(__file__).parents[1] / "pullwise_server" / f"{name}.py"
             (package / f"{name}.py").write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
         print("Generated synthetic Server schema fixture")
