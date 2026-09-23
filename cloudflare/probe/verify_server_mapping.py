@@ -48,6 +48,28 @@ def main():
     state = call("state", "GET")[1]
     assert state["attempts"] == 0 and state["jobState"] == "queued", state
     assert call("reset")[0] == 200
+    assert call("account-write-a")[0] == 200
+    assert call("claim")[0] == 409
+    state = call("state", "GET")[1]
+    assert state["accountRevision"] == 2 and state["accountDirty"] == 1, state
+    assert call("account-write-b")[0] == 200
+    assert call("refresh-account")[0] == 200
+    assert call("claim")[0] == 409
+    assert call("claim-current")[0] == 200
+    assert call("publish-current")[0] == 200
+    assert call("reset")[0] == 200
+    assert call("pending-event")[0] == 200
+    state = call("state", "GET")[1]
+    assert state["pendingCount"] == 1 and state["laterEvent"] == 0, state
+    assert call("reconcile-pending")[0] == 200
+    assert call("claim")[0] == 409
+    state = call("state", "GET")[1]
+    assert state["pendingCount"] == 0 and state["laterEvent"] == 1, state
+    assert state["accountRevision"] == 2 and state["accountDirty"] == 1, state
+    assert call("refresh-reconciled")[0] == 200
+    assert call("claim-reconciled")[0] == 200
+    assert call("publish-reconciled")[0] == 200
+    assert call("reset")[0] == 200
     assert call("event-a")[0] == 200
     assert call("event-a")[0] == 409
     assert call("claim")[0] == 409

@@ -26,6 +26,16 @@ revision; pending or incomplete assessment must not silently close an item.
   users entry with `entitlements_for_user` at a fixed timestamp. Use its
   period, monthlyProcessingLimit and strict resetAt; do not copy plan rules
   into the Worker. Paid expiry changes to free; upgrades retain period/usage.
+- `account_cycle_rules.py` and `product_entitlement_rules.py` own the pure
+  monthly cycle and product entitlement rules. `quota.py` and
+  `entitlements.py` re-export them for existing Server callers; the local
+  Python Worker packages those same pure modules for live reprojection.
+- `cloudflare_account_adapter.py` submits Server-owned D1 account commands
+  through one async `batch()` after reading persisted snapshots. Every batch
+  rechecks those snapshots; separate awaits do not form a transaction. The
+  caller must pass `state_for_storage` account JSON and validated billing
+  handler output. Pending association updates users, billingEvents and
+  billingPendingUpdates in one guarded batch; this is not yet wired to Creem.
 - The real Creem handler mutates in-memory users, billingEvents and pending
   updates under `STATE_LOCK`; `persist_state` later flushes them through
   `db.save_state` and `state_for_storage`. The probe event batch is not this

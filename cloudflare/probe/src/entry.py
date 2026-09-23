@@ -42,6 +42,8 @@ ATTEMPT_PERIOD = "strftime('%Y-%m',(SELECT now FROM probe_attempt_clock WHERE id
 class Default(WorkerEntrypoint):
     async def server_mapping(self, request, url):
         from server_fixture import DATA
+        from pullwise_server.cloudflare_d1_batch import execute_d1_batch
+        from pullwise_server.cloudflare_account_adapter import D1AccountTransactions
         import server_mapping as mapping
         name = url.path.removeprefix('/server-map/')
         if request.method == 'GET' and name == 'state':
@@ -57,6 +59,10 @@ class Default(WorkerEntrypoint):
                     WHERE name='billingEvents') AS eventA,
                 (SELECT json_type(payload,'$."event-b"') IS NOT NULL FROM app_state
                     WHERE name='billingEvents') AS eventB,
+                (SELECT json_type(payload,'$."later"') IS NOT NULL FROM app_state
+                    WHERE name='billingEvents') AS laterEvent,
+                (SELECT json_array_length(payload) FROM app_state
+                    WHERE name='billingPendingUpdates') AS pendingCount,
                 (SELECT payload='{"event_fixture":{"status":"processed"}}' FROM app_state
                     WHERE name='billingEvents') AS paymentFactsPreserved,
                 (SELECT json_type(payload,'$."event_fixture"') IS NOT NULL FROM app_state
@@ -67,27 +73,85 @@ class Default(WorkerEntrypoint):
             await self.env.DB.batch([self.env.DB.prepare(sql) for sql in DATA['schemas']]
                 + [self.env.DB.prepare(sql) for sql, _ in mapping.schema()])
             commands = [('DELETE FROM ' + table, ()) for table in reversed(DATA['names'])] + DATA['inserts']
-        elif name in {'claim', 'claim-current'}:
+        elif name in {'claim', 'claim-current', 'claim-reconciled'}:
             args = dict(DATA['claim'])
             if name == 'claim-current':
                 args['account_revision'] = 4
+            elif name == 'claim-reconciled':
+                args['account_revision'] = 3
+                account = json.loads(args['account_snapshot'])
+                args['account_snapshot'] = json.dumps(dict(account,
+                    billing=dict(account['billing'], customerId='customer')), separators=(',', ':'))
             commands = mapping.claim(**args)
-        elif name in {'publish', 'publish-current'}:
+        elif name in {'publish', 'publish-current', 'publish-reconciled'}:
             args = dict(DATA['publication'])
             if name == 'publish-current':
                 args['account_revision'] = 4
+            elif name == 'publish-reconciled':
+                args['account_revision'] = 3
+                account = json.loads(args['account_snapshot'])
+                args['account_snapshot'] = json.dumps(dict(account,
+                    billing=dict(account['billing'], customerId='customer')), separators=(',', ':'))
             commands = mapping.publication(**args)
         elif name in {'event-a', 'event-b'}:
             account = json.loads(DATA['claim']['account_snapshot'])
             changed = dict(account, billing=dict(account['billing'], plan='free'))
             changed = json.dumps(changed, separators=(',', ':'))
-            current, next_value, revision = (DATA['claim']['account_snapshot'], changed, 1) if name == 'event-a' else (
-                changed, DATA['claim']['account_snapshot'], 2)
-            commands = mapping.stage_account_event(owner_id='owner', expected_revision=revision,
-                account_snapshot=current, next_account_json=next_value, event_id=name,
-                event_record_json='{"applied":true}', now=DATA['claim']['now'])
+            next_value, revision = (changed, 1) if name == 'event-a' else (
+                DATA['claim']['account_snapshot'], 2)
+            try:
+                await D1AccountTransactions(self.env.DB).stage_account_event(
+                    owner_id='owner', expected_revision=revision, next_account_json=next_value,
+                    event_id=name, event_record_json='{"applied":true}', now=DATA['claim']['now'])
+                return Response.json({'committed': True})
+            except Exception:
+                return Response.json({'committed': False}, status=409)
+        elif name in {'account-write-a', 'account-write-b'}:
+            account = json.loads(DATA['claim']['account_snapshot'])
+            changed = json.dumps(dict(account, githubLogin='renamed'), separators=(',', ':'))
+            next_value, revision = (changed, 1) if name == 'account-write-a' else (
+                DATA['claim']['account_snapshot'], 2)
+            try:
+                await D1AccountTransactions(self.env.DB).stage_account_write(
+                    owner_id='owner', expected_revision=revision,
+                    next_account_json=next_value, now=DATA['claim']['now'])
+                return Response.json({'committed': True})
+            except Exception:
+                return Response.json({'committed': False}, status=409)
         elif name == 'refresh-account':
-            commands = DATA['refresh']
+            try:
+                await D1AccountTransactions(self.env.DB).refresh_account_entitlement(
+                    owner_id='owner', expected_revision=3, now=DATA['claim']['now'])
+                return Response.json({'committed': True})
+            except Exception:
+                return Response.json({'committed': False}, status=409)
+        elif name == 'pending-event':
+            try:
+                await D1AccountTransactions(self.env.DB).stage_pending_billing_updates(
+                    next_pending_json='[{"eventId":"later","customerId":"customer"}]',
+                    now=DATA['claim']['now'])
+                return Response.json({'committed': True})
+            except Exception:
+                return Response.json({'committed': False}, status=409)
+        elif name == 'reconcile-pending':
+            account = json.loads(DATA['claim']['account_snapshot'])
+            changed = json.dumps(dict(account, billing=dict(account['billing'], customerId='customer')),
+                separators=(',', ':'))
+            try:
+                await D1AccountTransactions(self.env.DB).stage_billing_reconciliation(
+                    owner_id='owner', expected_revision=1, next_account_json=changed,
+                    next_events_json='{"event_fixture":{"status":"processed"},"later":{"applied":true}}',
+                    next_pending_json='[]', now=DATA['claim']['now'])
+                return Response.json({'committed': True})
+            except Exception:
+                return Response.json({'committed': False}, status=409)
+        elif name == 'refresh-reconciled':
+            try:
+                await D1AccountTransactions(self.env.DB).refresh_account_entitlement(
+                    owner_id='owner', expected_revision=2, now=DATA['claim']['now'])
+                return Response.json({'committed': True})
+            except Exception:
+                return Response.json({'committed': False}, status=409)
         elif name == 'edit-parent':
             commands = [("UPDATE source_records SET source_revision=source_revision+1 WHERE source_id='2'", ())]
         elif name == 'change-account':
@@ -97,8 +161,7 @@ class Default(WorkerEntrypoint):
         else:
             return Response('Not found', status=404)
         try:
-            await self.env.DB.batch([self.env.DB.prepare(sql).bind(*params) if params else self.env.DB.prepare(sql)
-                                     for sql, params in commands])
+            await execute_d1_batch(self.env.DB, commands)
             return Response.json({'committed': True})
         except Exception:
             return Response.json({'committed': False}, status=409)

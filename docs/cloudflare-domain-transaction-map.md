@@ -73,6 +73,24 @@ conservatively retained while successful processing remains charge-key guarded.
 
 ## Persisted-account projection boundary
 
+The command builders now live in Server `cloudflare_d1_mapping.py`, with
+`cloudflare_account_adapter.py` providing async snapshot reads and one D1
+`batch()` call per guarded write. The isolated probe packages the same Server
+source modules into its generated local Worker package. Its accepted-event,
+non-billing account write, pending-list and pending-association paths passed
+on local workerd/D1 and after an actual process restart. The fixture passes
+through `state_for_storage` with synthetic GitHub tokens and a synthetic key;
+the persisted fixture contains encrypted fields and no plaintext tokens.
+The adapter accepts already encrypted account JSON from a trusted caller;
+no real Worker account codec or Creem handler is connected.
+
+The pending-association batch uses exact persisted snapshots of the affected
+user, the whole billingEvents map and the whole billingPendingUpdates list.
+It changes all three plus the owner revision together or rejects them all.
+This coarse CAS matches today's app_state shape but can conflict across
+unrelated billing events; a finer storage layout and retention protocol are
+still needed before production traffic.
+
 Initial and refresh commands now parse the frozen persisted users entry on the
 Server side and call `entitlements_for_user(user, timestamp=now)`. They accept
 no plan, period, limit or expiry arguments; resetAt is strict validUntil. The

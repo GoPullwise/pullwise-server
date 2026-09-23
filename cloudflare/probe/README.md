@@ -132,6 +132,15 @@ aggregation and unseen-PR coverage remain separate work.
 
 ## Actual Server schema mapping continuation
 
+The synthetic fixture generator now copies Server-owned D1 mapping, async
+batch/account adapter and pure entitlement-rule modules into an ignored local
+Worker package. `/server-map/*` uses that adapter for account event, generic
+account write, pending association and live entitlement refresh. Its account
+snapshot contains encrypted synthetic GitHub tokens produced by Server
+`state_for_storage`; no real key or account data enters the probe. Local D1
+and restart checks are still isolated validation, not a real Creem/Server
+runtime or CF2 completion.
+
 See [the transaction map](../../docs/cloudflare-domain-transaction-map.md) for
 the precise account/Creem boundary and remaining CF2 work. From Server, generate
 the ignored synthetic `src/server_fixture.py` using

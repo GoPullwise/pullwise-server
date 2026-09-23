@@ -999,6 +999,36 @@ REST/proxy cases on local Workers. Full source-result production orchestration,
 real provider quality/bounded-exit and live-ingestion readiness remain separate
 gates; P5b remains deferred.
 
+## Async D1 account boundary continuation (2026-09-23)
+
+Moved finite mapping commands into Server `cloudflare_d1_mapping.py` and
+introduced `cloudflare_d1_batch.py` plus `cloudflare_account_adapter.py`.
+The adapter reads persisted account/event/pending snapshots through D1, then
+submits each guarded write as one prepared async batch; concurrent changes
+between read and batch reject the entire write. Added a non-billing account
+write that increments the owner revision and dirties the projection, and a
+pending-event association batch that atomically changes the affected user,
+billingEvents, billingPendingUpdates and revision. It consumes trusted output
+from the existing handler; it does not reinterpret Creem events.
+
+Extracted the existing monthly cycle and product entitlement rules into pure
+Server modules re-exported by `quota.py` and `entitlements.py`. The generated
+local Python Worker package uses the same source for live entitlement refresh,
+without a fixture-provided plan/period/limit/expiry or a second tariff table.
+The synthetic fixture now passes through `state_for_storage`, encrypting two
+synthetic GitHub token fields with a temporary synthetic key. The new account
+adapter paths, pending association, claim/publication and restart replay passed
+on local workerd/D1. The workerd process was stopped.
+
+Test-first evidence includes failed tests for account identity swapping,
+missing non-billing writer, missing async batch/adapter and pending commands;
+the live Worker refresh initially failed before pure-rule packaging. A broad
+selected Server regression after the pure-rule extraction passed **708 tests,
+84 subtests**. Follow-up encrypted-fixture mapping tests passed **17 tests**.
+No remote Server runtime, real Creem handler, encryption-key access on Workers,
+all account writers, full ProductStore, scheduler or Server REST adapter is
+connected. This remains below CF2; production Jev and live GitHub stay off.
+
 ## Persisted-account entitlement projection (2026-09-23 continuation)
 
 The local mapping's initial and refresh commands now derive plan, processing

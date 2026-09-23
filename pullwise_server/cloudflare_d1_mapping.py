@@ -1,0 +1,302 @@
+"""Candidate finite D1 commands over Server tables, exercised only by the probe.
+
+No API, credentials, network, payment interpretation or production wiring.
+Each returned list must be one D1 batch; never execute it as separate awaits.
+"""
+import json
+from datetime import datetime, timezone
+
+
+def schema():
+    return [
+        ("CREATE TABLE IF NOT EXISTS d1_command_guard(ok INTEGER NOT NULL CHECK(ok=1))", ()),
+        ("""CREATE TABLE IF NOT EXISTS account_entitlement_authority(
+            owner_id TEXT PRIMARY KEY, revision INTEGER NOT NULL CHECK(revision>=1),
+            plan TEXT NOT NULL, period TEXT NOT NULL,
+            monthly_processing_limit INTEGER NOT NULL CHECK(monthly_processing_limit>=0),
+            valid_until INTEGER NOT NULL, dirty INTEGER NOT NULL CHECK(dirty IN (0,1))
+        )""", ()),
+        ("""CREATE TABLE IF NOT EXISTS d1_claim_authority(
+            job_id TEXT PRIMARY KEY, account_revision INTEGER NOT NULL CHECK(account_revision>=1)
+        )""", ()),
+    ]
+
+
+def _check(predicate, params=()):
+    return ("INSERT INTO d1_command_guard VALUES(CASE WHEN " + predicate + " THEN 1 ELSE 0 END)", tuple(params))
+
+
+def _changed():
+    return _check("changes()=1")
+
+
+def _account(job_id, frozen, revision, now):
+    # Match the actual persisted users entry, including billing facts, not an
+    # in-memory plan or checkout-return URL. Equality is deliberately conservative.
+    return _check("""EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u,background_jobs j
+        JOIN account_entitlement_authority authority ON authority.owner_id=j.billing_owner_id
+        JOIN processing_usage_ledger ledger ON ledger.reservation_id=j.reservation_id
+        WHERE a.name='users' AND u.key=j.billing_owner_id AND u.value=? AND j.id=?
+        AND authority.revision=? AND authority.dirty=0 AND authority.valid_until>?
+        AND authority.period=ledger.period)""", (frozen, job_id, revision, now))
+
+
+def _projection(owner_id, account_snapshot, now):
+    # Imported only by the Server-side fixture/adapter. The isolated Worker
+    # executes exported commands and carries no second copy of billing rules.
+    from pullwise_server.product_entitlement_rules import entitlements_for_user
+
+    user = json.loads(account_snapshot)
+    if not isinstance(user, dict) or user.get("id") != owner_id:
+        raise ValueError("account snapshot does not match owner")
+    entitlement = entitlements_for_user(user, timestamp=now)
+    valid_until = entitlement["resetAt"]
+    if valid_until <= now:
+        raise ValueError("expired entitlement projection")
+    return (entitlement["plan"], entitlement["period"],
+            entitlement["entitlements"]["monthlyProcessingLimit"], valid_until)
+
+
+def initialize_account(*, owner_id, account_snapshot, now):
+    """Local synthetic seed after the account has been persisted; no API entrypoint."""
+    plan, period, monthly_processing_limit, valid_until = _projection(owner_id, account_snapshot, now)
+    return [_check("""EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u
+        WHERE a.name='users' AND u.key=? AND u.value=?)""", (owner_id, account_snapshot)),
+        ("""INSERT INTO account_entitlement_authority
+        (owner_id,revision,plan,period,monthly_processing_limit,valid_until,dirty)
+        VALUES (?,1,?,?,?,?,0)""",
+        (owner_id, plan, period, monthly_processing_limit, valid_until)),
+        ("DELETE FROM d1_command_guard", ())]
+
+
+def _json_path(identifier):
+    if not isinstance(identifier, str) or not identifier:
+        raise ValueError("non-empty account/event identity required")
+    return '$.' + json.dumps(identifier, ensure_ascii=False)
+
+
+def stage_account_write(*, owner_id, expected_revision, account_snapshot,
+                        next_account_json, now):
+    """Finite CAS for a trusted non-billing account writer.
+
+    The caller must pass state_for_storage output. Every account mutation
+    dirties the entitlement projection until a trusted refresh runs.
+    """
+    next_account = json.loads(next_account_json)
+    if not isinstance(next_account, dict) or next_account.get("id") != owner_id:
+        raise ValueError("account identity is invalid")
+    user_path = _json_path(owner_id)
+    return [
+        _check("""EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u,
+            account_entitlement_authority authority WHERE a.name='users' AND u.key=?
+            AND u.value=? AND authority.owner_id=? AND authority.revision=?)""",
+            (owner_id, account_snapshot, owner_id, expected_revision)),
+        ("""UPDATE app_state SET payload=json_set(payload,?,json(?)),updated_at=?
+            WHERE name='users' AND (SELECT value FROM json_each(payload) WHERE key=?)=?""",
+            (user_path, next_account_json, now, owner_id, account_snapshot)), _changed(),
+        ("""UPDATE account_entitlement_authority SET revision=revision+1,dirty=1,valid_until=?
+            WHERE owner_id=? AND revision=?""", (now, owner_id, expected_revision)), _changed(),
+        ("DELETE FROM d1_command_guard", ()),
+    ]
+
+
+def stage_pending_billing_updates(*, expected_pending_json, next_pending_json, now):
+    """Persist the trusted handler's unmatched update list with a whole-list CAS."""
+    if (not isinstance(json.loads(expected_pending_json), list)
+            or not isinstance(json.loads(next_pending_json), list)):
+        raise ValueError("pending billing updates must be JSON arrays")
+    return [
+        ("""UPDATE app_state SET payload=?,updated_at=?
+            WHERE name='billingPendingUpdates' AND payload=?""",
+            (next_pending_json, now, expected_pending_json)), _changed(),
+        ("DELETE FROM d1_command_guard", ()),
+    ]
+
+
+def stage_billing_reconciliation(*, owner_id, expected_revision, account_snapshot,
+                                 next_account_json, expected_events_json,
+                                 next_events_json, expected_pending_json,
+                                 next_pending_json, now):
+    """Persist one trusted handler result across user, events and pending facts.
+
+    The billing handler, not this command, interprets event order and payment
+    state. Whole-map CAS rejects concurrent unrelated account/event changes.
+    """
+    next_account = json.loads(next_account_json)
+    if not isinstance(next_account, dict) or next_account.get("id") != owner_id:
+        raise ValueError("account identity is invalid")
+    if (not isinstance(json.loads(expected_events_json), dict)
+            or not isinstance(json.loads(next_events_json), dict)
+            or not isinstance(json.loads(expected_pending_json), list)
+            or not isinstance(json.loads(next_pending_json), list)):
+        raise ValueError("billing event/pending snapshots have invalid shape")
+    user_path = _json_path(owner_id)
+    return [
+        _check("""EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u,
+            account_entitlement_authority authority WHERE a.name='users' AND u.key=?
+            AND u.value=? AND authority.owner_id=? AND authority.revision=?)""",
+            (owner_id, account_snapshot, owner_id, expected_revision)),
+        ("""UPDATE app_state SET payload=json_set(payload,?,json(?)),updated_at=?
+            WHERE name='users' AND (SELECT value FROM json_each(payload) WHERE key=?)=?""",
+            (user_path, next_account_json, now, owner_id, account_snapshot)), _changed(),
+        ("""UPDATE app_state SET payload=?,updated_at=?
+            WHERE name='billingEvents' AND payload=?""",
+            (next_events_json, now, expected_events_json)), _changed(),
+        ("""UPDATE app_state SET payload=?,updated_at=?
+            WHERE name='billingPendingUpdates' AND payload=?""",
+            (next_pending_json, now, expected_pending_json)), _changed(),
+        ("""UPDATE account_entitlement_authority SET revision=revision+1,dirty=1,valid_until=?
+            WHERE owner_id=? AND revision=?""", (now, owner_id, expected_revision)), _changed(),
+        ("DELETE FROM d1_command_guard", ()),
+    ]
+
+
+def stage_account_event(*, owner_id, expected_revision, account_snapshot,
+                        next_account_json, event_id, event_record_json, now):
+    """Persist a previously accepted Creem fact and invalidate its projection.
+
+    The caller must supply only state_for_storage output and the validated,
+    deduplicated event record from the existing billing handler.
+    """
+    user_path, event_path = _json_path(owner_id), _json_path(event_id)
+    next_account = json.loads(next_account_json)
+    event_record = json.loads(event_record_json)
+    if (not isinstance(next_account, dict) or next_account.get("id") != owner_id
+            or not isinstance(event_record, dict)):
+        raise ValueError("account identity or event record is invalid")
+    return [
+        _check("""EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u,
+            account_entitlement_authority authority WHERE a.name='users' AND u.key=?
+            AND u.value=? AND authority.owner_id=? AND authority.revision=?)""",
+            (owner_id, account_snapshot, owner_id, expected_revision)),
+        _check("""EXISTS(SELECT 1 FROM app_state WHERE name='billingEvents'
+            AND json_type(payload,?) IS NULL)""", (event_path,)),
+        ("""UPDATE app_state SET payload=json_set(payload,?,json(?)),updated_at=?
+            WHERE name='users' AND (SELECT value FROM json_each(payload) WHERE key=?)=?""",
+            (user_path, next_account_json, now, owner_id, account_snapshot)), _changed(),
+        ("""UPDATE app_state SET payload=json_set(payload,?,json(?)),updated_at=?
+            WHERE name='billingEvents' AND json_type(payload,?) IS NULL""",
+            (event_path, event_record_json, now, event_path)), _changed(),
+        ("""UPDATE account_entitlement_authority SET revision=revision+1,dirty=1,valid_until=?
+            WHERE owner_id=? AND revision=?""", (now, owner_id, expected_revision)), _changed(),
+        ("DELETE FROM d1_command_guard", ()),
+    ]
+
+
+def refresh_account_entitlement(*, owner_id, expected_revision, account_snapshot, now):
+    """Commit a trusted entitlement calculation over the persisted account."""
+    plan, period, monthly_processing_limit, valid_until = _projection(owner_id, account_snapshot, now)
+    return [
+        _check("""EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u,
+            account_entitlement_authority authority WHERE a.name='users' AND u.key=?
+            AND u.value=? AND authority.owner_id=? AND authority.revision=?)""",
+            (owner_id, account_snapshot, owner_id, expected_revision)),
+        ("""UPDATE account_entitlement_authority SET revision=revision+1,plan=?,period=?,
+            monthly_processing_limit=?,valid_until=?,dirty=0 WHERE owner_id=? AND revision=?""",
+            (plan, period, monthly_processing_limit, valid_until, owner_id, expected_revision)), _changed(),
+        ("DELETE FROM d1_command_guard", ()),
+    ]
+
+
+def _job_binding(job_id, now):
+    return _check("""EXISTS(SELECT 1 FROM background_jobs j
+        JOIN source_records s ON s.source_id=j.source_id
+        JOIN source_contexts c ON c.source_id=j.source_id AND c.context_id=j.context_id
+        JOIN processing_usage_ledger l ON l.reservation_id=j.reservation_id
+        WHERE j.id=? AND j.job_type='analyze_source' AND s.processing_mode='model' AND s.lifecycle='active'
+        AND s.latest_version=j.source_version_id AND s.source_revision=j.source_revision
+        AND c.accessible=1 AND c.analysis_enabled=1 AND c.context_stale=0
+        AND c.authorization_valid_until>=? AND c.authorization_revision=j.authorization_revision
+        AND c.configuration_revision=j.configuration_revision AND c.context_version=j.context_version
+        AND c.billing_owner_id=j.billing_owner_id AND l.billing_owner_id=j.billing_owner_id
+        AND l.state='reserved')""", (job_id, now))
+
+
+def claim(*, job_id, token, now, account_snapshot, account_revision, owner_monthly_limit,
+          global_monthly_limit, owner_rolling_limit, global_rolling_limit):
+    period = datetime.fromtimestamp(now, timezone.utc).strftime("%Y-%m")
+    return [
+        _account(job_id, account_snapshot, account_revision, now), _job_binding(job_id, now),
+        _check("""EXISTS(SELECT 1 FROM account_entitlement_authority authority,
+            background_jobs j WHERE j.id=? AND authority.owner_id=j.billing_owner_id
+            AND ?<=authority.monthly_processing_limit*3)""", (job_id, owner_monthly_limit)),
+        ("""UPDATE background_jobs SET state='running',attempt=attempt+1,claim_token=?,
+            claimed_until=?,next_attempt_at=NULL,updated_at=? WHERE id=? AND attempt<3 AND (
+              (state IN ('queued','retry_wait') AND COALESCE(next_attempt_at,0)<=?)
+              OR (state='running' AND COALESCE(claimed_until,0)<=?))""",
+         (token, now + 120, now, job_id, now, now)), _changed(),
+        ("""INSERT INTO d1_claim_authority(job_id,account_revision) VALUES (?,?)
+            ON CONFLICT(job_id) DO UPDATE SET account_revision=excluded.account_revision""",
+            (job_id, account_revision)),
+        ("""INSERT INTO provider_attempts(attempt_id,billing_owner_id,input_key,period_utc,occurred_at,created_at)
+            SELECT ?,j.billing_owner_id,j.logical_key,?,?,? FROM background_jobs j WHERE j.id=?
+              AND (SELECT COUNT(*) FROM provider_attempts WHERE period_utc=?)<?
+              AND (SELECT COUNT(*) FROM provider_attempts WHERE period_utc=? AND billing_owner_id=j.billing_owner_id)<?
+              AND (SELECT COUNT(*) FROM provider_attempts WHERE occurred_at BETWEEN ? AND ?)<?
+              AND (SELECT COUNT(*) FROM provider_attempts WHERE occurred_at BETWEEN ? AND ? AND billing_owner_id=j.billing_owner_id)<?""",
+         (token, period, now, now, job_id, period, global_monthly_limit, period, owner_monthly_limit,
+          max(0, now - 59), now, global_rolling_limit, max(0, now - 59), now, owner_rolling_limit)), _changed(),
+        ("""UPDATE source_contexts SET processing_status='processing',updated_at=? WHERE (source_id,context_id)=
+            (SELECT source_id,context_id FROM background_jobs WHERE id=?)""", (now, job_id)), _changed(),
+        ("""INSERT INTO analysis_claim_owners(billing_owner_id,last_claim_order)
+            SELECT billing_owner_id,(SELECT COALESCE(MAX(last_claim_order),0)+1 FROM analysis_claim_owners)
+            FROM background_jobs WHERE id=? ON CONFLICT(billing_owner_id) DO UPDATE SET last_claim_order=excluded.last_claim_order""", (job_id,)),
+        ("DELETE FROM d1_command_guard", ()),
+    ]
+
+
+def publication(*, job_id, token, now, account_snapshot, account_revision, sources, fences,
+                assessment, source_publication, item, expected_item_revision, version):
+    """Publish a prevalidated immutable result; CAS every read used to build it.
+
+    Rows use actual SQLite column names. Assessment validation/semantic projection
+    remains in Server; this experiment validates the persistence boundary only.
+    """
+    commands = [_account(job_id, account_snapshot, account_revision, now), _job_binding(job_id, now),
+        _check("""EXISTS(SELECT 1 FROM d1_claim_authority WHERE job_id=?
+            AND account_revision=?)""", (job_id, account_revision)),
+        _check("""EXISTS(SELECT 1 FROM background_jobs WHERE id=? AND state='running'
+            AND claim_token=? AND claimed_until>?)""", (job_id, token, now))]
+    if len({s["sourceId"] for s in sources}) != len(sources) or {s["sourceId"] for s in sources} != {f["sourceId"] for f in fences}:
+        raise ValueError("incomplete dependency fences")
+    for source in sources:
+        commands.append(_check("""EXISTS(SELECT 1 FROM source_records WHERE source_id=?
+            AND latest_version=? AND source_revision=?)""",
+            (source["sourceId"], source["sourceVersion"], source["sourceRevision"])))
+    for fence in fences:
+        commands.append(_check("""EXISTS(SELECT 1 FROM source_contexts c,background_jobs j WHERE j.id=?
+            AND c.source_id=? AND c.context_id=? AND c.context_version=? AND c.configuration_revision=?
+            AND c.authorization_revision=? AND c.authorization_valid_until>=? AND c.accessible=1
+            AND c.analysis_enabled=1 AND c.context_stale=0 AND c.billing_owner_id=j.billing_owner_id)""",
+            (job_id, fence["sourceId"], fence["contextId"], fence["contextVersion"],
+             fence["configurationRevision"], fence["authorizationRevision"], now)))
+    commands.append(_check("""EXISTS(SELECT 1 FROM background_jobs WHERE id=? AND source_id=? AND
+        source_version_id=? AND context_id=? AND billing_owner_id=?)""",
+        (job_id, source_publication["source_id"], assessment["source_version_id"],
+         source_publication["context_id"], assessment["billing_owner_id"])))
+    # Finite column allowlists prevent this module becoming an arbitrary SQL API.
+    for table, row, columns in (
+        ("assessments", assessment, "id billing_owner_id source_version_id context_hash evaluated_context_version question_version extractor_version model input_hash dependencies_json answers_json usage_json status created_at"),
+        ("source_assessment_publications", source_publication, "source_id context_id source_version_id context_version authorization_revision billing_owner_id assessment_json evidence_json sources_json fences_json coverage_json"),
+        ("item_versions", version, "item_id item_version snapshot_hash sources_json context_fences_json snapshot_json observed_at"),
+    ):
+        names = columns.split()
+        commands.append((f"INSERT INTO {table}({','.join(names)}) VALUES({','.join('?' for _ in names)})",
+                         tuple(row[name] for name in names)))
+    commands += [
+        ("""UPDATE items SET current_item_version=?,current_snapshot_hash=?,revision=revision+1,updated_at=?
+            WHERE id=? AND revision=? AND current_item_version=?""",
+         (version["item_version"], version["snapshot_hash"], now, item["id"], expected_item_revision, version["item_version"] - 1)), _changed(),
+        ("""UPDATE processing_usage_buckets SET reserved=reserved-1,used=used+1,updated_at=?
+            WHERE (billing_owner_id,period)=(SELECT l.billing_owner_id,l.period FROM processing_usage_ledger l
+              JOIN background_jobs j ON j.reservation_id=l.reservation_id WHERE j.id=?)
+              AND metric='intelligent_processing' AND reserved>=1""", (now, job_id)), _changed(),
+        ("""UPDATE processing_usage_ledger SET state='consumed',finished_at=? WHERE reservation_id=
+            (SELECT reservation_id FROM background_jobs WHERE id=?) AND state='reserved'""", (now, job_id)), _changed(),
+        ("UPDATE background_jobs SET state='succeeded',claim_token=NULL,claimed_until=NULL,updated_at=? WHERE id=? AND claim_token=?",
+         (now, job_id, token)), _changed(),
+        ("UPDATE source_contexts SET processing_status='assessed',item_id=?,updated_at=? WHERE source_id=? AND context_id=?",
+         (item["id"], now, source_publication["source_id"], source_publication["context_id"])), _changed(),
+        ("DELETE FROM d1_command_guard", ()),
+    ]
+    return commands

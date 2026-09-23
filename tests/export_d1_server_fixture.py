@@ -3,7 +3,7 @@ import tempfile
 from contextlib import closing
 from pathlib import Path
 
-from test_cloudflare_server_mapping import seed, claim_args, publication_args, mapping
+from test_cloudflare_server_mapping import seed, claim_args, publication_args
 
 
 def main():
@@ -11,8 +11,6 @@ def main():
         f, job, frozen = seed(Path(directory) / "synthetic.db")
         publish = publication_args(f, job, frozen)
         claim = claim_args(f, job, frozen)
-        refresh = mapping().refresh_account_entitlement(owner_id="owner", expected_revision=3,
-            account_snapshot=frozen, now=claim["now"])
         names = ["source_records", "source_versions", "source_contexts", "assessments",
                  "source_assessment_publications", "items", "item_versions", "provider_attempts",
                  "processing_usage_buckets", "processing_usage_ledger", "background_jobs",
@@ -33,7 +31,14 @@ def main():
         output = Path(__file__).parents[1] / "cloudflare/probe/src/server_fixture.py"
         output.write_text("# Generated synthetic fixture; regenerate with tests/export_d1_server_fixture.py\nDATA = "
             + repr(dict(schemas=schemas, names=names, inserts=inserts, claim=claim,
-                        publication=publish, refresh=refresh)) + "\n", encoding="utf-8")
+                        publication=publish)) + "\n", encoding="utf-8")
+        package = output.parent / "pullwise_server"
+        package.mkdir(exist_ok=True)
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        for name in ("account_cycle_rules", "product_entitlement_rules", "cloudflare_d1_batch",
+                     "cloudflare_d1_mapping", "cloudflare_account_adapter"):
+            source = Path(__file__).parents[1] / "pullwise_server" / f"{name}.py"
+            (package / f"{name}.py").write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
         print("Generated synthetic Server schema fixture")
 
 

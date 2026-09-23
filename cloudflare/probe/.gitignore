@@ -10,3 +10,6 @@ python_modules/
 __pycache__/
 *.pyc
 src/server_fixture.py
+src/server_d1_batch.py
+src/server_mapping_impl.py
+src/pullwise_server/

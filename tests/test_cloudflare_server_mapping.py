@@ -1,23 +1,21 @@
 """Run the candidate D1 batches against the actual ProductStore schema first."""
-import importlib.util
 import json
+import os
 import sqlite3
 from contextlib import closing
-from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from pullwise_server.product_jobs import ProductJobScheduler, TrustedTrigger
 from pullwise_server.entitlements import entitlements_for_user
+from pullwise_server import db as server_db
+from pullwise_server import cloudflare_d1_mapping
 from test_pr_thread_semantics import ThreadFixture
 
 
 def mapping():
-    path = Path(__file__).parents[1] / "cloudflare/probe/src/server_mapping.py"
-    spec = importlib.util.spec_from_file_location("server_mapping", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return cloudflare_d1_mapping
 
 
 def execute(store, statements):
@@ -32,7 +30,9 @@ def seed(path):
     f.source("2", "Question", reply="1")
     account = dict(id="owner", createdAt=f.now - 864000,
         billing=dict(plan="pro", status="active", subscriptionId="sub_fixture",
-                     currentPeriodStart=f.now - 864000, currentPeriodEnd=f.now + 864000), githubId="author")
+                     currentPeriodStart=f.now - 864000, currentPeriodEnd=f.now + 864000),
+        githubId="author", githubAccessToken="synthetic_user_token",
+        githubIdentities=[{"id": "synthetic_identity", "accessToken": "synthetic_identity_token"}])
     entitlement = entitlements_for_user(account, timestamp=f.now)
     reservation = f.store.reserve_processing_unit(charge_key="charge", billing_owner_id="owner",
         period=entitlement["period"], module="pr", limit=entitlement["entitlements"]["monthlyProcessingLimit"])
@@ -41,8 +41,13 @@ def seed(path):
     with f.store._immediate() as db:
         db.execute("CREATE TABLE app_state(name TEXT PRIMARY KEY,payload TEXT NOT NULL,updated_at INTEGER NOT NULL)")
         # Synthetic preserved account facts; the mapping never interprets or rewrites these.
-        db.execute("INSERT INTO app_state VALUES('users',?,?)", (json.dumps({"owner": account}), f.now))
+        key_path = path.parent / "synthetic-state.key"
+        key_path.write_bytes(bytes([0x42]) * 32)
+        with patch.dict(os.environ, {server_db.STATE_ENCRYPTION_KEY_PATH_ENV: str(key_path)}):
+            storage_users = server_db.state_for_storage({"users": {"owner": account}})["users"]
+        db.execute("INSERT INTO app_state VALUES('users',?,?)", (json.dumps(storage_users), f.now))
         db.execute("INSERT INTO app_state VALUES('billingEvents',?,?)", ('{"event_fixture":{"status":"processed"}}', f.now))
+        db.execute("INSERT INTO app_state VALUES('billingPendingUpdates',?,?)", ('[]', f.now))
         frozen = db.execute("SELECT value FROM app_state,json_each(payload) WHERE name='users' AND key='owner'").fetchone()[0]
     m = mapping()
     execute(f.store, m.schema())
@@ -254,3 +259,79 @@ def test_initial_projection_requires_matching_persisted_account(tmp_path):
         db.execute("UPDATE app_state SET payload='{}' WHERE name='users'")
     with pytest.raises(sqlite3.IntegrityError):
         execute(f.store, m.initialize_account(owner_id="owner", account_snapshot=frozen, now=f.now))
+
+
+def test_accepted_event_rejects_account_identity_swap_before_any_write(tmp_path):
+    m = mapping()
+    f, _, frozen = seed(tmp_path / "domain.db")
+    wrong = json.dumps({**json.loads(frozen), "id": "other"})
+    with pytest.raises(ValueError):
+        execute(f.store, m.stage_account_event(owner_id="owner", expected_revision=1,
+            account_snapshot=frozen, next_account_json=wrong, event_id="swap",
+            event_record_json='{"applied":true}', now=f.now))
+    with closing(f.store.connect()) as db:
+        assert db.execute("SELECT value FROM app_state,json_each(payload) WHERE name='users' AND key='owner'").fetchone()[0] == frozen
+        assert db.execute("SELECT json_type(payload,'$.swap') FROM app_state WHERE name='billingEvents'").fetchone()[0] is None
+        assert db.execute("SELECT revision FROM account_entitlement_authority WHERE owner_id='owner'").fetchone()[0] == 1
+
+
+def test_non_billing_account_write_invalidates_projection_and_fences_aba(tmp_path):
+    m = mapping()
+    f, job, frozen = seed(tmp_path / "domain.db")
+    changed = json.dumps({**json.loads(frozen), "githubLogin": "renamed"}, separators=(",", ":"))
+    execute(f.store, m.stage_account_write(owner_id="owner", expected_revision=1,
+        account_snapshot=frozen, next_account_json=changed, now=f.now))
+    with closing(f.store.connect()) as db:
+        row = db.execute("SELECT revision,dirty FROM account_entitlement_authority WHERE owner_id='owner'").fetchone()
+        assert tuple(row) == (2, 1)
+        assert db.execute("SELECT payload FROM app_state WHERE name='billingEvents'").fetchone()[0] == '{"event_fixture":{"status":"processed"}}'
+    with pytest.raises(sqlite3.IntegrityError):
+        execute(f.store, m.claim(**{**claim_args(f, job, changed), "account_revision": 2}))
+    execute(f.store, m.stage_account_write(owner_id="owner", expected_revision=2,
+        account_snapshot=changed, next_account_json=frozen, now=f.now))
+    execute(f.store, m.refresh_account_entitlement(owner_id="owner", expected_revision=3,
+        account_snapshot=frozen, now=f.now))
+    with pytest.raises(sqlite3.IntegrityError):
+        execute(f.store, m.claim(**claim_args(f, job, frozen)))
+    with pytest.raises(sqlite3.IntegrityError):
+        execute(f.store, m.stage_account_write(owner_id="owner", expected_revision=1,
+            account_snapshot=frozen, next_account_json=changed, now=f.now))
+    with closing(f.store.connect()) as db:
+        assert db.execute("SELECT revision FROM account_entitlement_authority WHERE owner_id='owner'").fetchone()[0] == 4
+
+
+def test_pending_event_association_commits_user_events_and_pending_together(tmp_path):
+    m = mapping()
+    f, _, frozen = seed(tmp_path / "domain.db")
+    pending = '[{"eventId":"later","customerId":"customer"}]'
+    execute(f.store, m.stage_pending_billing_updates(expected_pending_json='[]',
+        next_pending_json=pending, now=f.now))
+    changed = json.dumps({**json.loads(frozen), "billing": {**json.loads(frozen)["billing"],
+        "customerId": "customer"}}, separators=(",", ":"))
+    next_events = '{"event_fixture":{"status":"processed"},"later":{"applied":true}}'
+    args = dict(owner_id="owner", expected_revision=1, account_snapshot=frozen,
+        next_account_json=changed, expected_events_json='{"event_fixture":{"status":"processed"}}',
+        next_events_json=next_events, expected_pending_json=pending,
+        next_pending_json='[]', now=f.now)
+    with pytest.raises(sqlite3.IntegrityError):
+        execute(f.store, m.stage_billing_reconciliation(**{**args, "expected_pending_json": "[]"}))
+    with closing(f.store.connect()) as db:
+        assert db.execute("SELECT revision FROM account_entitlement_authority").fetchone()[0] == 1
+        assert db.execute("SELECT payload FROM app_state WHERE name='billingEvents'").fetchone()[0] == args["expected_events_json"]
+    execute(f.store, m.stage_billing_reconciliation(**args))
+    with closing(f.store.connect()) as db:
+        assert tuple(db.execute("SELECT revision,dirty FROM account_entitlement_authority").fetchone()) == (2, 1)
+        assert db.execute("SELECT payload FROM app_state WHERE name='billingEvents'").fetchone()[0] == next_events
+        assert db.execute("SELECT payload FROM app_state WHERE name='billingPendingUpdates'").fetchone()[0] == '[]'
+        assert db.execute("SELECT value FROM app_state,json_each(payload) WHERE name='users' AND key='owner'").fetchone()[0] == changed
+
+
+def test_probe_fixture_preserves_encrypted_account_fields_without_plaintext(tmp_path):
+    f, _, frozen = seed(tmp_path / "domain.db")
+    stored = json.loads(frozen)
+    assert stored["githubAccessToken"]["__encrypted"] == server_db.STATE_ENCRYPTION_MARKER
+    assert stored["githubIdentities"][0]["accessToken"]["__encrypted"] == server_db.STATE_ENCRYPTION_MARKER
+    assert "synthetic_user_token" not in frozen
+    assert "synthetic_identity_token" not in frozen
+    with closing(f.store.connect()) as db:
+        assert db.execute("SELECT payload FROM app_state WHERE name='billingEvents'").fetchone()[0] == '{"event_fixture":{"status":"processed"}}'
