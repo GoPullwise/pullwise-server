@@ -605,13 +605,12 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(first.payload["billingUsage"]["used"], 0)
         self.assertEqual(first.payload["billingUsage"]["reserved"], 1)
         self.assertEqual(billing_payload["usage"]["used"], 0)
-        self.assertEqual(billing_payload["usage"]["reserved"], 1)
-        self.assertEqual(billing_payload["usage"]["limit"], 1)
-        self.assertEqual(billing_payload["usage"]["remaining"], 0)
-        self.assertEqual(billing_payload["usage"]["resetAt"], first.payload["billingUsage"]["resetAt"])
-        self.assertGreater(billing_payload["usage"]["resetAt"], app.now())
+        self.assertEqual(billing_payload["usage"]["reserved"], 0)
+        self.assertEqual(billing_payload["usage"]["limit"], 200)
+        self.assertEqual(billing_payload["usage"]["remaining"], 200)
+        self.assertEqual(billing_payload["usage"]["metric"], "intelligent_processing")
 
-    def test_billing_plan_exposes_scan_quota_activity(self) -> None:
+    def test_billing_plan_excludes_legacy_scan_quota_activity(self) -> None:
         cookie = seed_session()
         authorize_repo_for_seed_user()
         consumed = HandlerHarness({"repo": "owner/repo", "requestId": "scan_req_used"}, cookie=cookie)
@@ -651,21 +650,9 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(consumed.status, HTTPStatus.CREATED)
         self.assertEqual(refunded.status, HTTPStatus.CREATED)
         self.assertEqual(handler.status, HTTPStatus.OK)
-        activity = handler.payload["account"]["quotaActivity"]
-        activity_keys = {(item["scanId"], item["action"]) for item in activity}
-
-        self.assertIn((consumed.payload["id"], "consumed"), activity_keys)
-        self.assertIn((refunded.payload["id"], "consumed"), activity_keys)
-        self.assertIn((refunded.payload["id"], "refunded"), activity_keys)
-        refund_item = next(
-            item
-            for item in activity
-            if item["scanId"] == refunded.payload["id"] and item["action"] == "refunded"
-        )
-        self.assertEqual(refund_item["delta"], -1)
-        self.assertEqual(refund_item["reason"], "REPOSITORY_TOO_LARGE")
-        self.assertEqual(refund_item["repo"], "owner/repo")
-        self.assertEqual(refund_item["status"], "failed")
+        self.assertEqual(handler.payload["account"]["processingActivity"], [])
+        self.assertNotIn("quotaActivity", handler.payload["account"])
+        self.assertEqual(handler.payload["account"]["usage"]["metric"], "intelligent_processing")
 
     def test_quota_finalization_uses_durable_scan_when_memory_mirror_is_cold(self) -> None:
         cookie = seed_session()
@@ -743,7 +730,7 @@ class BillingRoutesTest(unittest.TestCase):
         self.assertEqual(first_payload["used"], 1)
         self.assertEqual(second_payload["used"], 1)
         self.assertEqual(second_payload["remaining"], 0)
-        self.assertEqual(account_payload["usage"]["used"], 1)
+        self.assertEqual(account_payload["usage"]["used"], 0)
         self.assertNotIn("billingUsage", app.USERS["usr_1"])
 
     def test_billing_account_payload_ignores_non_finite_usage(self) -> None:
@@ -1634,9 +1621,9 @@ class BillingWebhookPersistenceTest(unittest.TestCase):
 
         self.assertEqual(billing_payload["plan"], "pro")
         self.assertEqual(billing_payload["status"], "active")
-        self.assertEqual(billing_payload["usage"]["limit"], 60)
-        self.assertEqual(billing_payload["usage"]["remaining"], 60)
-        self.assertEqual(billing_payload["usage"]["plan"], "pro")
+        self.assertEqual(billing_payload["usage"]["limit"], 5000)
+        self.assertEqual(billing_payload["usage"]["remaining"], 5000)
+        self.assertEqual(billing_payload["entitlements"]["activeWatchLimit"], 25)
         self.assertNotIn("subscriptions", billing_payload)
         self.assertEqual(len(billing_payload["subscriptionEvents"]), 1)
         self.assertEqual(billing_payload["subscriptionEvents"][0]["eventId"], "evt_creem_checkout_real_1")
@@ -1685,9 +1672,8 @@ class BillingWebhookPersistenceTest(unittest.TestCase):
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertEqual(billing_payload["plan"], "pro")
         self.assertEqual(billing_payload["status"], "active")
-        self.assertEqual(billing_payload["usage"]["plan"], "pro")
-        self.assertEqual(billing_payload["usage"]["limit"], 60)
-        self.assertEqual(billing_payload["usage"]["remaining"], 60)
+        self.assertEqual(billing_payload["usage"]["limit"], 5000)
+        self.assertEqual(billing_payload["usage"]["remaining"], 5000)
 
         connection = app.db.connect()
         try:
@@ -1799,8 +1785,7 @@ class BillingWebhookPersistenceTest(unittest.TestCase):
         billing_payload = app.billing_account_payload(app.USERS["usr_1"])
         self.assertEqual(billing_payload["status"], "canceled")
         self.assertEqual(billing_payload["plan"], "free")
-        self.assertEqual(billing_payload["usage"]["plan"], "free")
-        self.assertEqual(billing_payload["usage"]["limit"], 5)
+        self.assertEqual(billing_payload["usage"]["limit"], 200)
 
     def test_creem_one_time_refund_webhook_does_not_revoke_active_subscription(self) -> None:
         seed_session()
@@ -1922,8 +1907,7 @@ class BillingWebhookPersistenceTest(unittest.TestCase):
         billing_payload = app.billing_account_payload(app.USERS["usr_1"])
         self.assertEqual(billing_payload["status"], "past_due")
         self.assertEqual(billing_payload["plan"], "free")
-        self.assertEqual(billing_payload["usage"]["plan"], "free")
-        self.assertEqual(billing_payload["usage"]["limit"], 5)
+        self.assertEqual(billing_payload["usage"]["limit"], 200)
 
 
 if __name__ == "__main__":

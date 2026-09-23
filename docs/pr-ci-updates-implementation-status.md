@@ -1940,3 +1940,30 @@ The expanded current Server CI selection after trusted session/OAuth-state
 mappings passes **701 tests, 68 subtests** locally. Web `npm run check`
 remains green at **615 tests** plus lint/build. No local candidate/probe
 process remains on 8796/8797. The edited Server CI has not run remotely.
+
+## Local Billing/Pricing product entitlements (2026-09-23 continuation)
+
+The local Server now projects Pricing capacities from the single
+`PLAN_ENTITLEMENTS` source and removes reviewLimit/checkout file-byte limits
+from the public plan catalog. Billing retains Creem product/price IDs,
+subscription lifecycle fields and payment event history, while its account
+read uses ProductStore for intelligent-processing usage, runtime attempts and
+consumed `processingActivity`. It no longer displays legacy scan quota as
+new product consumption. Missing-field tests failed first. After updating
+payment protection expectations, all **106 billing tests and 15 subtests**
+passed; the current Server product/Cloudflare/billing/security selection
+passed **703 tests, 68 subtests**.
+
+Web Billing/Pricing kept the existing hard-edged cards, subscription actions
+and price display, but now shows the three product capacities and saved
+processing records, with an unavailable state for missing usage. A new Web
+test failed first, then Billing's **50 tests** and full `npm run check`
+passed **49 files / 616 tests**, lint and build. A real local headless Chrome
+check at 390px used a synthetic loopback Billing API, found
+`scrollWidth=clientWidth=390` on Billing and Pricing, and visually inspected
+expanded processing rows. Screenshots were added under Web's preserved
+untracked `output/playwright/`; no real account/payment data was used.
+Playwright CLI was unavailable in installed dependencies and the connected
+browser inventory failed, so Chrome DevTools Protocol provided the real
+browser check without installing a package. Candidate Cloudflare `/billing`,
+public plan and payment-provider mutations remain CF2 work.

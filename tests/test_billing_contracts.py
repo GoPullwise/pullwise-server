@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 import requests
 
 from pullwise_server import billing, system_config
+from pullwise_server.product_entitlement_rules import PLAN_ENTITLEMENTS
 
 
 def creem_product(product_id: str, *, price: int, period: str, currency: str = "USD", name: str = "Pullwise Pro") -> dict:
@@ -118,8 +119,8 @@ class BillingContractsTest(unittest.TestCase):
         ):
             plan = billing.public_plan()
 
-        self.assertEqual(plan["plans"][0]["reviewLimit"], 6)
-        self.assertEqual(plan["plans"][1]["reviewLimit"], 66)
+        self.assertEqual(plan["plans"][0]["entitlements"], PLAN_ENTITLEMENTS["free"])
+        self.assertEqual(plan["plans"][1]["entitlements"], PLAN_ENTITLEMENTS["pro"])
         self.assertEqual(plan["plans"][1]["prices"]["month"]["productId"], "prod_db_monthly")
         self.assertEqual(plan["plans"][1]["prices"]["year"]["productId"], "prod_db_yearly")
         self.assertEqual(plan["checkoutTimeoutMs"], 22_000)
@@ -170,11 +171,9 @@ class BillingContractsTest(unittest.TestCase):
         self.assertEqual(plan["provider"], "creem")
         self.assertEqual(plan["currency"], "USD")
         self.assertEqual(plan["plans"][0]["id"], "free")
-        self.assertEqual(plan["plans"][0]["reviewLimit"], 5)
-        self.assertEqual(plan["plans"][0]["repositoryLimits"], {"maxFiles": 200, "maxBytes": 5 * 1024 * 1024, "source": "database"})
+        self.assertEqual(plan["plans"][0]["entitlements"], PLAN_ENTITLEMENTS["free"])
         self.assertEqual(plan["plans"][1]["id"], "pro")
-        self.assertEqual(plan["plans"][1]["reviewLimit"], 60)
-        self.assertEqual(plan["plans"][1]["repositoryLimits"], {"maxFiles": 1000, "maxBytes": 20 * 1024 * 1024, "source": "database"})
+        self.assertEqual(plan["plans"][1]["entitlements"], PLAN_ENTITLEMENTS["pro"])
         self.assertEqual(plan["plans"][1]["prices"]["month"]["amount"], "29")
         self.assertEqual(plan["plans"][1]["prices"]["year"]["amount"], "290")
         self.assertEqual(plan["plans"][1]["prices"]["month"]["productId"], "prod_monthly")
@@ -207,7 +206,7 @@ class BillingContractsTest(unittest.TestCase):
         self.assertEqual([item["id"] for item in plan["plans"]], ["free", "pro", "max"])
         max_plan = plan["plans"][2]
         self.assertEqual(max_plan["name"], "Pullwise Max")
-        self.assertEqual(max_plan["reviewLimit"], 90)
+        self.assertEqual(max_plan["entitlements"], PLAN_ENTITLEMENTS["max"])
         self.assertEqual(max_plan["prices"]["month"]["amount"], "49")
         self.assertEqual(max_plan["prices"]["year"]["amount"], "490")
         self.assertEqual(max_plan["prices"]["month"]["productId"], "prod_max_monthly")
@@ -256,8 +255,8 @@ class BillingContractsTest(unittest.TestCase):
         ):
             plan = billing.public_plan()
 
-        self.assertEqual(plan["plans"][0]["reviewLimit"], 5)
-        self.assertEqual(plan["plans"][1]["reviewLimit"], 60)
+        self.assertEqual(plan["plans"][0]["entitlements"], PLAN_ENTITLEMENTS["free"])
+        self.assertEqual(plan["plans"][1]["entitlements"], PLAN_ENTITLEMENTS["pro"])
 
     def test_unrelated_environment_does_not_enable_billing(self) -> None:
         with patch.dict(

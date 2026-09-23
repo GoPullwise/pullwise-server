@@ -7,6 +7,8 @@ from ._app_imports import import_compat_globals as _import_compat_globals
 from .api_key_dto_rules import api_key_public_payload as _pure_api_key_public_payload
 from .api_key_dto_rules import requested_api_key_scopes as _pure_requested_api_key_scopes
 from .api_key_dto_rules import parse_api_key_restrictions as _pure_parse_api_key_restrictions
+from .product_store import ProductStore as _ProductStore
+from .entitlements import product_usage_payload as _product_usage_payload
 
 _import_compat_globals(vars(_previous_app_part), globals())
 del _import_compat_globals, _previous_app_part
@@ -324,11 +326,13 @@ def billing_quota_activity_payload(user: dict) -> list[dict]:
 def billing_account_payload(user: dict) -> dict:
     current = user_billing_state(user)
     entitlement = billing_entitlement_for_user(user)
-    scan_usage = quota.quota_payload_for_user(user)
+    store = _ProductStore(db.database_path())
+    store.initialize()
+    product = _product_usage_payload(store, user)
     return {
         "provider": public_billing_text(current.get("provider")),
         "status": public_billing_status(current.get("status")),
-        "plan": scan_usage["plan"],
+        "plan": product["plan"],
         "interval": billing.normalize_interval(entitlement["interval"]),
         "customerId": public_billing_text(current.get("customerId")),
         "subscriptionId": public_billing_text(current.get("subscriptionId")),
@@ -342,18 +346,10 @@ def billing_account_payload(user: dict) -> dict:
         "lastEventType": public_billing_text(current.get("lastEventType")),
         "lastEventCreated": pull_request_timestamp(current.get("lastEventCreated")),
         "updatedAt": pull_request_timestamp(current.get("updatedAt")),
-        "reviewLimit": scan_usage["limit"],
-        "usage": {
-            "period": scan_usage["period"],
-            "used": scan_usage["used"],
-            "reserved": scan_usage.get("reserved", 0),
-            "limit": scan_usage["limit"],
-            "remaining": scan_usage["remaining"],
-            "plan": scan_usage["plan"],
-            "scope": scan_usage["scope"],
-            "resetAt": scan_usage["resetAt"],
-        },
-        "quotaActivity": billing_quota_activity_payload(user),
+        "entitlements": product["entitlements"],
+        "usage": product["usage"],
+        "runtimeUsage": product["runtimeUsage"],
+        "processingActivity": store.list_processing_usage_events(user["id"], limit=20)["items"],
         "subscriptionEvents": billing_subscription_events_payload(user),
     }
 

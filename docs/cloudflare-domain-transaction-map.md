@@ -267,6 +267,13 @@ revocation, bearer rejection and restart replay under
 `server-http-key-delete-state`. Direct local D1 inspection found revoked=true,
 lastUsed=NULL, zero provider attempts and unchanged entitlement revision 1.
 Key creation and complete account/OAuth integration remain open.
+The local Billing/Pricing read now uses product entitlements and product
+processing ledger rather than scan quota, while retaining provider/customer/
+subscription facts and payment history. The candidate Python Worker still
+does not expose `/billing` or `/billing/plan`; equivalent account DTO reads
+must join the same persisted entitlement/usage authority without a D1 write.
+Checkout, subscription changes and all real payment writers remain separate
+CF2 transaction work, not covered by the local Billing page tests.
 Trusted session issuance/revocation has a separate `D1SessionTransactions`
 mapping. It reads the storage-form user and sessions map, then performs an
 exact-snapshot CAS with a `changes()=1` guard so a concurrent session cannot

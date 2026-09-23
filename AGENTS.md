@@ -116,6 +116,15 @@ revision; pending or incomplete assessment must not silently close an item.
   `watchIds` restrictions and returns an empty list for a key restricted only
   by repositories. Its GET has no D1 batch write/model side effect. Source and
   Item reads still require multi-source, permission and publication fences.
+- Public Pricing plans now take PR/CI/Updates capacities directly from
+  `product_entitlement_rules.PLAN_ENTITLEMENTS`; no reviewLimit or checkout
+  file/byte limits belong in the public product catalog. Local Billing keeps
+  provider/customer/subscription facts and `subscriptionEvents`, while
+  `billing_account_payload` initializes ProductStore and exposes product
+  entitlements, intelligent-processing usage/runtime attempts and consumed
+  `processingActivity`. Never label legacy scan quota ledger as new usage.
+  Candidate Cloudflare `/billing` and provider checkout/account writes still
+  require full CF2 adaptation.
 - `product_dto_rules.source_context_dto` and `source_record_dto` own the
   exact SQLite/D1 Source projection. Candidate `/api/v1/sources` list/detail
   prepends API-key, session and user SELECTs to the four Source/publication/

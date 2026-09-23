@@ -11,6 +11,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 
 from . import db, system_config
+from .product_entitlement_rules import PLAN_ENTITLEMENTS
 from .creem_signature import timing_safe_hex_equal, verify_creem_signature
 from . import creem_event_rules as creem_rules
 from .creem_event_rules import (
@@ -529,10 +530,9 @@ def public_plan() -> dict:
             {
                 "id": "free",
                 "name": "Free",
-                "description": "Try Pullwise with monthly account and repository scan allowance.",
+                "description": "Follow PR feedback, CI failures and upstream releases.",
                 "currency": currency,
-                "reviewLimit": review_limit("free"),
-                "repositoryLimits": repository_limits("free"),
+                "entitlements": dict(PLAN_ENTITLEMENTS["free"]),
                 "prices": {
                     "month": {
                         "amount": "0",
@@ -552,9 +552,9 @@ def public_paid_plan_payload(plan: str, products: dict, currency: str) -> dict:
     normalized_plan = normalize_plan(plan)
     title = "Pullwise Max" if normalized_plan == "max" else "Pullwise Pro"
     default_description = (
-        "Higher-capacity repository review for production teams."
+        "Higher-capacity PR, CI and Updates follow-up for production teams."
         if normalized_plan == "max"
-        else "Repository review for production teams."
+        else "PR, CI and Updates follow-up for production teams."
     )
     monthly_product = products.get("month") if isinstance(products, dict) else None
     yearly_product = products.get("year") if isinstance(products, dict) else None
@@ -563,10 +563,9 @@ def public_paid_plan_payload(plan: str, products: dict, currency: str) -> dict:
     return {
         "id": normalized_plan,
         "name": name,
-        "description": f"{description} Quota is shared across your account and repositories.",
+        "description": f"{description} Intelligent processing is shared across PR, CI and Updates.",
         "currency": currency,
-        "reviewLimit": review_limit(normalized_plan),
-        "repositoryLimits": repository_limits(normalized_plan),
+        "entitlements": dict(PLAN_ENTITLEMENTS[normalized_plan]),
         "prices": {
             "month": creem_price_payload(monthly_product, "month"),
             "year": creem_price_payload(yearly_product, "year"),
