@@ -9,7 +9,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 
 WEBHOOK_SECRET = b"synthetic-webhook-secret"
-WEBHOOK_RAW = b'{"id":"evt-local","eventType":"subscription.paid"}'
+WEBHOOK_RAW = (b'{"id":"evt-local","eventType":"subscription.canceled",'
+               b'"object":{"id":"synthetic-sub","metadata":{"userId":"owner"}}}')
 
 
 def call(path, method="POST", *, raw_body=None, headers=None):
@@ -180,7 +181,8 @@ def main():
     assert webhook(valid=False)[0] == 409
     assert webhook()[0] == 200
     assert webhook()[0] == 200
-    assert webhook("webhook-conflict", raw=b'{"id":"evt-local","eventType":"subscription.canceled"}')[0] == 409
+    assert webhook("webhook-conflict", raw=(b'{"id":"evt-local","eventType":"subscription.canceled",'
+        b'"object":{"id":"different-sub","metadata":{"userId":"owner"}}}'))[0] == 409
     assert call("state", "GET")[1]["webhookReceipts"] == 1
     print("Actual Server schema: combined claim/budget, payment-fact revision fencing and atomic publication passed on local D1")
 

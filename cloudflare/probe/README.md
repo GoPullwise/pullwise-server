@@ -145,12 +145,15 @@ re-reservation. One local restart exited with a workerd disconnected error;
 a subsequent restart with the same persisted D1 passed the replay check.
 The local HTTP receipt route now reads request bytes/signature rather than
 fabricating a signature inside the Worker. It uses a synthetic secret and
-normalizer through `record_signed_creem_event`, verifies a 64 KiB
+the Server's pure `creem_event_rules` normalizer with synthetic product IDs
+through `record_signed_creem_event`, verifies a 64 KiB
 Content-Length bound, and proves the
 receipt/apply and first-generation queue-admission batches on local D1.
 Do not treat this route as a production Creem endpoint or Server scheduler.
 After `/server-map/schedule-enable`, the local Wrangler scheduled test URL
 invokes the Server async due-job selector once, then disables that probe flag.
+`wrangler.jsonc` declares no cron; the test URL invokes the handler manually
+on localhost and no remote schedule is created.
 It claims one eligible synthetic Job with no model request; a second wake
 does not spend another attempt. A separate stale-source wake terminates that
 Job and releases its reservation without spending an attempt. This does not

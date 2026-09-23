@@ -1271,3 +1271,25 @@ has no remote D1 binding yet. For its future D1 runtime, bound scheduled
 updates to changed rows and inspect `meta.rows_written` plus per-query
 analytics before raising cadence or queue limits. The external staging fix
 and deployment are outside this repository and are not Pullwise validation.
+
+## Pure Creem event normalization and no-cron probe (2026-09-23 continuation)
+
+Moved the existing Creem event parser/status/product-ID checks into
+`creem_event_rules.py`, a pure module with explicit configured product IDs.
+`billing.py` reuses those functions and supplies the existing Server product
+configuration, so payment decisions and public callers retain one authority.
+The generated local Python Worker packages the same module and passes only
+synthetic IDs through the signed receipt path. Tests first failed because the
+module did not exist; lifecycle fixtures then compared the pure and existing
+Server entries, including paid, canceled, unknown-product and unsupported
+events. The expanded billing, webhook, entitlement and D1 mapping regression
+passed **144 tests, 15 subtests**.
+
+The probe's `wrangler.jsonc` now has **no cron trigger**. The local
+`verify_server_mapping.py` driver passed with explicit localhost scheduled
+invocations and the same local `remote: false` D1, then workerd was stopped.
+The connected account's ten listed Workers were checked read-only and all
+remote schedules were empty, including `pullwise-web`, `pullwise-admin` and
+the separately stopped `gamelens-jobs-staging`. No remote schedule was changed
+or enabled. Real Creem handler/key binding, account settlement and Server REST
+remain unconnected.

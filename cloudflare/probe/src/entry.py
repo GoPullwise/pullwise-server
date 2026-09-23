@@ -49,6 +49,7 @@ class Default(WorkerEntrypoint):
         from pullwise_server.cloudflare_account_adapter import D1AccountTransactions
         from pullwise_server.cloudflare_analysis_adapter import D1AnalysisTransactions
         from pullwise_server.cloudflare_webhook_receipts import D1WebhookReceipts
+        from pullwise_server import creem_event_rules
         import server_mapping as mapping
         name = url.path.removeprefix('/server-map/')
         if request.method == 'GET' and name == 'state':
@@ -216,8 +217,9 @@ class Default(WorkerEntrypoint):
                     return Response.json({'committed': False}, status=413)
                 await D1WebhookReceipts(self.env.DB).record_signed_creem_event(
                     raw_body=raw, signature=request.headers.get('creem-signature'),
-                    secret=secret, normalize_event=lambda event: {
-                        "eventId": event.get('id'), "customerId": "synthetic-customer"},
+                    secret=secret, normalize_event=lambda event:
+                        creem_event_rules.billing_update_from_creem_event(
+                            event, {'pro': (), 'max': ()}),
                     now=DATA['claim']['now'])
                 return Response.json({'committed': True})
             except Exception:

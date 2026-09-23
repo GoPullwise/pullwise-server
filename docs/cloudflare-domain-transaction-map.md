@@ -104,13 +104,16 @@ HMAC check as the local billing module, and persists a normalized synthetic
 update before acknowledging. Duplicate identical bytes keep one receipt;
 invalid signatures and same-ID conflicting bytes cannot overwrite it.
 The normalized event ID is checked against the signed raw event ID. The
-Server adapter can call the existing `billing_update_from_creem_event` through
-`record_signed_creem_event`; the local Worker exercises that entry with a
-synthetic normalizer and no production product IDs.
+event normalizer now lives in pure `creem_event_rules.py`, takes an explicit
+plan-to-product-ID binding and is reused by `billing.py` with its existing
+configured IDs. `record_signed_creem_event` accepts that callable; the local
+Worker executes the same module with synthetic IDs and no production config.
 Applying a pending receipt marks it applied in the same D1 batch as the
 trusted user, billingEvents, billingPendingUpdates and owner-revision change.
 This is local protocol evidence only: real Creem handler composition, secret
 binding, checkout lifecycle and receipt retention are not wired into the Worker.
+The probe Wrangler config declares no cron trigger; scheduled behavior is
+invoked explicitly at localhost during local testing only.
 
 A first-generation enqueue command now freezes the current source/context
 revisions and trusted trigger into a queued job. It computes global and owner

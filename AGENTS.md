@@ -55,11 +55,13 @@ revision; pending or incomplete assessment must not silently close an item.
   with the same Creem HMAC helper as `billing.py`, then stores a normalized
   trusted update before ACK. Applying that receipt marks it applied in the
   same batch as users, billingEvents, pending updates and owner revision.
-  `record_signed_creem_event` accepts the existing Server billing normalizer
-  as a trusted callback; every saved normalized eventId must match the signed
-  raw event ID. The probe uses a synthetic secret and normalizer; real
-  handler/key binding, account settlement and receipt retention remain
-  unconnected.
+  `creem_event_rules.py` owns the pure Creem event normalization and requires
+  an explicit plan-to-product-ID binding. `billing.py` supplies its existing
+  configured IDs and retains its public entry; the local Python Worker packages
+  the same pure module with synthetic IDs. `record_signed_creem_event` accepts
+  that normalizer as a trusted callback, and saved eventId must match the
+  signed raw event ID. Real handler/key binding, account settlement and
+  receipt retention remain unconnected.
 - First-generation D1 analysis enqueue computes owner/global active caps in
   one batch. On cap rejection, it releases the new reservation and marks the
   source context throttled without creating a job. Existing-generation reuse,
@@ -93,6 +95,10 @@ revision; pending or incomplete assessment must not silently close an item.
   on each wake. Inspect D1 `meta.rows_written` and per-query analytics before
   expanding queue or cron frequency. The local probe uses `remote: false` and
   does not establish remote cost behavior.
+- Do not configure Cloudflare cron triggers. The local probe Wrangler config
+  has none; its handler remains available for explicit local tests only. No
+  remote schedule is authorized. Never re-enable the unrelated
+  `gamelens-jobs-staging` every-minute cron stopped by the user.
 
 - `pr_followup.reconcile_thread` aggregates saved pr-followup/v3 answers inside
   the fact/result transaction. One verified thread/context has one Item; source
