@@ -21,6 +21,46 @@ def test_d1_source_list_and_detail_match_product_store(tmp_path):
         source_id="1", include_content=True)
 
 
+def test_shared_watch_parent_disable_hides_source_and_item(tmp_path):
+    fixture, job, frozen = seed(tmp_path / "domain.db")
+    publication = publication_args(fixture, job, frozen)
+    execute(fixture.store, mapping().claim(**claim_args(fixture, job, frozen)))
+    execute(fixture.store, mapping().publication(**publication))
+    fixture.store.put_repository_service(repository_id="repo", installation_id="inst-1",
+        billing_owner_id="owner", expected_revision=0, enabled=True,
+        modules={"pr": True, "ci": False}, analysis_enabled={"pr": False, "ci": False},
+        allow_member_sync=False, default_assignee_id=None, priority_order=0)
+    watch = fixture.store.create_watch(owner_id="owner", target_repository_id="repo",
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=False)
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE source_contexts SET watch_id=? WHERE source_id='1'", (watch["id"],))
+    source_reader = D1SourceReads(D1ShapedSQLite(fixture.store))
+    item_reader = D1ItemReads(D1ShapedSQLite(fixture.store))
+    assert asyncio.run(source_reader.list_sources_for_billing_owner(
+        owner_id="owner", source_id="1", now=fixture.now))
+    visible_items = asyncio.run(item_reader.list_items_for_billing_owner(
+        owner_id="owner", now=fixture.now))
+    assert visible_items
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE repository_services SET enabled=0,status='paused' WHERE repository_id='repo'")
+    assert asyncio.run(source_reader.list_sources_for_billing_owner(
+        owner_id="owner", source_id="1", now=fixture.now)) == []
+    assert fixture.store.list_sources_for_billing_owner("owner", source_id="1") == []
+    assert asyncio.run(item_reader.list_items_for_billing_owner(
+        owner_id="owner", now=fixture.now)) == []
+    assert fixture.store.list_items_for_billing_owner("owner") == []
+    try:
+        fixture.store.patch_item_handling(item_id=publication["item"]["id"],
+            item_version=visible_items[0]["itemVersion"],
+            expected_revision=visible_items[0]["revision"],
+            actor_id="owner", disposition="done")
+    except ValueError as error:
+        assert str(error) == "STALE_ITEM"
+    else:
+        raise AssertionError("revoked shared-watch Item accepted handling")
+
+
 def test_d1_source_read_expires_publication_after_secondary_source_change(tmp_path):
     fixture, job, frozen = seed(tmp_path / "domain.db")
     publication = publication_args(fixture, job, frozen)

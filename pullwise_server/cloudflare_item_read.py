@@ -22,7 +22,12 @@ class D1ItemReads:
                       AND sc.accessible=1 AND sc.authorization_valid_until>=?
                       AND (sc.watch_id IS NULL OR EXISTS(
                           SELECT 1 FROM update_watches w
-                          WHERE w.id=sc.watch_id AND w.archived_at IS NULL)))
+                          WHERE w.id=sc.watch_id AND w.archived_at IS NULL
+                            AND (w.target_repository_id IS NULL OR EXISTS(
+                              SELECT 1 FROM repository_services parent
+                              WHERE parent.repository_id=w.target_repository_id
+                                AND parent.billing_owner_id=sc.billing_owner_id
+                                AND parent.enabled=1 AND parent.status='active')))))
                   AND (? IS NULL OR i.id=?)
                 ORDER BY i.updated_at DESC,i.id""").bind(owner_id, now, item_id, item_id),
             self.binding.prepare("""SELECT sc.source_id,sc.context_id,sc.billing_owner_id,
@@ -33,7 +38,12 @@ class D1ItemReads:
                 LEFT JOIN update_watches w ON w.id=sc.watch_id
                 WHERE sc.billing_owner_id=? AND sc.accessible=1
                   AND sc.authorization_valid_until>=?
-                  AND (sc.watch_id IS NULL OR (w.id IS NOT NULL AND w.archived_at IS NULL))""").bind(owner_id, now),
+                  AND (sc.watch_id IS NULL OR (w.id IS NOT NULL AND w.archived_at IS NULL
+                    AND (w.target_repository_id IS NULL OR EXISTS(
+                      SELECT 1 FROM repository_services parent
+                      WHERE parent.repository_id=w.target_repository_id
+                        AND parent.billing_owner_id=sc.billing_owner_id
+                        AND parent.enabled=1 AND parent.status='active'))))""").bind(owner_id, now),
             (self.binding.prepare("""SELECT * FROM item_handling_events
                 WHERE (? IS NULL OR item_id=?) ORDER BY rowid""").bind(item_id, item_id)
              if include_history else self.binding.prepare("""SELECT h.* FROM item_handling_events h

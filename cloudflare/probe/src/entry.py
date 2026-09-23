@@ -144,14 +144,15 @@ class Default(WorkerEntrypoint):
                     WHERE name='billingEvents') AS originalPaymentFactPreserved''').first())
         if request.method != 'POST':
             return Response('Not found', status=404)
-        if name in {'repository-create', 'repository-disable', 'repository-change-installation'}:
+        if name in {'repository-create', 'repository-disable', 'repository-change-installation',
+                    'repository-pause'}:
             try:
                 result = await D1RepositoryTransactions(self.env.DB).put_service(
                     repository_id='repo', installation_id=(
                         'inst-2' if name == 'repository-change-installation' else 'inst-1'),
                     owner_id='owner',
                     expected_revision=0 if name == 'repository-create' else 1,
-                    enabled=True, modules={'pr': True, 'ci': False},
+                    enabled=name != 'repository-pause', modules={'pr': True, 'ci': False},
                     analysis_enabled={'pr': name == 'repository-create', 'ci': False},
                     allow_member_sync=False, default_assignee_id=None,
                     priority_order=0, now=DATA['claim']['now'])

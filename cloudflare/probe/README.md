@@ -37,6 +37,11 @@ with synthetic owner, repository, Job and reservation rows. The local
 reservation release, analysis-off Source fence, stale revision rejection, and
 the same state after a real workerd restart. These routes are probe-only; no
 real GitHub installation or repository write HTTP endpoint is enabled.
+`verify_repository_read_fence.py` uses a separate fresh
+`.wrangler/server-map-repository-source-state`. It links a synthetic watch to
+a repository, confirms the Source is readable, pauses the parent without
+revoking the old watch proof/Source lease, then confirms the Source is hidden
+before and after a real workerd restart. No model or provider request occurs.
 Run `verify_repository_mapping.py` with the fresh
 `.wrangler/server-map-repository-parent-state` and again with
 `--after-restart` after restarting workerd. It creates a synthetic linked

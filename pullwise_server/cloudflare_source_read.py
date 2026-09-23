@@ -25,7 +25,12 @@ class D1SourceReads:
                 JOIN source_contexts sc ON sc.source_id=sr.source_id
                 LEFT JOIN update_watches uw ON uw.id=sc.watch_id
                 WHERE sc.billing_owner_id=? AND sc.accessible=1
-                AND (sc.watch_id IS NULL OR (uw.id IS NOT NULL AND uw.archived_at IS NULL))
+                AND (sc.watch_id IS NULL OR (uw.id IS NOT NULL AND uw.archived_at IS NULL
+                    AND (uw.target_repository_id IS NULL OR EXISTS(
+                        SELECT 1 FROM repository_services parent
+                        WHERE parent.repository_id=uw.target_repository_id
+                          AND parent.billing_owner_id=sc.billing_owner_id
+                          AND parent.enabled=1 AND parent.status='active'))))
                 AND (? IS NULL OR sr.source_id=?)
                 AND sc.authorization_valid_until>=?
                 ORDER BY sr.updated_at DESC,sr.source_id,sc.context_id""").bind(
@@ -44,7 +49,12 @@ class D1SourceReads:
                 sc.context_version,sc.configuration_revision,
                 sc.authorization_revision,
                 CASE WHEN sc.watch_id IS NULL THEN 1
-                     WHEN w.id IS NOT NULL AND w.archived_at IS NULL THEN 1
+                     WHEN w.id IS NOT NULL AND w.archived_at IS NULL
+                       AND (w.target_repository_id IS NULL OR EXISTS(
+                         SELECT 1 FROM repository_services parent
+                         WHERE parent.repository_id=w.target_repository_id
+                           AND parent.billing_owner_id=sc.billing_owner_id
+                           AND parent.enabled=1 AND parent.status='active')) THEN 1
                      ELSE 0 END AS watch_active
                 FROM source_contexts sc LEFT JOIN update_watches w ON w.id=sc.watch_id
                 WHERE sc.billing_owner_id=?""").bind(owner_id),

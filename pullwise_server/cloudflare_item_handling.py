@@ -69,6 +69,14 @@ class D1ItemHandling:
                 WHERE sc.source_id=? AND sc.context_id=? AND sc.billing_owner_id=?
                   AND sc.accessible=1 AND sc.context_stale=0
                   AND sc.authorization_valid_until>=?
+                  AND (sc.watch_id IS NULL OR EXISTS(
+                    SELECT 1 FROM update_watches w WHERE w.id=sc.watch_id
+                      AND w.archived_at IS NULL
+                      AND (w.target_repository_id IS NULL OR EXISTS(
+                        SELECT 1 FROM repository_services parent
+                        WHERE parent.repository_id=w.target_repository_id
+                          AND parent.billing_owner_id=sc.billing_owner_id
+                          AND parent.enabled=1 AND parent.status='active'))))
                   AND sr.latest_version=? AND sr.source_revision=?
                   AND sc.context_version=? AND sc.authorization_revision=?)""")
             params.extend((source["sourceId"], fence["contextId"], owner_id, now,

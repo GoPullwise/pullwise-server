@@ -224,7 +224,12 @@ revision; pending or incomplete assessment must not silently close an item.
   watch contexts do not appear in lists/details even while their old GitHub
   authorization lease is still valid, and a saved assessment depending on
   any archived secondary watch context is stale. Keep the SQLite and D1
-  readers aligned. `D1WatchTransactions.archive_watch` maps a trusted local
+  readers aligned. For linked shared watches, a missing, paused, or
+  owner-mismatched parent repository service hides their Source/Item content
+  even if the watch proof and Source authorization lease remain valid. Item
+  handling D1 writes recheck that parent in the guarded batch; the local
+  handling transaction rejects a paused linked parent as stale.
+  `D1WatchTransactions.archive_watch` maps a trusted local
   batch for archival, context/target revocation, active Job cancellation and
   reserved-usage release. It checks bucket consistency and leaves provider
   attempts spent; a late result cannot publish. Candidate product

@@ -2082,3 +2082,24 @@ The existing local HTTP watch PATCH/Job read driver passed. Port 8797 was
 stopped; no remote resource, model, or provider call was used.
 The Server CI target plus shared-watch regression passes **744 tests,
 73 subtests** locally after this change.
+
+## Shared-watch parent read and handling fence (2026-09-24 continuation)
+
+Red tests showed Source and Item reads could still expose a linked watch's
+saved content after its parent repository service was paused while the old
+watch/Source authorization lease remained valid. SQLite and D1 Source/Item
+queries now require an active same-owner parent. The D1 Item handling batch
+rechecks that parent after its read snapshot, and local ProductStore handling
+rejects a paused linked parent. Focused Source/Item/handling/shared-watch
+regression passes **87 tests, 5 subtests**. The synthetic local workerd/D1
+probe in `server-map-repository-source-state` showed one Source before pause,
+none after pause and after a real process restart, with the old watch proof
+and Source accessible flags intentionally still set. Ports 8796/8797 are
+stopped. No remote permission check or live provider call was performed.
+The updated Server CI target plus shared-watch contracts passes **746 tests,
+73 subtests**. A fresh candidate HTTP Worker on local workerd/D1 served
+Source and Item reads with the new SQL and completed Item handling PATCH.
+The full synthetic HTTP driver hit one local ProxyWorker connection-loss
+during PATCH after its prior GETs passed; a direct retry of that same Item
+PATCH returned 200 and persisted the event. This is local runtime evidence,
+not a full driver pass or CF2 verification. Port 8797 was stopped.

@@ -555,6 +555,49 @@ def test_item_handling_patch_rolls_back_when_key_revoked_before_write_batch(tmp_
         assert db.execute("SELECT revision FROM items WHERE id=?", (item_id,)).fetchone()[0] == item["revision"]
 
 
+def test_item_handling_patch_rechecks_shared_watch_parent_in_write_batch(tmp_path):
+    fixture, job, frozen = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("items:read", "items:write"))
+    publication = publication_args(fixture, job, frozen)
+    execute(fixture.store, mapping().claim(**claim_args(fixture, job, frozen)))
+    execute(fixture.store, mapping().publication(**publication))
+    fixture.store.put_repository_service(repository_id="repo", installation_id="inst-1",
+        billing_owner_id="owner", expected_revision=0, enabled=True,
+        modules={"pr": True, "ci": False}, analysis_enabled={"pr": False, "ci": False},
+        allow_member_sync=False, default_assignee_id=None, priority_order=0)
+    watch = fixture.store.create_watch(owner_id="owner", target_repository_id="repo",
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=False)
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE source_contexts SET watch_id=? WHERE source_id='1'", (watch["id"],))
+    item_id = publication["item"]["id"]
+    item = fixture.store.list_items_for_billing_owner("owner", item_id=item_id)[0]
+    binding = D1ShapedSQLite(fixture.store)
+    batches = 0
+
+    def disable_parent_before_write():
+        nonlocal batches
+        batches += 1
+        if batches == 2:
+            with fixture.store._immediate() as db:
+                db.execute("UPDATE repository_services SET enabled=0,status='paused' WHERE repository_id='repo'")
+
+    binding.before_batch = disable_parent_before_write
+    body = json.dumps({"itemVersion": item["itemVersion"], "disposition": "done"}).encode()
+
+    async def read_body():
+        return body
+
+    status, _ = asyncio.run(handle_http_request(method="PATCH",
+        path=f"/api/v1/items/{item_id}",
+        headers={"Cookie": "pw_session=session-local", "If-Match": str(item["revision"]),
+                 "Content-Length": str(len(body))}, read_body=read_body,
+        binding=binding, creem_secret="", configured_products={}, now=fixture.now))
+    assert status == 412
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT COUNT(*) FROM item_handling_events").fetchone()[0] == 0
+
+
 def test_handling_saved_item_remains_available_after_analysis_is_disabled(tmp_path):
     fixture, job, frozen = seed(tmp_path / "domain.db")
     _seed_auth(fixture, scopes=("items:read", "items:write"))

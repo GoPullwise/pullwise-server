@@ -525,6 +525,17 @@ synthetic workerd/D1 restart probe covered the shared-watch installation
 case. It is unmounted pending current GitHub App authority binding; this is
 not CF2 evidence.
 
+Linked shared-watch reads now require the parent repository service to remain
+active under the same billing owner. SQLite and D1 Source/Item queries apply
+this gate to the visible row and every publication/dependency fence; the D1
+Item handling write guard rechecks it after the initial read. The local
+ProductStore handling transaction rejects a paused linked parent. A red
+Source/Item test and a write-race test first exposed the gap. Synthetic
+workerd/D1 kept the old watch proof and Source authorization accessible but
+hid the Source after pausing the parent, including after process restart in
+`server-map-repository-source-state`. These are local authorization proofs,
+not live GitHub revocation evidence.
+
 - Full ProductStore async reads and consistent authorization-filtered list/count
   snapshots; no use of a Worker/Container local SQLite file as durable storage.
 - Source-only and cached publication, thread membership CAS for projections

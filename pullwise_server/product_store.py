@@ -1798,7 +1798,12 @@ class ProductStore:
                 JOIN source_contexts sc ON sc.source_id = sr.source_id
                 LEFT JOIN update_watches uw ON uw.id = sc.watch_id
                 WHERE sc.billing_owner_id = ? AND sc.accessible = 1
-                  AND (sc.watch_id IS NULL OR (uw.id IS NOT NULL AND uw.archived_at IS NULL))
+                  AND (sc.watch_id IS NULL OR (uw.id IS NOT NULL AND uw.archived_at IS NULL
+                    AND (uw.target_repository_id IS NULL OR EXISTS (
+                      SELECT 1 FROM repository_services parent
+                      WHERE parent.repository_id=uw.target_repository_id
+                        AND parent.billing_owner_id=sc.billing_owner_id
+                        AND parent.enabled=1 AND parent.status='active'))))
                   AND (? IS NULL OR sr.source_id = ?)
                   AND sc.authorization_valid_until >= ?
                 ORDER BY sr.updated_at DESC, sr.source_id, sc.context_id
@@ -1838,7 +1843,12 @@ class ProductStore:
                     for fence in fences:
                         stored = connection.execute(
                             """SELECT sc.*,CASE WHEN sc.watch_id IS NULL THEN 1
-                                 WHEN w.id IS NOT NULL AND w.archived_at IS NULL THEN 1
+                                 WHEN w.id IS NOT NULL AND w.archived_at IS NULL
+                                   AND (w.target_repository_id IS NULL OR EXISTS (
+                                     SELECT 1 FROM repository_services parent
+                                     WHERE parent.repository_id=w.target_repository_id
+                                       AND parent.billing_owner_id=sc.billing_owner_id
+                                       AND parent.enabled=1 AND parent.status='active')) THEN 1
                                  ELSE 0 END AS watch_active
                                FROM source_contexts sc
                                LEFT JOIN update_watches w ON w.id=sc.watch_id
@@ -1890,7 +1900,12 @@ class ProductStore:
                       AND sc.accessible = 1 AND sc.authorization_valid_until >= ?
                       AND (sc.watch_id IS NULL OR EXISTS (
                           SELECT 1 FROM update_watches w
-                          WHERE w.id=sc.watch_id AND w.archived_at IS NULL))
+                          WHERE w.id=sc.watch_id AND w.archived_at IS NULL
+                            AND (w.target_repository_id IS NULL OR EXISTS (
+                              SELECT 1 FROM repository_services parent
+                              WHERE parent.repository_id=w.target_repository_id
+                                AND parent.billing_owner_id=sc.billing_owner_id
+                                AND parent.enabled=1 AND parent.status='active'))))
                 )
                 AND (? IS NULL OR i.id = ?)
                 ORDER BY i.updated_at DESC, i.id
@@ -1908,7 +1923,12 @@ class ProductStore:
                     LEFT JOIN update_watches w ON w.id=sc.watch_id
                     WHERE sc.billing_owner_id = ? AND sc.accessible = 1
                       AND sc.authorization_valid_until >= ?
-                      AND (sc.watch_id IS NULL OR (w.id IS NOT NULL AND w.archived_at IS NULL))
+                      AND (sc.watch_id IS NULL OR (w.id IS NOT NULL AND w.archived_at IS NULL
+                        AND (w.target_repository_id IS NULL OR EXISTS (
+                          SELECT 1 FROM repository_services parent
+                          WHERE parent.repository_id=w.target_repository_id
+                            AND parent.billing_owner_id=sc.billing_owner_id
+                            AND parent.enabled=1 AND parent.status='active'))))
                     """,
                     (owner_id, timestamp),
                 ).fetchall()
@@ -2743,6 +2763,19 @@ class ProductStore:
                 raise ValueError("STALE_ITEM")
             if int(item["revision"]) != expected_revision:
                 raise ValueError("REVISION_MISMATCH")
+            parent_denied = connection.execute(
+                """SELECT 1 FROM source_contexts sc
+                    JOIN update_watches w ON w.id=sc.watch_id
+                    WHERE sc.context_id=? AND sc.billing_owner_id=?
+                      AND w.target_repository_id IS NOT NULL
+                      AND NOT EXISTS(SELECT 1 FROM repository_services parent
+                          WHERE parent.repository_id=w.target_repository_id
+                            AND parent.billing_owner_id=sc.billing_owner_id
+                            AND parent.enabled=1 AND parent.status='active') LIMIT 1""",
+                (item["context_id"], actor_id),
+            ).fetchone()
+            if parent_denied is not None:
+                raise ValueError("STALE_ITEM")
             previous = connection.execute(
                 """
                 SELECT * FROM item_handling_events

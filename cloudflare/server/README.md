@@ -67,6 +67,10 @@ The watch list uses the same Server-owned DTO projection as ProductStore,
 filters to the current billing owner, and applies API-key `watchIds` scope.
 Source list/detail rechecks the API key or Cookie session and stored user in
 the same read-only D1 batch as Source rows and publication/dependency fences.
+Linked watch Source and Item reads also require their parent repository
+service active under the billing owner in that batch; a disabled parent hides
+the content even before the old watch authorization lease expires. Item
+handling rechecks the parent inside its write transaction.
 It shares Source DTO and filter rules with local REST, including watch and
 repository key restrictions. GET never writes usage or schedules model work.
 Item list/detail uses the same identity proof and reads current ItemVersion,
@@ -146,6 +150,11 @@ to check an in-scope key's sync Job GET, then changed that key's local D1
 `watchIds` to an unrelated ID while workerd was stopped. After restart the
 key received 404 and the Cookie owner still received 200. This is local
 authorization evidence only.
+In a separate fresh `server-http-parent-read-state`, Source and Item HTTP
+reads compiled and returned saved data with the linked-parent SQL present.
+The full HTTP driver hit one local ProxyWorker connection loss during its Item
+PATCH; a direct retry returned 200 and saved the handling event. This is
+local runtime evidence rather than a full clean HTTP driver pass.
 
 ## Remaining gates
 
