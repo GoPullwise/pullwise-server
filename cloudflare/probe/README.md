@@ -37,6 +37,11 @@ with synthetic owner, repository, Job and reservation rows. The local
 reservation release, analysis-off Source fence, stale revision rejection, and
 the same state after a real workerd restart. These routes are probe-only; no
 real GitHub installation or repository write HTTP endpoint is enabled.
+Run `verify_repository_mapping.py` with the fresh
+`.wrangler/server-map-repository-parent-state` and again with
+`--after-restart` after restarting workerd. It creates a synthetic linked
+watch and verifies parent installation change revokes its proof and Source
+context while cancelling queued work and releasing the reservation.
 
 This is a **local experiment, not the Server deployment or a production adapter**.
 The user approved the isolated validation dependencies in this session. No real

@@ -2053,3 +2053,15 @@ shared-watch parent propagation and manual sync scheduling remain open.
 Server/Web have not been pushed, so remote CI does not cover this change.
 The updated Server CI target selection passes **722 tests, 68 subtests**
 locally; `sync_server_modules.py --check` and `git diff --check` also pass.
+Follow-up red tests found the real `repository:{id}` discovery context and
+shared-watch parent installation transition were missing from the first D1
+mapping. Both now update Source and Job fences in the same batch. Linked
+watch config changes cancel queued work and release reservations while
+preserving the current authorization proof; an installation change also
+revokes that proof and cancels running work. Eight focused SQLite tests pass.
+The finite local workerd/D1 shared-watch probe passed before and after a
+real restart in `server-map-repository-parent-state`. Product HTTP remains
+unmounted pending current GitHub App authority.
+The expanded local regression including shared-watch contracts passes
+**738 tests, 73 subtests**. Remote CI remains run `35848982912` on the older
+`7a1ade3` head and has not executed these unpushed commits.

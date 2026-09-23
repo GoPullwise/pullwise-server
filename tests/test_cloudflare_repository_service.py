@@ -117,3 +117,86 @@ def test_repository_switch_rolls_back_when_reservation_is_missing(tmp_path):
         assert db.execute("SELECT revision FROM repository_services WHERE repository_id='repo'").fetchone()[0] == 1
         assert db.execute("SELECT state FROM background_jobs WHERE id=?", (job["id"],)).fetchone()[0] == "queued"
         assert db.execute("SELECT analysis_enabled FROM source_contexts WHERE source_id='1'").fetchone()[0] == 1
+
+
+def test_repository_switch_uses_discovery_target_context_not_fixture_alias(tmp_path):
+    fixture, job, _ = seed(tmp_path / "domain.db")
+    adapter = D1RepositoryTransactions(D1ShapedSQLite(fixture.store))
+    initial = asyncio.run(adapter.put_service(**{**arguments(fixture,
+        repository_id="repo"), "analysis_enabled": {"pr": True, "ci": False}}))
+    fixture.store.set_discovery_authorization(resource_kind="repository", resource_id="repo",
+        module="pr", github_repository_id="101", installation_id="inst-1", app_id="app",
+        authorization_revision=1, accessible=True,
+        valid_until=fixture.now + 300, observed_at=fixture.now)
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE source_contexts SET context_id='repository:repo' WHERE context_id='repo:repo:pr'")
+        db.execute("UPDATE background_jobs SET context_id='repository:repo',state='queued' WHERE id=?", (job["id"],))
+        db.execute("UPDATE processing_usage_ledger SET state='reserved' WHERE charge_key='charge'")
+        db.execute("UPDATE processing_usage_buckets SET reserved=1")
+    asyncio.run(adapter.put_service(**{**arguments(fixture,
+        repository_id="repo", expected_revision=initial["revision"]),
+        "analysis_enabled": {"pr": False, "ci": False}}))
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT state FROM background_jobs WHERE id=?", (job["id"],)).fetchone()[0] == "cancelled"
+        assert db.execute("SELECT reserved FROM processing_usage_buckets").fetchone()[0] == 0
+        assert tuple(db.execute("SELECT configuration_revision,analysis_enabled FROM source_contexts WHERE source_id='1'").fetchone()) == (2, 0)
+
+
+def test_parent_installation_change_revokes_shared_watch_and_releases_queue(tmp_path):
+    fixture, job, _ = seed(tmp_path / "domain.db")
+    adapter = D1RepositoryTransactions(D1ShapedSQLite(fixture.store))
+    initial = asyncio.run(adapter.put_service(**{**arguments(fixture,
+        repository_id="repo"), "analysis_enabled": {"pr": False, "ci": False}}))
+    watch = fixture.store.create_watch(owner_id="owner", target_repository_id="repo",
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=True)
+    fixture.store.set_discovery_authorization(resource_kind="watch",
+        resource_id=watch["id"], module="updates", github_repository_id="101",
+        installation_id=None, app_id="app", authorization_revision=1,
+        accessible=True, valid_until=fixture.now + 300, observed_at=fixture.now)
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE source_records SET source_type='release',repository_id='github:101' WHERE source_id='1'")
+        db.execute("UPDATE source_contexts SET context_id=?,watch_id=?,analysis_enabled=1 WHERE source_id='1'",
+            (watch["watchScopeKey"], watch["id"]))
+        db.execute("UPDATE background_jobs SET context_id=?,state='queued' WHERE id=?",
+            (watch["watchScopeKey"], job["id"]))
+        db.execute("UPDATE processing_usage_ledger SET state='reserved' WHERE charge_key='charge'")
+        db.execute("UPDATE processing_usage_buckets SET reserved=1")
+    asyncio.run(adapter.put_service(**{**arguments(fixture,
+        repository_id="repo", expected_revision=initial["revision"]),
+        "installation_id": "inst-2"}))
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT state FROM background_jobs WHERE id=?", (job["id"],)).fetchone()[0] == "cancelled"
+        assert db.execute("SELECT reserved FROM processing_usage_buckets").fetchone()[0] == 0
+        assert tuple(db.execute("SELECT accessible,analysis_enabled FROM source_contexts WHERE source_id='1'").fetchone()) == (0, 0)
+        assert db.execute("SELECT accessible FROM discovery_targets WHERE resource_kind='watch'").fetchone()[0] == 0
+
+
+def test_parent_config_change_fences_shared_watch_without_revoking_proof(tmp_path):
+    fixture, job, _ = seed(tmp_path / "domain.db")
+    adapter = D1RepositoryTransactions(D1ShapedSQLite(fixture.store))
+    initial = asyncio.run(adapter.put_service(**{**arguments(fixture,
+        repository_id="repo"), "analysis_enabled": {"pr": False, "ci": False}}))
+    watch = fixture.store.create_watch(owner_id="owner", target_repository_id="repo",
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=True)
+    fixture.store.set_discovery_authorization(resource_kind="watch",
+        resource_id=watch["id"], module="updates", github_repository_id="101",
+        installation_id=None, app_id="app", authorization_revision=1,
+        accessible=True, valid_until=fixture.now + 300, observed_at=fixture.now)
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE source_records SET source_type='release',repository_id='github:101' WHERE source_id='1'")
+        db.execute("UPDATE source_contexts SET context_id=?,watch_id=?,analysis_enabled=1 WHERE source_id='1'",
+            (watch["watchScopeKey"], watch["id"]))
+        db.execute("UPDATE background_jobs SET context_id=?,state='queued' WHERE id=?",
+            (watch["watchScopeKey"], job["id"]))
+        db.execute("UPDATE processing_usage_ledger SET state='reserved' WHERE charge_key='charge'")
+        db.execute("UPDATE processing_usage_buckets SET reserved=1")
+    asyncio.run(adapter.put_service(**{**arguments(fixture,
+        repository_id="repo", expected_revision=initial["revision"]),
+        "allow_member_sync": True}))
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT state FROM background_jobs WHERE id=?", (job["id"],)).fetchone()[0] == "cancelled"
+        assert db.execute("SELECT reserved FROM processing_usage_buckets").fetchone()[0] == 0
+        assert tuple(db.execute("SELECT configuration_revision,accessible,authorization_revision FROM source_contexts WHERE source_id='1'").fetchone()) == (2, 1, 1)
+        assert tuple(db.execute("SELECT configuration_epoch,accessible FROM discovery_targets WHERE resource_kind='watch'").fetchone()) == (2, 1)

@@ -95,6 +95,8 @@ class Default(WorkerEntrypoint):
                 (SELECT reserved FROM processing_usage_buckets LIMIT 1) AS reserved,
                 (SELECT configuration_revision FROM source_contexts WHERE source_id='1') AS config,
                 (SELECT analysis_enabled FROM source_contexts WHERE source_id='1') AS analysis,
+                (SELECT accessible FROM source_contexts WHERE source_id='1') AS accessible,
+                (SELECT accessible FROM discovery_targets WHERE resource_kind='watch' LIMIT 1) AS watchProof,
                 (SELECT COUNT(*) FROM provider_attempts) AS attempts''').first()
             return Response.json(row)
         if request.method == 'GET' and name == 'source-read':
@@ -142,10 +144,12 @@ class Default(WorkerEntrypoint):
                     WHERE name='billingEvents') AS originalPaymentFactPreserved''').first())
         if request.method != 'POST':
             return Response('Not found', status=404)
-        if name in {'repository-create', 'repository-disable'}:
+        if name in {'repository-create', 'repository-disable', 'repository-change-installation'}:
             try:
                 result = await D1RepositoryTransactions(self.env.DB).put_service(
-                    repository_id='repo', installation_id='inst-1', owner_id='owner',
+                    repository_id='repo', installation_id=(
+                        'inst-2' if name == 'repository-change-installation' else 'inst-1'),
+                    owner_id='owner',
                     expected_revision=0 if name == 'repository-create' else 1,
                     enabled=True, modules={'pr': True, 'ci': False},
                     analysis_enabled={'pr': name == 'repository-create', 'ci': False},
@@ -154,6 +158,31 @@ class Default(WorkerEntrypoint):
                 return Response.json(result)
             except Exception:
                 return Response.json({'error': 'repository rejected'}, status=409)
+        if name == 'repository-seed-shared':
+            try:
+                watch = await D1WatchTransactions(self.env.DB).create_public_watch(
+                    owner_id='owner', resolved_public_repository_id='github:101',
+                    interests=['OAuth'], enabled=True, analysis_enabled=True,
+                    now=DATA['claim']['now'])
+                await self.env.DB.batch([
+                    self.env.DB.prepare("UPDATE update_watches SET target_repository_id='repo' WHERE id=?").bind(watch['id']),
+                    self.env.DB.prepare("UPDATE watch_controls SET target_repository_id='repo' WHERE watch_scope_key=?").bind(watch['watchScopeKey']),
+                    self.env.DB.prepare("""INSERT INTO discovery_targets(
+                        control_key,resource_kind,resource_id,context_id,module,
+                        repository_id,github_repository_id,installation_id,app_id,
+                        billing_owner_id,authorization_revision,accessible,valid_until)
+                        VALUES(?,'watch',?,?,'updates','github:101','101',NULL,'app','owner',1,1,?)""").bind(
+                            watch['watchScopeKey'], watch['id'], watch['watchScopeKey'], DATA['claim']['now']+300),
+                    self.env.DB.prepare("UPDATE source_records SET source_type='release',repository_id='github:101' WHERE source_id='1'"),
+                    self.env.DB.prepare("UPDATE source_contexts SET context_id=?,watch_id=?,analysis_enabled=1 WHERE source_id='1'").bind(
+                        watch['watchScopeKey'],watch['id']),
+                    self.env.DB.prepare("UPDATE background_jobs SET context_id=?,state='queued' WHERE source_id='1'").bind(watch['watchScopeKey']),
+                    self.env.DB.prepare("UPDATE processing_usage_ledger SET state='reserved' WHERE charge_key='charge'"),
+                    self.env.DB.prepare("UPDATE processing_usage_buckets SET reserved=1 WHERE billing_owner_id='owner'"),
+                ])
+                return Response.json({'watchId': watch['id']})
+            except Exception:
+                return Response.json({'error': 'shared watch fixture rejected'}, status=409)
         if name == 'watch-create':
             try:
                 watch = await D1WatchTransactions(self.env.DB).create_public_watch(

@@ -98,10 +98,11 @@ class D1RepositoryTransactions:
         for module, source_types in _SOURCE_TYPES.items():
             context_id = f"repo:{repository_id}:{module}"
             source_condition = """j.job_type='analyze_source' AND j.state IN ('queued','retry_wait')
-                AND j.context_id=? AND j.billing_owner_id=?
+                AND j.context_id IN (?,?) AND j.billing_owner_id=?
                 AND EXISTS(SELECT 1 FROM source_records sr WHERE sr.source_id=j.source_id
                     AND sr.repository_id=? AND sr.source_type IN (?,?,?,?))"""
-            scope = (context_id, owner_id, repository_id, *source_types)
+            scope = (context_id, f"repository:{repository_id}", owner_id,
+                     repository_id, *source_types)
             statements.append(self.binding.prepare("""INSERT INTO d1_command_guard(ok)
                 VALUES(CASE WHEN NOT EXISTS(SELECT 1 FROM background_jobs j
                     LEFT JOIN processing_usage_ledger l ON l.reservation_id=j.reservation_id
@@ -148,13 +149,100 @@ class D1RepositoryTransactions:
                     analysis_enabled=?,
                     processing_status=CASE WHEN ?=0 THEN 'analysis_disabled'
                                            ELSE processing_status END,
-                    updated_at=? WHERE context_id=? AND billing_owner_id=?
+                    updated_at=? WHERE context_id IN (?,?) AND billing_owner_id=?
                     AND source_id IN (SELECT source_id FROM source_records
                         WHERE repository_id=? AND source_type IN (?,?,?,?))""").bind(
                             int(current is not None), expected_revision + 1,
                             int(enabled and modules[module] and analysis_enabled[module]),
                             int(enabled and modules[module] and analysis_enabled[module]),
-                            now, context_id, owner_id, repository_id, *source_types),
+                            now, context_id, f"repository:{repository_id}",
+                            owner_id, repository_id, *source_types),
+            ])
+        parent_installation_changed = (current is not None and
+                                       current["installation_id"] != installation_id)
+        watch_states = "'queued','running','retry_wait'" if parent_installation_changed else "'queued','retry_wait'"
+        watch_job = """j.job_type='analyze_source' AND j.state IN (""" + watch_states + """)
+            AND EXISTS(SELECT 1 FROM source_contexts sc JOIN update_watches w
+                ON w.id=sc.watch_id WHERE sc.source_id=j.source_id
+                AND sc.context_id=j.context_id AND sc.billing_owner_id=j.billing_owner_id
+                AND w.target_repository_id=? AND w.billing_owner_id=?
+                AND w.archived_at IS NULL)"""
+        watch_scope = (repository_id, owner_id)
+        statements.append(self.binding.prepare("""INSERT INTO d1_command_guard(ok)
+            VALUES(CASE WHEN NOT EXISTS(SELECT 1 FROM background_jobs j
+                LEFT JOIN processing_usage_ledger l ON l.reservation_id=j.reservation_id
+                WHERE """ + watch_job + """ AND j.reservation_id IS NOT NULL
+                  AND (l.reservation_id IS NULL OR l.state!='reserved'))
+              AND NOT EXISTS(SELECT 1 FROM (
+                SELECT l.billing_owner_id AS owner_id,l.period,COUNT(*) AS needed
+                FROM processing_usage_ledger l JOIN background_jobs j
+                    ON j.reservation_id=l.reservation_id
+                WHERE l.state='reserved' AND """ + watch_job + """
+                GROUP BY l.billing_owner_id,l.period) needed
+                LEFT JOIN processing_usage_buckets b
+                  ON b.billing_owner_id=needed.owner_id AND b.period=needed.period
+                  AND b.metric='intelligent_processing'
+                WHERE b.billing_owner_id IS NULL OR b.reserved<needed.needed)
+              THEN 1 ELSE 0 END)""").bind(*watch_scope, *watch_scope))
+        statements.extend([
+            self.binding.prepare("""UPDATE processing_usage_buckets AS b SET
+                reserved=reserved-(SELECT COUNT(*) FROM processing_usage_ledger l
+                    JOIN background_jobs j ON j.reservation_id=l.reservation_id
+                    WHERE l.billing_owner_id=b.billing_owner_id AND l.period=b.period
+                      AND l.state='reserved' AND """ + watch_job + """),updated_at=?
+                WHERE b.metric='intelligent_processing' AND EXISTS(
+                    SELECT 1 FROM processing_usage_ledger l
+                    JOIN background_jobs j ON j.reservation_id=l.reservation_id
+                    WHERE l.billing_owner_id=b.billing_owner_id AND l.period=b.period
+                      AND l.state='reserved' AND """ + watch_job + ")").bind(
+                          *watch_scope, now, *watch_scope),
+            self.binding.prepare("""UPDATE processing_usage_ledger SET
+                state='released',finished_at=? WHERE state='reserved'
+                AND reservation_id IN (SELECT j.reservation_id FROM background_jobs j
+                    WHERE """ + watch_job + ")").bind(now, *watch_scope),
+            self.binding.prepare("""UPDATE background_jobs AS j SET state='cancelled',
+                claim_token=NULL,claimed_until=NULL,updated_at=? WHERE """ + watch_job).bind(
+                    now, *watch_scope),
+            self.binding.prepare("""UPDATE discovery_targets AS d SET
+                configuration_epoch=MAX(configuration_epoch+1,?),
+                configuration_stamp=json_array(d.resource_id,
+                    (SELECT w.revision FROM update_watches w WHERE w.id=d.resource_id),
+                    ?,?,?,?)
+                WHERE d.resource_kind='watch' AND d.resource_id IN
+                    (SELECT id FROM update_watches WHERE target_repository_id=?
+                        AND billing_owner_id=? AND archived_at IS NULL)""").bind(
+                            expected_revision + 1, repository_id, installation_id,
+                            expected_revision + 1, owner_id, repository_id, owner_id),
+            self.binding.prepare("""UPDATE source_contexts AS sc SET
+                configuration_revision=MAX(sc.configuration_revision+1,
+                    COALESCE((SELECT d.configuration_epoch FROM discovery_targets d
+                        WHERE d.resource_kind='watch' AND d.resource_id=sc.watch_id),0)),
+                analysis_enabled=CASE WHEN EXISTS(SELECT 1 FROM update_watches w
+                    WHERE w.id=sc.watch_id AND w.enabled=1 AND w.analysis_enabled=1)
+                    AND ?=1 THEN 1 ELSE 0 END,
+                processing_status=CASE WHEN ?=0 THEN 'analysis_disabled'
+                    ELSE processing_status END,updated_at=?
+                WHERE sc.watch_id IN (SELECT id FROM update_watches
+                    WHERE target_repository_id=? AND billing_owner_id=?
+                      AND archived_at IS NULL)""").bind(
+                          int(enabled), int(enabled), now, repository_id, owner_id),
+        ])
+        if parent_installation_changed:
+            statements.extend([
+                self.binding.prepare("""UPDATE discovery_targets SET
+                    accessible=0,authorization_revision=authorization_revision+1,
+                    valid_until=? WHERE resource_kind='watch' AND resource_id IN
+                        (SELECT id FROM update_watches WHERE target_repository_id=?
+                            AND billing_owner_id=? AND archived_at IS NULL)""").bind(
+                                now, repository_id, owner_id),
+                self.binding.prepare("""UPDATE source_contexts SET
+                    accessible=0,authorization_revision=authorization_revision+1,
+                    authorization_valid_until=?,analysis_enabled=0,
+                    processing_status='analysis_disabled',updated_at=?
+                    WHERE watch_id IN (SELECT id FROM update_watches
+                        WHERE target_repository_id=? AND billing_owner_id=?
+                          AND archived_at IS NULL)""").bind(
+                              now, now, repository_id, owner_id),
             ])
         statements.append(self.binding.prepare("DELETE FROM d1_command_guard"))
         await self.binding.batch(statements)

@@ -196,8 +196,10 @@ revision; pending or incomplete assessment must not silently close an item.
   queued reservations, then updates the service, releases queued processing
   reservations and advances PR/CI Source configuration fences atomically.
   Running leases retain their state but cannot publish against the new fence.
-  A real caller still needs current GitHub App repository authorization and
-  shared-watch parent propagation before this command can be mounted.
+  Shared-watch parent changes also advance Updates configuration fences,
+  release queued work and, on installation change, revoke authorization and
+  cancel running work. A real caller still needs current GitHub App repository
+  authorization before this command can be mounted.
   `GET /api/v1/watches/{id}` is now shared by local REST and the candidate;
   resolve only an unarchived owner watch, apply API-key watchIds restrictions,
   and keep the candidate's identity and watch row in one D1 read snapshot.

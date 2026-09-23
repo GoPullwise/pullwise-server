@@ -509,8 +509,14 @@ releases matching queued PR/CI reservations, cancels those Jobs, and advances
 repository discovery-target and Source-context configuration fences. Running
 leases remain and cannot publish their old configuration. A malformed ledger
 rolls back the entire service revision. SQLite tests and a synthetic local
-workerd restart probe cover this path. It is unmounted pending GitHub App
-authority binding and shared-watch parent propagation; it is not CF2 evidence.
+workerd restart probe cover this path. Follow-up coverage uses the actual
+`repository:{id}` discovery context as well as the older synthetic alias.
+Linked shared watches now advance Updates configuration fences, cancel queued
+analysis and release its reservation; an installation change also revokes
+their discovery and Source authorization and cancels running work. A second
+synthetic workerd/D1 restart probe covered the shared-watch installation
+case. It is unmounted pending current GitHub App authority binding; this is
+not CF2 evidence.
 
 - Full ProductStore async reads and consistent authorization-filtered list/count
   snapshots; no use of a Worker/Container local SQLite file as durable storage.

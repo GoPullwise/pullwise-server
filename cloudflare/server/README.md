@@ -24,8 +24,9 @@ local state.
 The package also contains a trusted, currently unmounted
 `D1RepositoryTransactions.put_service` mapping. It guards owner/capacity and
 revision, cancels queued repository analysis, releases reservations and fences
-Source configuration in one D1 batch. Real GitHub App repository authority and
-shared-watch parent propagation remain prerequisites for a write route.
+Source configuration in one D1 batch. Parent changes also fence linked shared
+watches; changing installation revokes their current authorization. Real GitHub
+App repository authority remains a prerequisite for a write route.
 
 `src/entry.py` calls Server-owned `cloudflare_http_contract.py`. The latter
 requires raw request bytes, checks the 64 KiB bound and signature before D1,
