@@ -1406,3 +1406,41 @@ The selected HTTP, billing, entitlement and D1 regression reported **165
 passed, 15 subtests**. `sync_server_modules.py --check` passed. Server remote
 CI still shows run 35824307016 failing at the retired Worker checkout before
 tests; Web Actions are empty. No push, deployment, cron or remote D1 use.
+
+## Candidate authenticated product reads (2026-09-23 continuation)
+
+The local Server Worker now serves authenticated `GET /api/v1/me` and
+`GET /api/v1/usage` using persisted Cookie sessions or hashed API keys and
+the existing required scopes. Mixed identities, expired/revoked or malformed
+keys, missing GitHub session tokens and audit-bundle restrictions are denied.
+The D1 usage reader joins the current owner-period bucket, consumed ledger
+counts and provider-attempt count through `product_entitlement_rules`' shared
+DTO builder. GETs do not write API-key last-used, processing usage or attempts,
+and do not call GitHub/Jev. This intentionally leaves a bounded API-key
+last-used policy for later migration rather than charging D1 on every read.
+
+The Cookie/API-key DTO and auth tests failed first while the candidate returned
+404, then passed after the read adapter. A malformed-expiry/missing-token test
+also failed first and now rejects those credentials. The local fixture gained
+synthetic `sessions`, `api_keys` and `provider_attempts` tables. Its first
+workerd `/usage` run returned 503 because `provider_attempts` had been omitted
+from the fixture; a new local state directory with the actual Server table
+passed `/me`, `/usage`, mixed-auth rejection and webhook replay. After a real
+process restart the same HTTP driver passed again. Read-only D1 inspection
+showed API-key `last_used_at=NULL`, zero provider attempts, and payment
+revision 3. Old local D1 directories were preserved. No remote D1, cron,
+deployment, real key or production provider was used. The remaining product
+REST and account authorization flows are still CF2 work. Selected HTTP,
+billing, entitlement and D1 regression: **169 passed, 15 subtests**;
+`sync_server_modules.py --check` passed. Remote Server CI still fails at the
+retired Worker checkout before tests and Web Actions remain empty.
+The next readiness regression found that `/health` could report 200 with
+`app_state` present but `provider_attempts`/`api_keys` absent, while `/usage`
+returned 503. A failing test preceded the fix; health now requires all eight
+D1 tables used by its currently routed slice. The local workerd HTTP driver
+passed again after byte-syncing Server modules. This checks table presence,
+not complete schema migration or other product endpoints.
+Selected HTTP, billing, entitlement and D1 regression after the readiness fix:
+**170 passed, 15 subtests**. The candidate source sync check remained green.
+All `tests/test_product_*.py` suites then passed **198 tests, 8 subtests**
+after the shared usage DTO refactor.

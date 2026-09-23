@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import json
 from contextlib import closing
 from pathlib import Path
 import sqlite3
@@ -15,7 +17,9 @@ TABLES = (
     "billing_webhook_receipts",
     "processing_usage_buckets",
     "processing_usage_ledger",
+    "provider_attempts",
     "d1_command_guard",
+    "api_keys",
 )
 
 
@@ -29,6 +33,21 @@ def main() -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=os.environ.get("TEMP")) as directory:
         fixture, _, _ = seed(Path(directory) / "synthetic.db")
+        with fixture.store._immediate() as db:
+            db.execute("INSERT INTO app_state(name,payload,updated_at) VALUES('sessions',?,?)",
+                (json.dumps({"session-local": {"userId": "owner",
+                    "expiresAt": fixture.now + 86400}}), fixture.now))
+            db.execute("""CREATE TABLE IF NOT EXISTS api_keys(
+                id TEXT PRIMARY KEY,user_id TEXT NOT NULL,name TEXT NOT NULL,
+                key_prefix TEXT NOT NULL,key_hash TEXT NOT NULL UNIQUE,
+                scopes TEXT NOT NULL,expires_at INTEGER,restrictions TEXT NOT NULL,
+                created_at INTEGER NOT NULL,last_used_at INTEGER,revoked_at INTEGER)""")
+            token = "pwk_local_http_test"
+            db.execute("INSERT INTO api_keys VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                ("key-local", "owner", "Synthetic", token[:16],
+                 hashlib.sha256(token.encode()).hexdigest(),
+                 '["profile:read","usage:read"]', fixture.now + 86400,
+                 "{}", fixture.now, None, None))
         with closing(fixture.store.connect()) as db:
             statements = []
             for table in TABLES:

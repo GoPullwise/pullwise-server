@@ -83,6 +83,16 @@ mounted. Local Wrangler 4.136.3 with the synthetic `remote: false` D1 verified
 signature rejection, acceptance, replay and real process restart; account
 revision remained 3 and projection clean. This is still not a remote Server
 deployment or CF2 pass.
+The candidate now also serves `/api/v1/me` and `/api/v1/usage` from persisted
+Cookie sessions or hashed API-key rows with required read scopes. It rejects
+mixed/expired/restricted credentials, projects usage from current D1 bucket,
+ledger and owner-cycle provider attempts through the same pure entitlement
+DTO builder as local Server, and performs no D1 batch write or model call on
+GET. A synthetic local Workerd HTTP run and real process restart passed;
+read-only D1 inspection found `last_used_at=NULL`, zero provider attempts and
+unchanged payment revision on replay. This is a narrow read slice: full
+session/API-key lifecycle, resource authorization and remaining product-v1
+REST routes are not migrated.
 
 The finite local mapping now has `account_entitlement_authority` and
 `d1_claim_authority`. A previously accepted synthetic event updates the matching

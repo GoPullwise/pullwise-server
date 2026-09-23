@@ -9,6 +9,7 @@ from .cloudflare_creem_handler import (
     accept_signed_creem_webhook,
 )
 from .creem_signature import verify_creem_signature
+from .cloudflare_product_read import read_product
 
 
 def _header(headers: Mapping[str, object], name: str) -> str:
@@ -26,14 +27,23 @@ async def handle_http_request(*, method: str, path: str,
                               configured_products: dict, now: int) -> tuple[int, dict]:
     if method == "GET" and path == "/health":
         try:
-            row = await binding.prepare("""SELECT 1 AS ok FROM sqlite_master
-                WHERE type='table' AND name='app_state'""").first()
-            if row and row.get("ok") == 1:
+            row = await binding.prepare("""SELECT COUNT(*) AS table_count FROM sqlite_master
+                WHERE type='table' AND name IN ('app_state','account_entitlement_authority',
+                    'billing_webhook_receipts','processing_usage_buckets',
+                    'processing_usage_ledger','provider_attempts','api_keys',
+                    'd1_command_guard')""").first()
+            if row and row.get("table_count") == 8:
                 return 200, {"ok": True, "service": "pullwise-server",
                              "database": {"type": "d1", "configured": True}}
         except Exception:
             pass
         return 503, {"ok": False, "service": "pullwise-server"}
+    if method == "GET" and path in {"/api/v1/me", "/api/v1/usage"}:
+        try:
+            return await read_product(binding=binding, path=path,
+                headers=headers, now=now)
+        except Exception:
+            return 503, {"error": {"code": "SERVER_UNAVAILABLE"}}
     if method != "POST" or path != "/webhooks/creem":
         return 404, {"error": {"code": "NOT_FOUND"}}
     if not isinstance(creem_secret, str) or not creem_secret or not isinstance(configured_products, dict):

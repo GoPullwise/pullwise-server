@@ -23,6 +23,9 @@ class Default(WorkerEntrypoint):
         headers = {
             "Content-Length": request.headers.get("content-length") or "",
             "creem-signature": request.headers.get("creem-signature") or "",
+            "Cookie": request.headers.get("cookie") or "",
+            "Authorization": request.headers.get("authorization") or "",
+            "X-Pullwise-Api-Key": request.headers.get("x-pullwise-api-key") or "",
         }
         status, payload = await handle_http_request(
             method=request.method,

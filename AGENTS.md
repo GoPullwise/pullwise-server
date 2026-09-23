@@ -29,7 +29,8 @@ revision; pending or incomplete assessment must not silently close an item.
 - `account_cycle_rules.py` and `product_entitlement_rules.py` own the pure
   monthly cycle and product entitlement rules. `quota.py` and
   `entitlements.py` re-export them for existing Server callers; the local
-  Python Worker packages those same pure modules for live reprojection.
+  Python Worker packages those same pure modules for live reprojection and
+  the exact product-v1 usage DTO from saved bucket/attempt counts.
 - `cloudflare_account_adapter.py` submits Server-owned D1 account commands
   through one async `batch()` after reading persisted snapshots. Every batch
   rechecks those snapshots; separate awaits do not form a transaction. The
@@ -110,10 +111,16 @@ revision; pending or incomplete assessment must not silently close an item.
   through the in-memory users map. Cloudflare REST adaptation must map all
   three seams while preserving the same Cookie/API-key contract and DTOs.
 - `cloudflare/server` is a separate **local-only candidate** for the actual
-  Server Python Worker HTTP entry. `src/entry.py` routes only read-only
-  `/health` and raw-byte `POST /webhooks/creem` through Server-owned
-  `cloudflare_http_contract.py`; unported product routes return 404. Its
-  Wrangler config has no cron/public route, uses a synthetic `remote: false`
+  Server Python Worker HTTP entry. `src/entry.py` routes read-only `/health`,
+  authenticated `GET /api/v1/me` and `/api/v1/usage`, and raw-byte
+  `POST /webhooks/creem` through Server-owned modules; unported product routes
+  return 404. `cloudflare_product_read.py` checks persisted Cookie sessions
+  and hashed API keys, rejects mixed/expired/restricted identities, and reads
+  saved usage without Jev or a D1 write. The candidate does not update API-key
+  last-used metadata on every GET; define a bounded policy before migration.
+  Its read-only health checks presence of the eight D1 tables required by
+  currently routed endpoints; it is not a full schema/migration readiness gate.
+  Its Wrangler config has no cron/public route, uses a synthetic `remote: false`
   D1 ID, and must not be deployed. Sync exact Server modules into its ignored
   `src/pullwise_server` before running. The local candidate passed a real
   process restart and webhook replay; this does not validate remote runtime,

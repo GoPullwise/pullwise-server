@@ -34,3 +34,26 @@ def entitlements_for_user(user: dict[str, Any] | None, *, timestamp: int | None 
         "resetAt": reset_at,
         "entitlements": dict(PLAN_ENTITLEMENTS[plan]),
     }
+
+
+def product_usage_payload_from_usage(
+    user: dict[str, Any], usage: dict, runtime_used: int,
+    *, timestamp: int | None = None,
+) -> dict:
+    entitlement = entitlements_for_user(user, timestamp=timestamp)
+    processing_limit = entitlement["entitlements"]["monthlyProcessingLimit"]
+    usage = {**usage, "limit": processing_limit,
+             "remaining": max(0, processing_limit - usage["used"] - usage["reserved"]),
+             "resetAt": entitlement["resetAt"]}
+    return {
+        "service": "github_followups",
+        "plan": entitlement["plan"],
+        "entitlements": entitlement["entitlements"],
+        "usage": usage,
+        "runtimeUsage": {
+            "metric": "provider_attempts",
+            "used": runtime_used,
+            "limit": processing_limit * 3,
+            "resetAt": entitlement["resetAt"],
+        },
+    }

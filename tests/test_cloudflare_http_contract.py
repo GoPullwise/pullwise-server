@@ -58,6 +58,8 @@ def test_candidate_webhook_rejects_bad_body_before_d1_and_hides_errors(tmp_path)
 
 def test_candidate_worker_has_read_only_health_and_no_fake_product_api(tmp_path):
     fixture, _, _ = seed(tmp_path / "domain.db")
+    with fixture.store._immediate() as db:
+        db.execute("CREATE TABLE api_keys(id TEXT PRIMARY KEY,key_hash TEXT)")
     binding = D1ShapedSQLite(fixture.store)
     before = binding.batch_count
     (status, health), reads = _request(binding, method="GET", path="/health")
@@ -65,6 +67,22 @@ def test_candidate_worker_has_read_only_health_and_no_fake_product_api(tmp_path)
     assert reads == [] and binding.batch_count == before
     (status, payload), reads = _request(binding, method="GET", path="/api/v1/items")
     assert status == 404 and reads == [] and binding.batch_count == before
+
+
+def test_health_rejects_incomplete_d1_auth_schema(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    binding = D1ShapedSQLite(fixture.store)
+    status, payload = _get_health(binding)
+    assert status == 503 and payload["ok"] is False
+
+
+def _get_health(binding):
+    async def no_body():
+        raise AssertionError("health must not read a body")
+
+    return asyncio.run(handle_http_request(method="GET", path="/health",
+        headers={}, read_body=no_body, binding=binding,
+        creem_secret="", configured_products={}, now=1800000000))
 
 
 def test_candidate_webhook_rejects_missing_config_and_malformed_signed_json(tmp_path):

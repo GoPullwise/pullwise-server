@@ -13,6 +13,7 @@ MODULES = (
     "cloudflare_d1_batch",
     "cloudflare_d1_mapping",
     "cloudflare_http_contract",
+    "cloudflare_product_read",
     "cloudflare_webhook_receipts",
     "creem_event_rules",
     "creem_signature",
