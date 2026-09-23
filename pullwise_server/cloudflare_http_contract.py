@@ -14,6 +14,7 @@ from .cloudflare_product_read import read_product, patch_item, patch_watch, dele
 from .cloudflare_api_key_read import list_api_keys
 from .cloudflare_api_key_write import revoke_api_key, create_api_key
 from .cloudflare_billing_read import read_billing
+from .cloudflare_billing_catalog import read_public_plan
 
 
 def _header(headers: Mapping[str, object], name: str) -> str:
@@ -43,8 +44,9 @@ async def handle_http_request(*, method: str, path: str,
                     'source_contexts','source_assessment_publications',
                     'items','item_versions','item_handling_events',
                     'background_jobs','repository_services',
-                    'processing_controls','discovery_targets')""").first()
-            if row and row.get("table_count") == 21:
+                    'processing_controls','discovery_targets',
+                    'billing_public_catalog')""").first()
+            if row and row.get("table_count") == 22:
                 return 200, {"ok": True, "service": "pullwise-server",
                              "database": {"type": "d1", "configured": True}}
         except Exception:
@@ -60,6 +62,11 @@ async def handle_http_request(*, method: str, path: str,
             return await read_billing(binding=binding, headers=headers, now=now)
         except Exception:
             return 503, {"error": {"code": "SERVER_UNAVAILABLE"}}
+    if method == "GET" and path == "/billing/plan":
+        try:
+            return await read_public_plan(binding=binding, headers=headers, now=now)
+        except Exception:
+            return 503, {"error": {"code": "BILLING_CATALOG_UNAVAILABLE"}}
     if method == "POST" and path == "/api-keys":
         if cookie_same_site.casefold() == "none" and _cookie_sessions(headers):
             claimed_origin = _header(headers, "Origin") or _header(headers, "Referer")

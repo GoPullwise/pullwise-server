@@ -127,8 +127,24 @@ revision; pending or incomplete assessment must not silently close an item.
   subscription-history shape for local and candidate. Candidate Cookie-only
   `/billing` batches current principal, product usage and recent consumed
   history in one D1 read snapshot, sends no-store, and rejects API keys.
-  Public `/billing/plan` and provider checkout/account writes still require
-  full CF2 adaptation.
+  Candidate `/billing/plan` reads a fresh trusted `billing_public_catalog`
+  D1 projection, strips old scan/model fields and overlays current
+  `PLAN_ENTITLEMENTS`. Anonymous reads are public; a valid Cookie adds account
+  data in the same batch, and a revoked Cookie cannot disclose it. Missing or
+  expired catalog returns 503, never fake paid prices. Trusted local-only
+  `D1BillingCatalogTransactions.stage_verified_catalog` requires a complete
+  three-plan shape and monotonic sourceRevision, publishes atomically after
+  caller-verified provider data, rejects stale prices and skips identical
+  replay. Real Creem product fetch/binding, refresh trigger and provider
+  checkout/account writes still require CF2 adaptation.
+  `creem_public_catalog_rules.verified_public_catalog` validates an injected
+  fetched-product set against configured IDs, active recurring month/year
+  periods, positive integer cent prices and one currency before trusted D1
+  staging. Never stage a provider response by product position or infer a
+  missing/malformed product as configured. No live Creem fetch is wired.
+  `product_public_catalog_rules.catalog_payload` is shared by the D1 catalog
+  writer and GET reader for completeness/expiry and current entitlements;
+  Pro/Max default public descriptions match local Billing projection.
 - `product_dto_rules.source_context_dto` and `source_record_dto` own the
   exact SQLite/D1 Source projection. Candidate `/api/v1/sources` list/detail
   prepends API-key, session and user SELECTs to the four Source/publication/
@@ -276,7 +292,7 @@ revision; pending or incomplete assessment must not silently close an item.
   product rows. Usage bucket, ledger and owner-cycle attempts share one
   read-only batch. The candidate does not update API-key
   last-used metadata on every GET; define a bounded policy before migration.
-  Its read-only health checks presence of the 21 D1 tables required by
+  Its read-only health checks presence of the 22 D1 tables required by
   currently routed endpoints; it is not a full schema/migration readiness gate.
   Its Wrangler config has no cron/public route, uses a synthetic `remote: false`
   D1 ID, and must not be deployed. Sync exact Server modules into its ignored

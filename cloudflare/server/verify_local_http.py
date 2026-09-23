@@ -41,6 +41,17 @@ def call(path, *, raw=None, signature=None, extra_headers=None, method=None,
 
 def main():
     same_site_none = "--same-site-none" in sys.argv
+    if "--catalog-only" in sys.argv:
+        status, public = call("/billing/plan")
+        assert status == 200 and public["enabled"] is False
+        assert [plan["id"] for plan in public["plans"]] == ["free", "pro", "max"]
+        assert "account" not in public
+        status, account = call("/billing/plan", extra_headers={
+            "Cookie": "pw_session=session-local"})
+        assert status == 200 and account["account"]["plan"] == "pro"
+        assert account["plans"][1]["entitlements"]["monthlyProcessingLimit"] == 5000
+        print("Local Server Worker public/Cookie Billing catalog read passed")
+        return
     if "--key-create-only" in sys.argv:
         status, before = call("/api-keys", extra_headers={
             "Cookie": "pw_session=session-local"})
@@ -96,6 +107,14 @@ def main():
         print("Local Server Worker API-key revocation and Origin guard passed")
         return
     if "--watch-only" in sys.argv:
+        status, public_plan = call("/billing/plan")
+        assert status == 200 and public_plan["enabled"] is False
+        assert [plan["id"] for plan in public_plan["plans"]] == ["free", "pro", "max"]
+        assert public_plan["plans"][1]["entitlements"]["monthlyProcessingLimit"] == 5000
+        assert "account" not in public_plan
+        status, personal_plan = call("/billing/plan", extra_headers={
+            "Cookie": "pw_session=session-local"})
+        assert status == 200 and personal_plan["account"]["plan"] == "pro"
         status, billing, billing_headers = call("/billing", extra_headers={
             "Cookie": "pw_session=session-local"}, return_headers=True)
         assert status == 200 and billing["account"]["plan"] == "pro"

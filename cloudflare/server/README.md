@@ -7,6 +7,7 @@ session-only `GET /api-keys` for redacted owner API-key metadata,
 session-only `DELETE /api-keys/{id}` for guarded revocation,
 session-only `POST /api-keys` for one-time token issuance,
 session-only `GET /billing` for product usage and saved payment history,
+public `GET /billing/plan` from a fresh trusted D1 catalog projection,
 `GET /api/v1/watches/{id}`,
 `GET /api/v1/sources` and `GET /api/v1/sources/{id}`, and
 `GET /api/v1/items`, `GET /api/v1/items/{id}`, `GET /api/v1/items/overview` and
@@ -50,7 +51,11 @@ Billing GET rechecks Cookie/user with usage bucket, consumed module counts,
 owner-cycle attempts and the newest 20 successful processing events in one
 read-only D1 batch. It shares the pure account/payment DTO with local Server,
 preserves subscription history, sends no-store and rejects API keys. Public
-`/billing/plan` and payment-provider mutations remain unported.
+plan GET never calls Creem: it requires a non-expired verified catalog row,
+overlays shared product capacities, and adds a Cookie account from the same
+D1 snapshot only when authority remains current. Missing/stale catalog
+returns 503. The local fixture contains only synthetic disabled pricing;
+trusted live catalog refresh and payment-provider mutations remain unported.
 The watch list uses the same Server-owned DTO projection as ProductStore,
 filters to the current billing owner, and applies API-key `watchIds` scope.
 Source list/detail rechecks the API key or Cookie session and stored user in
@@ -94,13 +99,13 @@ if (-not (Test-Path cloudflare/server/python_modules)) {
 $env:TEMP='F:/Pullwise/.test-tmp/discovery'
 $env:TMP=$env:TEMP
 D:/Python313/python.exe cloudflare/server/export_local_fixture.py
-node cloudflare/probe/node_modules/wrangler/wrangler-dist/cli.js d1 execute pullwise-cf1-local-only --config cloudflare/server/wrangler.jsonc --local --persist-to cloudflare/server/.wrangler/server-http-watch-cascade-state --file cloudflare/server/.wrangler/local-seed.sql
+node cloudflare/probe/node_modules/wrangler/wrangler-dist/cli.js d1 execute pullwise-cf1-local-only --config cloudflare/server/wrangler.jsonc --local --persist-to cloudflare/server/.wrangler/server-http-catalog-state --file cloudflare/server/.wrangler/local-seed.sql
 ```
 
 Start the Worker with **synthetic** test values and run its local HTTP driver:
 
 ```powershell
-node cloudflare/probe/node_modules/wrangler/wrangler-dist/cli.js dev --config cloudflare/server/wrangler.jsonc --local --ip 127.0.0.1 --port 8797 --persist-to cloudflare/server/.wrangler/server-http-watch-cascade-state --var='PULLWISE_CREEM_WEBHOOK_SECRET:synthetic-secret' --var='PULLWISE_CREEM_PRODUCT_IDS_JSON:{}' --var='PULLWISE_COOKIE_SAME_SITE:None' --var='PULLWISE_ALLOWED_ORIGINS:http://127.0.0.1:5173'
+node cloudflare/probe/node_modules/wrangler/wrangler-dist/cli.js dev --config cloudflare/server/wrangler.jsonc --local --ip 127.0.0.1 --port 8797 --persist-to cloudflare/server/.wrangler/server-http-catalog-state --var='PULLWISE_CREEM_WEBHOOK_SECRET:synthetic-secret' --var='PULLWISE_CREEM_PRODUCT_IDS_JSON:{}' --var='PULLWISE_COOKIE_SAME_SITE:None' --var='PULLWISE_ALLOWED_ORIGINS:http://127.0.0.1:5173'
 D:/Python313/python.exe cloudflare/server/verify_local_http.py --watch-only --delete-watch --same-site-none
 ```
 

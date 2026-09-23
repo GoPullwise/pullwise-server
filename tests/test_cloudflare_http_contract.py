@@ -30,6 +30,11 @@ def _request(binding, *, method, path, raw=b"", signature=None, secret="syntheti
     return result, reads
 
 
+def _seed_health_read_tables(db):
+    db.execute("CREATE TABLE api_keys(id TEXT PRIMARY KEY,key_hash TEXT)")
+    db.execute("CREATE TABLE billing_public_catalog(id INTEGER PRIMARY KEY)")
+
+
 def test_candidate_webhook_uses_raw_signature_and_existing_ack_shape(tmp_path):
     fixture, _, _ = seed(tmp_path / "domain.db")
     binding = D1ShapedSQLite(fixture.store)
@@ -60,7 +65,7 @@ def test_candidate_webhook_rejects_bad_body_before_d1_and_hides_errors(tmp_path)
 def test_candidate_worker_has_read_only_health_and_no_unported_product_api(tmp_path):
     fixture, _, _ = seed(tmp_path / "domain.db")
     with fixture.store._immediate() as db:
-        db.execute("CREATE TABLE api_keys(id TEXT PRIMARY KEY,key_hash TEXT)")
+        _seed_health_read_tables(db)
     binding = D1ShapedSQLite(fixture.store)
     before = binding.batch_count
     (status, health), reads = _request(binding, method="GET", path="/health")
@@ -80,7 +85,7 @@ def test_health_rejects_incomplete_d1_auth_schema(tmp_path):
 def test_health_rejects_missing_watch_table_for_routed_reads(tmp_path):
     fixture, _, _ = seed(tmp_path / "domain.db")
     with fixture.store._immediate() as db:
-        db.execute("CREATE TABLE api_keys(id TEXT PRIMARY KEY,key_hash TEXT)")
+        _seed_health_read_tables(db)
         db.execute("DROP TABLE update_watches")
     status, payload = _get_health(D1ShapedSQLite(fixture.store))
     assert status == 503 and payload["ok"] is False
@@ -89,7 +94,7 @@ def test_health_rejects_missing_watch_table_for_routed_reads(tmp_path):
 def test_health_rejects_missing_source_table_for_routed_reads(tmp_path):
     fixture, _, _ = seed(tmp_path / "domain.db")
     with fixture.store._immediate() as db:
-        db.execute("CREATE TABLE api_keys(id TEXT PRIMARY KEY,key_hash TEXT)")
+        _seed_health_read_tables(db)
         db.execute("DROP TABLE source_assessment_publications")
     status, payload = _get_health(D1ShapedSQLite(fixture.store))
     assert status == 503 and payload["ok"] is False
@@ -98,7 +103,7 @@ def test_health_rejects_missing_source_table_for_routed_reads(tmp_path):
 def test_health_rejects_missing_item_table_for_routed_reads(tmp_path):
     fixture, _, _ = seed(tmp_path / "domain.db")
     with fixture.store._immediate() as db:
-        db.execute("CREATE TABLE api_keys(id TEXT PRIMARY KEY,key_hash TEXT)")
+        _seed_health_read_tables(db)
         db.execute("DROP TABLE item_handling_events")
     status, payload = _get_health(D1ShapedSQLite(fixture.store))
     assert status == 503 and payload["ok"] is False
@@ -107,7 +112,7 @@ def test_health_rejects_missing_item_table_for_routed_reads(tmp_path):
 def test_health_rejects_missing_job_table_for_routed_reads(tmp_path):
     fixture, _, _ = seed(tmp_path / "domain.db")
     with fixture.store._immediate() as db:
-        db.execute("CREATE TABLE api_keys(id TEXT PRIMARY KEY,key_hash TEXT)")
+        _seed_health_read_tables(db)
         db.execute("DROP TABLE background_jobs")
     status, payload = _get_health(D1ShapedSQLite(fixture.store))
     assert status == 503 and payload["ok"] is False
@@ -116,8 +121,16 @@ def test_health_rejects_missing_job_table_for_routed_reads(tmp_path):
 def test_health_rejects_missing_repository_service_table_for_job_reads(tmp_path):
     fixture, _, _ = seed(tmp_path / "domain.db")
     with fixture.store._immediate() as db:
-        db.execute("CREATE TABLE api_keys(id TEXT PRIMARY KEY,key_hash TEXT)")
+        _seed_health_read_tables(db)
         db.execute("DROP TABLE repository_services")
+    status, payload = _get_health(D1ShapedSQLite(fixture.store))
+    assert status == 503 and payload["ok"] is False
+
+
+def test_health_rejects_missing_public_billing_catalog(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    with fixture.store._immediate() as db:
+        db.execute("CREATE TABLE api_keys(id TEXT PRIMARY KEY,key_hash TEXT)")
     status, payload = _get_health(D1ShapedSQLite(fixture.store))
     assert status == 503 and payload["ok"] is False
 
@@ -126,7 +139,7 @@ def test_health_rejects_missing_repository_service_table_for_job_reads(tmp_path)
 def test_health_rejects_missing_watch_write_table(tmp_path, table):
     fixture, _, _ = seed(tmp_path / "domain.db")
     with fixture.store._immediate() as db:
-        db.execute("CREATE TABLE api_keys(id TEXT PRIMARY KEY,key_hash TEXT)")
+        _seed_health_read_tables(db)
         db.execute(f'DROP TABLE "{table}"')
     status, payload = _get_health(D1ShapedSQLite(fixture.store))
     assert status == 503 and payload["ok"] is False

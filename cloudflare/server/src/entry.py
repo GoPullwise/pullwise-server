@@ -52,7 +52,7 @@ class Default(WorkerEntrypoint):
             return Response(None, status=status)
         response_headers = ({"Cache-Control": "no-store", "Pragma": "no-cache",
             "Vary": "Cookie, Authorization, X-Pullwise-Api-Key"}
-            if path == "/billing" or path == "/api-keys"
+            if path in {"/billing", "/billing/plan", "/api-keys"}
                or path.startswith("/api-keys/") else None)
         if (status == 200 and isinstance(payload, dict)
                 and type(payload.get("revision")) is int

@@ -33,6 +33,7 @@ TABLES = (
     "repository_services",
     "processing_controls",
     "discovery_targets",
+    "billing_public_catalog",
 )
 
 
@@ -42,6 +43,7 @@ def main() -> None:
     sys.path.insert(0, str(server_root / "tests"))
     from test_cloudflare_server_mapping import seed
     from pullwise_server.product_jobs import ProductJobScheduler
+    from pullwise_server.product_entitlement_rules import PLAN_ENTITLEMENTS
 
     output = Path(__file__).resolve().parent / ".wrangler" / "local-seed.sql"
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -55,6 +57,20 @@ def main() -> None:
             upstream_repository_id="github:102", billing_owner_id="owner",
             interests=["database"], enabled=True, analysis_enabled=False)
         with fixture.store._immediate() as db:
+            db.execute("""CREATE TABLE billing_public_catalog(
+                id INTEGER PRIMARY KEY CHECK(id=1),payload_json TEXT NOT NULL,
+                expires_at INTEGER NOT NULL,source_revision INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL)""")
+            catalog = {"provider": "disabled", "enabled": False,
+                "currency": "USD", "plans": [
+                    {"id": plan, "name": plan.title(),
+                     "entitlements": dict(PLAN_ENTITLEMENTS[plan]),
+                     "prices": {"month": {"amount": "0" if plan == "free" else None,
+                                          "currency": "USD", "interval": "month",
+                                          "configured": plan == "free"}}}
+                    for plan in ("free", "pro", "max")]}
+            db.execute("INSERT INTO billing_public_catalog VALUES(1,?,?,1,?)",
+                (json.dumps(catalog), fixture.now + 3600, fixture.now))
             db.execute("UPDATE source_contexts SET watch_id=? WHERE source_id='1'",
                 (first_watch["id"],))
             db.execute("""INSERT INTO processing_usage_buckets(

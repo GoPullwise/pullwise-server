@@ -1982,6 +1982,55 @@ processing records before and after restart in `server-http-usage-cursor-state`;
 API-key billing read returned 401. A 30-second cold-start request timed out
 on the first restart call; the ready Worker passed on retry. Public
 `/billing/plan`, checkout, subscription mutations and full CF2 remain open.
+
+## Candidate public Billing plan read (2026-09-23 continuation)
+
+Candidate `GET /billing/plan` now reads a trusted public catalog projection
+from D1 and overlays current `PLAN_ENTITLEMENTS`. It returns 503 for a missing
+or expired catalog, and never supplies invented paid prices. Anonymous reads
+stay public; Cookie account/usage/history is included only after authority is
+rechecked in the same batch. Missing-route and missing-health-table tests
+failed first, then focused catalog/Billing/HTTP tests passed **20 tests**.
+The synthetic local fixture declares the 22nd readiness table and stores a
+disabled three-plan catalog, not real Creem configuration. Local workerd/D1
+passed anonymous and Cookie plan reads before/after restart in
+`server-http-catalog-state`; an initial 30-second cold-start read timed out,
+then the ready Worker passed. Public plan GET never called Creem or wrote D1.
+Verified catalog refresh, checkout and real payment writers remain CF2 work.
+
+## Trusted Billing catalog publication mapping (2026-09-24 continuation)
+
+`D1BillingCatalogTransactions.stage_verified_catalog` now accepts a trusted
+complete three-plan public catalog and monotonic sourceRevision. It CASes the
+saved row in one D1 batch, rejects older or concurrently changed versions,
+and avoids a D1 write for identical replay. Missing-module tests failed
+first, then two SQLite tests passed. The isolated local workerd/D1 driver
+passed synthetic price revision 1→2, stale rejection and real restart in
+`server-map-catalog-state`; port 8796 was stopped. No real Creem fetch,
+payment secret, provider price update, cron or remote D1 was used. A trusted
+provider catalog verifier and refresh trigger remain required before paid
+pricing can be served from this projection.
+The catalog preparation now has a pure injected-product verifier, based on
+Creem's [product entity contract](https://docs.creem.io/skills/creem-api/REFERENCE):
+configured ID, active recurring month/year period, positive integer cents,
+unique binding and consistent ISO currency must all match before public
+projection. Four pure tests and a `stage_from_products` D1 mapping test passed.
+The isolated local workerd driver staged synthetic verified products at
+revisions 1→2 and passed stale/restart checks in fresh
+`server-map-catalog-verified-state`; port 8796 was stopped. No provider network,
+real product ID or payment configuration was touched.
+The public catalog read validator was extracted into shared pure
+`product_public_catalog_rules` so the trusted writer and candidate GET use
+identical completeness/expiry/entitlement projection. A parity test first
+found the Max default description drift from local Billing and was fixed.
+The focused Creem/catalog tests passed **7 tests**. After repackaging exact
+Server modules, real local workerd `/billing/plan` public and Cookie reads
+passed before/after restart on the preserved synthetic
+`server-http-catalog-state` without D1 writes or Creem network access.
+The current Server CI target selection after the public catalog read/write
+and injected Creem product verifier passes **717 tests, 68 subtests** locally.
+Web remains at **616 tests** plus lint/build and the 390px browser check.
+Server and Web are unpushed; remote CI still reflects the older checkout.
 The current Server CI target selection including pure Billing projection and
 candidate `/billing` passes **706 tests, 68 subtests** locally. Web's latest
 `npm run check` remains **616 tests** plus lint/build, with the 390px browser

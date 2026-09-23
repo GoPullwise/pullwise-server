@@ -54,6 +54,7 @@ class Default(WorkerEntrypoint):
         from pullwise_server.cloudflare_watch_adapter import D1WatchTransactions
         from pullwise_server.cloudflare_session_adapter import D1SessionTransactions
         from pullwise_server.cloudflare_oauth_state_adapter import D1OAuthStates
+        from pullwise_server.cloudflare_billing_catalog_write import D1BillingCatalogTransactions
         from pullwise_server import creem_event_rules
         import server_mapping as mapping
         name = url.path.removeprefix('/server-map/')
@@ -65,6 +66,14 @@ class Default(WorkerEntrypoint):
             row = await self.env.DB.prepare("SELECT payload FROM app_state WHERE name='githubStates'").first()
             states = json.loads(row['payload']) if row else {}
             return Response.json({'count': len(states), 'syntheticPresent': 'state-synthetic' in states})
+        if request.method == 'GET' and name == 'billing-catalog-state':
+            row = await self.env.DB.prepare("""SELECT payload_json,source_revision
+                FROM billing_public_catalog WHERE id=1""").first()
+            if row is None:
+                return Response.json({'revision': 0, 'amount': None})
+            catalog = json.loads(row['payload_json'])
+            return Response.json({'revision': row['source_revision'],
+                'amount': catalog['plans'][1]['prices']['month']['amount']})
         if request.method == 'GET' and name == 'watch-state':
             row = await self.env.DB.prepare('''SELECT
                 (SELECT COUNT(*) FROM update_watches WHERE archived_at IS NULL) AS active,
@@ -158,6 +167,22 @@ class Default(WorkerEntrypoint):
                     'redirectTo': record['redirectTo']})
             except Exception:
                 return Response.json({'error': 'oauth state rejected'}, status=409)
+        if name in {'billing-catalog-stage-1', 'billing-catalog-stage-2'}:
+            revision = 1 if name.endswith('-1') else 2
+            product = {'id': 'prod-pro-month', 'name': 'Pullwise Pro',
+                'description': 'PR CI Updates',
+                'price': 2900 if revision == 1 else 3000,
+                'currency': 'USD', 'billing_type': 'recurring',
+                'billing_period': 'every-month', 'status': 'active'}
+            try:
+                changed = await D1BillingCatalogTransactions(self.env.DB).stage_from_products(
+                    configured_ids={'pro': ['prod-pro-month'], 'max': []},
+                    fetched_products={'prod-pro-month': product},
+                    source_revision=revision,
+                    now=DATA['claim']['now'], expires_at=DATA['claim']['now'] + 3600)
+                return Response.json({'changed': changed})
+            except Exception:
+                return Response.json({'error': 'catalog stage rejected'}, status=409)
         if name == 'session-revoke':
             try:
                 revoked = await D1SessionTransactions(self.env.DB).revoke_session(

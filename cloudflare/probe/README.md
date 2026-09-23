@@ -22,6 +22,13 @@ The same driver now also issues a synthetic GitHub login state, survives a
 real restart, consumes it once and rejects replay. Use a fresh
 `.wrangler/server-map-oauth-state` for this combined session/OAuth-state probe;
 no GitHub network call or real identity is used.
+`verify_catalog_mapping.py` exercises another trusted-only command: stage a
+synthetic three-plan public price catalog at revision 1, advance to 2, reject
+stale revision 1, then restart local workerd/D1 and confirm revision 2 and
+idempotent replay. The current driver calls `stage_from_products` with
+synthetic product entities bound to configured IDs and uses a fresh
+`.wrangler/server-map-catalog-verified-state`; no real
+Creem product, secret, price configuration or remote resource is used.
 
 This is a **local experiment, not the Server deployment or a production adapter**.
 The user approved the isolated validation dependencies in this session. No real

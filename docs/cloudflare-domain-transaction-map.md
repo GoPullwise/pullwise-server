@@ -284,6 +284,40 @@ reserved usage and two historical processing events before and after a real
 restart in `server-http-usage-cursor-state`. One cold-start request timed out
 at 30 seconds, then the ready Worker returned the same result. Public plan,
 checkout and production account writers are still unported.
+The candidate now also reads a trusted `billing_public_catalog` D1 row for
+`GET /billing/plan`. Its expiry/revision and complete three-plan shape gate
+the response; current product entitlements are overlaid from the shared pure
+rules. Anonymous requests receive only public pricing. A Cookie request adds
+account/payment history using the same D1 batch, and a revoked Cookie loses
+that private addition. No GET contacts Creem or writes D1. The local fixture
+contains synthetic disabled prices only. Local workerd passed anonymous and
+Cookie reads before/after restart in `server-http-catalog-state`. One first
+restart read exceeded the 30-second local cold-start deadline, then passed
+after readiness. A trusted provider catalog updater and real price/source
+binding remain CF2 work.
+Trusted local `D1BillingCatalogTransactions.stage_verified_catalog` now
+publishes a complete three-plan public catalog under monotonic sourceRevision
+with one D1 CAS batch, bounded expiry and no-op identical replay. Local
+SQLite tests covered stale/concurrent revision rejection; the isolated
+`server-map-catalog-state` workerd/D1 probe passed revision 1→2, stale
+rejection and restart. The caller still must verify real Creem product IDs,
+amounts/currency and configured status before staging; no refresh schedule,
+secret or production price was connected.
+An injected-product verifier now checks configured product ID equality,
+active recurring `every-month`/`every-year`, positive integer cent prices,
+unique plan/interval bindings and one currency before building the public
+catalog. It follows Creem's [product entity fields](https://docs.creem.io/skills/creem-api/REFERENCE)
+without making a live request. `D1BillingCatalogTransactions.stage_from_products`
+composes that verifier with monotonic CAS. Four pure failure/success tests and
+the isolated local workerd revision/restart driver passed using synthetic
+products in `server-map-catalog-verified-state`. Real configured IDs,
+credentials and provider fetching are still disconnected.
+`product_public_catalog_rules` now supplies one pure completeness/expiry/
+entitlement projection to both trusted writer and GET reader. It was checked
+against local Billing's Pro/Max public price DTO for the same synthetic
+product facts; the isolated candidate Worker still returned the expected
+anonymous/Cookie catalog after exact module sync and a real restart under
+`server-http-catalog-state`.
 Trusted session issuance/revocation has a separate `D1SessionTransactions`
 mapping. It reads the storage-form user and sessions map, then performs an
 exact-snapshot CAS with a `changes()=1` guard so a concurrent session cannot
