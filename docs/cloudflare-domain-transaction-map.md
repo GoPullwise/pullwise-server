@@ -162,6 +162,13 @@ active repository-service owner state in that batch. Archived watch status is
 hidden. Member repository sync remains unmapped and is denied locally until
 current repository authorization can be proven. This passed the synthetic
 `server-http-job-fence-state` restart probe.
+Follow-up focused tests found resource-restricted API keys could read a
+same-owner Job outside their `watchIds` or `repositoryIds`. A shared pure
+filter now gates local REST and D1 read projection after the current key is
+rechecked in that same snapshot. Shared-watch Jobs also require an active
+parent repository service. This was locally tested for watch, repository,
+both shared-watch dimensions, and parent disable; no model or D1 write is
+performed by GET.
 
 Profile, usage and watches now also append their response SELECTs to the
 three current principal SELECTs in one D1 read batch. Usage's bucket, module

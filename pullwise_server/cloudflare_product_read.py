@@ -20,6 +20,7 @@ from .cloudflare_watch_adapter import D1WatchTransactions
 from .product_source_filters import apply_source_restrictions, filter_sources
 from .product_item_filters import apply_item_restrictions, filter_items
 from .product_usage_events import parse_usage_events_query, usage_events_page
+from .product_job_filters import job_resource_allowed
 
 SESSION_COOKIE = "pw_session"
 API_KEY_PREFIX = "pwk_"
@@ -400,10 +401,19 @@ async def read_product(*, binding: Any, path: str, headers: Mapping[str, object]
         auth, validate = _resource_auth_snapshot(binding, headers, user,
             restrictions, now, "items:read")
         result = await binding.batch([*auth, binding.prepare("""SELECT id,job_type,
-            state,attempt,requester_id,
+            state,attempt,requester_id,logical_key,
+            CASE WHEN job_type='sync_watch' THEN
+                (SELECT w.target_repository_id FROM update_watches w
+                  WHERE w.id=substr(logical_key,length('sync_watch:')+1))
+            ELSE NULL END AS target_repository_id,
             CASE WHEN job_type='sync_watch' THEN EXISTS(
                 SELECT 1 FROM update_watches w WHERE w.id=substr(logical_key,length('sync_watch:')+1)
-                  AND w.billing_owner_id=? AND w.archived_at IS NULL)
+                  AND w.billing_owner_id=? AND w.archived_at IS NULL
+                  AND (w.target_repository_id IS NULL OR EXISTS(
+                    SELECT 1 FROM repository_services s
+                    WHERE s.repository_id=w.target_repository_id
+                      AND s.billing_owner_id=w.billing_owner_id
+                      AND s.enabled=1 AND s.status='active')))
             WHEN job_type='sync_repository' THEN EXISTS(
                 SELECT 1 FROM repository_services s
                 WHERE s.repository_id=substr(logical_key,length('sync_repository:')+1)
@@ -419,7 +429,11 @@ async def read_product(*, binding: Any, path: str, headers: Mapping[str, object]
         rows = result[-1].results
         job = rows[0] if len(rows) == 1 else None
         if (job is None or job["requester_id"] != user["id"] or not job["resource_access"]
-                or job["job_type"] not in {"sync_repository", "sync_watch"}):
+                or job["job_type"] not in {"sync_repository", "sync_watch"}
+                or not job_resource_allowed(job_type=job["job_type"],
+                    resource_id=job["logical_key"].split(":", 1)[1],
+                    target_repository_id=job["target_repository_id"],
+                    restrictions=restrictions)):
             return 404, {"error": {"code": "NOT_FOUND", "message": "Sync job was not found.",
                 "retryable": False}, "requestId": f"req_{uuid.uuid4().hex}"}
         return 200, {"id": job["id"], "operation": job["job_type"],

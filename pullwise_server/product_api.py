@@ -12,6 +12,7 @@ from . import db
 from .entitlements import product_usage_payload
 from .github_sources import resolve_upstream_repository
 from .product_jobs import ProductJobScheduler
+from .product_job_filters import job_resource_allowed
 from .product_store import ProductStore
 from .product_source_filters import apply_source_restrictions, filter_sources
 from .product_item_filters import apply_item_restrictions, filter_items, item_in_view
@@ -214,10 +215,27 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
         return True
     if len(segments) == 2 and segments[0] == "jobs":
         job = store.get_background_job(segments[1])
+        resource_id = (job["logicalKey"].split(":", 1)[1] if job and ":" in job["logicalKey"] else "")
+        watch = (store.get_watch(resource_id) if job and job["jobType"] == "sync_watch" else None)
+        parent = (store.get_repository_service(watch["targetRepositoryId"])
+                  if watch and watch["targetRepositoryId"] else None)
+        service = (store.get_repository_service(resource_id)
+                   if job and job["jobType"] == "sync_repository" else None)
         if (
             job is None
             or job.get("requesterId") != user_id
             or job.get("jobType") not in {"sync_repository", "sync_watch"}
+            or job["jobType"] == "sync_watch" and (
+                watch is None or watch["billingOwnerId"] != user_id
+                or watch["targetRepositoryId"] is not None and (
+                    parent is None or not parent["enabled"]
+                    or parent["billingOwnerId"] != user_id))
+            or job["jobType"] == "sync_repository" and (
+                service is None or not service["enabled"]
+                or service["billingOwnerId"] != user_id)
+            or not job_resource_allowed(job_type=job["jobType"], resource_id=resource_id,
+                target_repository_id=watch.get("targetRepositoryId") if watch else None,
+                restrictions=principal.get("restrictions") or {})
         ):
             _error(handler, HTTPStatus.NOT_FOUND, "NOT_FOUND", "Sync job was not found.")
             return True

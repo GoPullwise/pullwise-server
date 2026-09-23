@@ -757,6 +757,36 @@ class ProductApiRoutesTest(unittest.TestCase):
         self.assertEqual(session.payload["operation"], "sync_repository")
         self.assertEqual(self.store.count_jobs(job_type="analyze_source"), 0)
 
+    def test_sync_job_read_respects_api_key_resource_scope(self) -> None:
+        from pullwise_server.product_jobs import ProductJobScheduler
+        job = ProductJobScheduler(self.store).request_manual_sync(
+            resource_kind="watch", resource_id=self.watch["id"], requester_id="usr_1")
+        token = self.api_key(["items:read"], restrictions={"watchIds": ["another-watch"]})
+        handler = RouteHarness(f"/api/v1/jobs/{job['id']}",
+            headers={"Authorization": f"Bearer {token}"})
+        app.PullwiseHandler.route(handler, "GET")
+        self.assertEqual(handler.status, HTTPStatus.NOT_FOUND)
+
+    def test_sync_job_read_hides_disabled_repository_service(self) -> None:
+        from pullwise_server.product_jobs import ProductJobScheduler
+        self.store.put_repository_service(repository_id=self.repository["id"],
+            installation_id="111", billing_owner_id="usr_1", expected_revision=0,
+            enabled=True, modules={"pr": True, "ci": False},
+            analysis_enabled={"pr": False, "ci": False}, allow_member_sync=False,
+            default_assignee_id=None, priority_order=0)
+        job = ProductJobScheduler(self.store).request_manual_sync(
+            resource_kind="repository", resource_id=self.repository["id"], requester_id="usr_1")
+        path = f"/api/v1/jobs/{job['id']}"
+        current = RouteHarness(path, cookie=f"{app.SESSION_COOKIE}=ses_1")
+        app.PullwiseHandler.route(current, "GET")
+        self.assertEqual(current.status, HTTPStatus.OK)
+        with self.store._immediate() as connection:
+            connection.execute("UPDATE repository_services SET enabled=0,status='paused' WHERE repository_id=?",
+                (self.repository["id"],))
+        stale = RouteHarness(path, cookie=f"{app.SESSION_COOKIE}=ses_1")
+        app.PullwiseHandler.route(stale, "GET")
+        self.assertEqual(stale.status, HTTPStatus.NOT_FOUND)
+
 
 if __name__ == "__main__":
     unittest.main()

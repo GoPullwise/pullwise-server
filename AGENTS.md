@@ -190,6 +190,12 @@ revision; pending or incomplete assessment must not silently close an item.
   or the repository service to remain active under that owner, in the same
   read snapshot. Member sync resource authorization remains unmapped and must
   fail closed. Job GET is read-only and does not schedule, renew or charge.
+  Local REST and candidate Job GET share `product_job_filters` for API-key
+  `repositoryIds` and `watchIds` restrictions. A shared-watch Job must meet
+  every supplied dimension and its parent repository service must remain
+  active under the owner; archived watches and disabled repository services
+  hide sync status. Candidate identity, Job and resource checks share one
+  D1 read snapshot.
   `cloudflare_repository_adapter.D1RepositoryTransactions.put_service` is a
   trusted local-only command, not an HTTP repository write. Its D1 batch
   rechecks the owner's entitlement, active repository count, revision and

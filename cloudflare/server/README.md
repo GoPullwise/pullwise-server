@@ -76,7 +76,9 @@ source or permission revision hides the old Item. Handling PATCH requires
 revision together while rechecking identity and all dependencies. Overview
 combines principal, Source and Item SELECTs in one D1 snapshot before counting.
 Job GET rechecks identity and current watch/repository-service ownership with
-the row and excludes `analyze_source`.
+the row and excludes `analyze_source`. It also applies API-key repository/watch
+restrictions and hides shared-watch Jobs when the parent repository service is
+inactive; these checks share the read batch.
 Public watch PATCH/DELETE recheck Cookie/API-key, stored user, owner, resource
 restriction and revision in the read snapshot and guarded write batch. They
 do not enqueue analysis. Private/shared watch writes and public-watch creation
@@ -139,6 +141,11 @@ The fixture exporter
 opens only temporary synthetic SQLite
 data; it never opens an account database. Preserve existing `.wrangler` state
 directories as local evidence.
+The `server-http-job-restrictions-state` local probe used this synthetic fixture
+to check an in-scope key's sync Job GET, then changed that key's local D1
+`watchIds` to an unrelated ID while workerd was stopped. After restart the
+key received 404 and the Cookie owner still received 200. This is local
+authorization evidence only.
 
 ## Remaining gates
 

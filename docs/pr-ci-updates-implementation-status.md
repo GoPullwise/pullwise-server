@@ -2065,3 +2065,20 @@ unmounted pending current GitHub App authority.
 The expanded local regression including shared-watch contracts passes
 **738 tests, 73 subtests**. Remote CI remains run `35848982912` on the older
 `7a1ade3` head and has not executed these unpushed commits.
+
+## Sync Job detail resource authorization (2026-09-24 continuation)
+
+Red tests showed a same-owner restricted API key could read a sync Job outside
+its `watchIds`/`repositoryIds`. Shared `product_job_filters` now rejects that
+read, including a shared watch unless every supplied dimension matches.
+Local REST additionally hides archived watches and disabled repository
+services; the D1 candidate checks those and the current key in one read batch.
+A disabled shared-watch parent hides its Job. Focused local REST/D1 route
+regression passes **60 tests**. On a fresh synthetic
+`server-http-job-restrictions-state`, the local Worker returned 200 to an
+in-scope key, then after a real workerd restart and a local-only D1 key-scope
+change returned 404 to that key while the Cookie owner still received 200.
+The existing local HTTP watch PATCH/Job read driver passed. Port 8797 was
+stopped; no remote resource, model, or provider call was used.
+The Server CI target plus shared-watch regression passes **744 tests,
+73 subtests** locally after this change.
