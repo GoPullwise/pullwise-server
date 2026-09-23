@@ -436,7 +436,13 @@ def terminate_invalid_due_job(*, job_id, now):
             AND c.authorization_valid_until>=? AND c.authorization_revision=j.authorization_revision
             AND c.configuration_revision=j.configuration_revision AND c.context_version=j.context_version
             AND c.billing_owner_id=j.billing_owner_id AND l.billing_owner_id=j.billing_owner_id
-            AND l.state='reserved')""", (job_id, now)),
+            AND l.state='reserved')
+            OR EXISTS(SELECT 1 FROM background_jobs j
+                JOIN account_entitlement_authority authority ON authority.owner_id=j.billing_owner_id
+                JOIN processing_usage_ledger l ON l.reservation_id=j.reservation_id
+                WHERE j.id=? AND authority.dirty=0
+                AND (l.period<>authority.period OR authority.period_start>?
+                    OR authority.valid_until<=?))""", (job_id, now, job_id, now, now)),
         ("""UPDATE processing_usage_buckets SET reserved=reserved-1,updated_at=?
             WHERE (billing_owner_id,period)=(SELECT l.billing_owner_id,l.period
                 FROM background_jobs j JOIN processing_usage_ledger l

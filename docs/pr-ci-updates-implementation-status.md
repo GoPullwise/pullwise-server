@@ -1202,8 +1202,31 @@ ran through local Wrangler 4.136.3/workerd and D1 at 127.0.0.1:8796 using
 stopped. These are local tests only; no remote Cloudflare runtime, Server
 REST, Creem handler, live GitHub or Jev path was exercised.
 
-The scan limit, account-cycle mismatch, exhausted attempts and concurrent
-selector races need further mapping before calling this a full scheduler.
+The scan limit, exhausted attempts and concurrent selector races need further
+mapping before calling this a full scheduler.
 Remote Server CI still shows run 35824307016 failing before tests at the
 retired Worker checkout; Web Actions remain empty. Neither repository was
 pushed or deployed in this continuation.
+
+The next local increment handled a clean account projection whose billing
+period no longer matches the Job's reserved ledger, or whose strict validity
+has expired. The due command now blocks that Job and releases its old-period
+reservation atomically; it leaves a dirty projection queued for refresh.
+The old-cycle test failed before implementation, then the combined adapter and
+actual-schema mapping tests reported **41 passed**. Local workerd/D1
+`verify_server_mapping.py` and `--after-restart` passed again with an added
+old-cycle scheduled wake under the same local persistence directory. The
+process was stopped. Remote Cloudflare, real account/Creem and REST wiring
+remain unverified.
+
+Real handler assessment: `_app_part_10_handler_main.py` verifies Creem and
+calls `apply_billing_update`, which mutates in-memory account/event/pending
+maps. Its response precedes the `route` finally block's `persist_state` call;
+that persistence catches errors. `db.state_for_storage` encrypts secret fields
+using a local key file. A Workers adapter must durably record an accepted
+receipt before ACK, run the existing billing decisions over a revision-fenced
+account snapshot, and apply account/event/pending changes in one async D1
+batch. The REST router still depends on synchronous global state and SQLite
+ProductStore; mapping its authenticated reads/writes and encrypted state is a
+separate implementation slice. No product route or payment configuration was
+changed here.

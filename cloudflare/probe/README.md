@@ -154,6 +154,10 @@ It claims one eligible synthetic Job with no model request; a second wake
 does not spend another attempt. A separate stale-source wake terminates that
 Job and releases its reservation without spending an attempt. This does not
 integrate the real Server scheduler.
+The same driver now also changes the clean account authority to a new billing
+cycle, then confirms that the old-cycle due Job is blocked and its reservation
+released. Dirty account projections are covered by Server tests and wait for
+refresh.
 
 The synthetic fixture generator now copies Server-owned D1 mapping, async
 batch/account adapter and pure entitlement-rule modules into an ignored local

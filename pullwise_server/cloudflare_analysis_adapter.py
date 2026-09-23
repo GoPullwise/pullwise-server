@@ -105,17 +105,22 @@ class D1AnalysisTransactions:
                 JOIN processing_usage_ledger ledger ON ledger.reservation_id=job.reservation_id
                 WHERE authority.owner_id=job.billing_owner_id AND authority.dirty=0
                 AND authority.period_start<=? AND authority.valid_until>?
-                AND ledger.period=authority.period) AS account_ready
+                AND ledger.period=authority.period) AS account_ready,
+            EXISTS(SELECT 1 FROM account_entitlement_authority authority
+                JOIN processing_usage_ledger ledger ON ledger.reservation_id=job.reservation_id
+                WHERE authority.owner_id=job.billing_owner_id AND authority.dirty=0
+                AND (ledger.period<>authority.period OR authority.period_start>?
+                    OR authority.valid_until<=?)) AS account_invalid
             FROM background_jobs job
             LEFT JOIN analysis_claim_owners fairness ON fairness.billing_owner_id=job.billing_owner_id
             WHERE job.job_type='analyze_source' AND job.attempt<3
             AND ((job.state IN ('queued','retry_wait') AND COALESCE(job.next_attempt_at,0)<=?)
                 OR (job.state='running' AND COALESCE(job.claimed_until,0)<=?))
             ORDER BY COALESCE(fairness.last_claim_order,0),job.rowid LIMIT 16""").bind(
-                now, now, now, now, now).all()
+                now, now, now, now, now, now, now).all()
         for row in due.results:
             job_id = row["id"]
-            if not row["valid_binding"]:
+            if not row["valid_binding"] or row["account_invalid"]:
                 await execute_d1_batch(self.binding,
                     mapping.terminate_invalid_due_job(job_id=job_id, now=now))
                 continue

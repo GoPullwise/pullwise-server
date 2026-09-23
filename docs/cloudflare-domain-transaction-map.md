@@ -20,7 +20,7 @@ Separate awaits for the statements would invalidate the proof.
 
 | Existing Server authority | D1 mapping | Current evidence / remaining work |
 | --- | --- | --- |
-| `background_jobs`, `source_records`, `source_contexts`, `processing_usage_ledger` | Frozen source/version/context/config/auth/owner and live reservation guard; current eligible job becomes running with a 120-second token | Local D1 competing claims admit one. Queue selection/fairness selection, terminal invalidation/release and full scheduler adaptation remain outside this command |
+| `background_jobs`, `source_records`, `source_contexts`, `processing_usage_ledger` | Frozen source/version/context/config/auth/owner and live reservation guard; current eligible job becomes running with a 120-second token | Local D1 competing claims admit one. Bounded due selection and stale-binding/cycle termination are separate guarded commands; full scheduler adaptation remains open |
 | `provider_attempts` | Owner/global monthly and inclusive last-60-second counts plus the new attempt in the claim batch | SQLite tests show budget rejection rolls the job back; local D1 executes the combined command. Existing isolated monthly/rolling rollover tests remain separate evidence |
 | `assessments`, `source_assessment_publications`, `items`, `item_versions` | Validate every source and context plus lease, then insert immutable result and CAS the current Item version | Local D1 rejects a changed secondary dependency and an expired/stale claim; current test result is synthetic, not model-quality evidence |
 | `processing_usage_buckets`, `processing_usage_ledger`, `background_jobs` | Result, ItemVersion, reserved→used and succeeded state in the publication batch | Local D1 final reservation failure rolls back earlier result/version inserts. Replay after process restart cannot consume again |
@@ -126,8 +126,11 @@ bindings superseded, cancelled or blocked, releasing any reserved usage in the
 same D1 batch. Live running leases and temporarily dirty account projections
 remain untouched. SQLite tests covered rollback on an inconsistent bucket; the
 local scheduled workerd/D1 probe covered stale source release and restart.
-Account-cycle mismatch, exhausted attempts, selector races, complete scheduler
-fairness, batch bounds and response-loss execution remain CF2 work.
+The subsequent local D1 run also blocked an old-cycle Job and released its
+reservation after the clean account authority moved to a different period;
+a dirty authority remained pending in SQLite tests. Exhausted attempts,
+selector races, complete scheduler fairness, batch bounds and response-loss
+execution remain CF2 work.
 
 The command builders now live in Server `cloudflare_d1_mapping.py`, with
 `cloudflare_account_adapter.py` providing async snapshot reads and one D1

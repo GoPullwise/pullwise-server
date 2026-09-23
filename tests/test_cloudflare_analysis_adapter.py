@@ -194,3 +194,29 @@ def test_async_due_invalidation_cancels_disabled_analysis(tmp_path):
     with closing(fixture.store.connect()) as db:
         assert db.execute("SELECT state FROM background_jobs WHERE id=?", (job["id"],)).fetchone()[0] == "cancelled"
         assert db.execute("SELECT state FROM processing_usage_ledger WHERE charge_key='charge'").fetchone()[0] == "released"
+
+
+def test_async_due_invalidation_releases_old_account_cycle_reservation(tmp_path):
+    fixture, job, _ = seed(tmp_path / "domain.db")
+    adapter = D1AnalysisTransactions(D1ShapedSQLite(fixture.store))
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE account_entitlement_authority SET period='new-cycle' WHERE owner_id='owner'")
+    assert asyncio.run(adapter.claim_due_analysis(now=fixture.now, token="new-cycle",
+        global_monthly_limit=10, owner_rolling_limit=6, global_rolling_limit=60)) is None
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT state FROM background_jobs WHERE id=?", (job["id"],)).fetchone()[0] == "blocked"
+        assert db.execute("SELECT state FROM processing_usage_ledger WHERE charge_key='charge'").fetchone()[0] == "released"
+        assert db.execute("SELECT reserved FROM processing_usage_buckets WHERE billing_owner_id='owner'").fetchone()[0] == 0
+
+
+def test_async_due_selection_waits_for_dirty_account_projection(tmp_path):
+    fixture, job, _ = seed(tmp_path / "domain.db")
+    adapter = D1AnalysisTransactions(D1ShapedSQLite(fixture.store))
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE account_entitlement_authority SET dirty=1 WHERE owner_id='owner'")
+    assert asyncio.run(adapter.claim_due_analysis(now=fixture.now, token="dirty",
+        global_monthly_limit=10, owner_rolling_limit=6, global_rolling_limit=60)) is None
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT state FROM background_jobs WHERE id=?", (job["id"],)).fetchone()[0] == "queued"
+        assert db.execute("SELECT state FROM processing_usage_ledger WHERE charge_key='charge'").fetchone()[0] == "reserved"
+        assert db.execute("SELECT COUNT(*) FROM provider_attempts").fetchone()[0] == 0
