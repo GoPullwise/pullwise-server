@@ -128,8 +128,9 @@ remain untouched. SQLite tests covered rollback on an inconsistent bucket; the
 local scheduled workerd/D1 probe covered stale source release and restart.
 The subsequent local D1 run also blocked an old-cycle Job and released its
 reservation after the clean account authority moved to a different period;
-a dirty authority remained pending in SQLite tests. Exhausted attempts,
-selector races, complete scheduler fairness, batch bounds and response-loss
+a dirty authority remained pending in SQLite tests. A later local D1 run also
+failed an expired third-attempt Job and released the reserved unit without
+recording a fourth attempt. Selector races, complete scheduler fairness, batch bounds and response-loss
 execution remain CF2 work.
 
 The command builders now live in Server `cloudflare_d1_mapping.py`, with

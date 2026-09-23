@@ -68,9 +68,10 @@ revision; pending or incomplete assessment must not silently close an item.
   claiming an eligible Job; a live running lease and an account projection
   awaiting refresh stay untouched. The local scheduled probe calls no model.
   A clean projection with a changed or expired billing cycle also blocks the
-  old Job and releases its old reservation. Exhausted-attempt cleanup,
-  concurrent selector races and complete scheduler composition still require
-  mapping.
+  old Job and releases its old reservation. A third-attempt running Job whose
+  lease expired becomes failed and releases its reservation without another
+  provider attempt. Concurrent selector races and complete scheduler
+  composition still require mapping.
 - The real Creem handler mutates in-memory users, billingEvents and pending
   updates under `STATE_LOCK`; `persist_state` later flushes them through
   `db.save_state` and `state_for_storage`. The probe event batch is not this

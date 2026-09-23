@@ -262,6 +262,9 @@ class Default(WorkerEntrypoint):
             commands = [("UPDATE source_records SET source_revision=source_revision+1 WHERE source_id='1'", ())]
         elif name == 'old-analysis-cycle':
             commands = [("UPDATE account_entitlement_authority SET period='new-cycle' WHERE owner_id='owner'", ())]
+        elif name == 'expired-third-attempt':
+            commands = [("""UPDATE background_jobs SET state='running',attempt=3,
+                claim_token='last-attempt',claimed_until=?""", (DATA['claim']['now'] - 1,))]
         elif name == 'change-account':
             commands = [("UPDATE app_state SET payload='{}' WHERE name='users'", ())]
         elif name == 'break-reservation':

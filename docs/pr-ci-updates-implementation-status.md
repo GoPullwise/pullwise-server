@@ -1230,3 +1230,11 @@ batch. The REST router still depends on synchronous global state and SQLite
 ProductStore; mapping its authenticated reads/writes and encrypted state is a
 separate implementation slice. No product route or payment configuration was
 changed here.
+
+An expired third-attempt running Job previously stayed active because the due
+selector excluded `attempt=3`. A failing regression covered that restart-like
+case. The due scan now terminates it as failed, clears its stale claim and
+releases the reservation in one guarded batch without a fourth provider
+attempt. The combined async adapter and actual-schema tests reported **42
+passed**. The added scheduled local workerd/D1 case passed in
+`verify_server_mapping.py`; no remote runtime or model request was involved.

@@ -85,7 +85,7 @@ class D1AnalysisTransactions:
                                  global_rolling_limit: int) -> dict | None:
         if not isinstance(token, str) or not token:
             raise ValueError("trusted claim token is required")
-        due = await self.binding.prepare("""SELECT job.id,
+        due = await self.binding.prepare("""SELECT job.id,job.attempt,
             EXISTS(SELECT 1 FROM source_records source
                 JOIN source_contexts context ON context.source_id=source.source_id
                     AND context.context_id=job.context_id
@@ -113,14 +113,14 @@ class D1AnalysisTransactions:
                     OR authority.valid_until<=?)) AS account_invalid
             FROM background_jobs job
             LEFT JOIN analysis_claim_owners fairness ON fairness.billing_owner_id=job.billing_owner_id
-            WHERE job.job_type='analyze_source' AND job.attempt<3
+            WHERE job.job_type='analyze_source'
             AND ((job.state IN ('queued','retry_wait') AND COALESCE(job.next_attempt_at,0)<=?)
                 OR (job.state='running' AND COALESCE(job.claimed_until,0)<=?))
             ORDER BY COALESCE(fairness.last_claim_order,0),job.rowid LIMIT 16""").bind(
                 now, now, now, now, now, now, now).all()
         for row in due.results:
             job_id = row["id"]
-            if not row["valid_binding"] or row["account_invalid"]:
+            if row["attempt"] >= 3 or not row["valid_binding"] or row["account_invalid"]:
                 await execute_d1_batch(self.binding,
                     mapping.terminate_invalid_due_job(job_id=job_id, now=now))
                 continue

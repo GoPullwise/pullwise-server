@@ -220,3 +220,20 @@ def test_async_due_selection_waits_for_dirty_account_projection(tmp_path):
         assert db.execute("SELECT state FROM background_jobs WHERE id=?", (job["id"],)).fetchone()[0] == "queued"
         assert db.execute("SELECT state FROM processing_usage_ledger WHERE charge_key='charge'").fetchone()[0] == "reserved"
         assert db.execute("SELECT COUNT(*) FROM provider_attempts").fetchone()[0] == 0
+
+
+def test_async_due_selection_releases_expired_third_attempt(tmp_path):
+    fixture, job, _ = seed(tmp_path / "domain.db")
+    adapter = D1AnalysisTransactions(D1ShapedSQLite(fixture.store))
+    with fixture.store._immediate() as db:
+        db.execute("""UPDATE background_jobs SET state='running',attempt=3,
+            claim_token='last-attempt',claimed_until=? WHERE id=?""",
+            (fixture.now - 1, job["id"]))
+    assert asyncio.run(adapter.claim_due_analysis(now=fixture.now, token="after-third",
+        global_monthly_limit=10, owner_rolling_limit=6, global_rolling_limit=60)) is None
+    with closing(fixture.store.connect()) as db:
+        assert tuple(db.execute("SELECT state,claim_token,claimed_until FROM background_jobs WHERE id=?",
+            (job["id"],)).fetchone()) == ("failed", None, None)
+        assert db.execute("SELECT state FROM processing_usage_ledger WHERE charge_key='charge'").fetchone()[0] == "released"
+        assert db.execute("SELECT reserved FROM processing_usage_buckets WHERE billing_owner_id='owner'").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM provider_attempts").fetchone()[0] == 0

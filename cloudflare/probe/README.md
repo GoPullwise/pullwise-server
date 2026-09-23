@@ -158,6 +158,8 @@ The same driver now also changes the clean account authority to a new billing
 cycle, then confirms that the old-cycle due Job is blocked and its reservation
 released. Dirty account projections are covered by Server tests and wait for
 refresh.
+An expired third-attempt running Job is also failed and released on a local
+scheduled wake, without spending a fourth provider attempt.
 
 The synthetic fixture generator now copies Server-owned D1 mapping, async
 batch/account adapter and pure entitlement-rule modules into an ignored local

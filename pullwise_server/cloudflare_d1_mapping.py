@@ -442,7 +442,9 @@ def terminate_invalid_due_job(*, job_id, now):
                 JOIN processing_usage_ledger l ON l.reservation_id=j.reservation_id
                 WHERE j.id=? AND authority.dirty=0
                 AND (l.period<>authority.period OR authority.period_start>?
-                    OR authority.valid_until<=?))""", (job_id, now, job_id, now, now)),
+                    OR authority.valid_until<=?))
+            OR EXISTS(SELECT 1 FROM background_jobs WHERE id=? AND attempt>=3)""",
+            (job_id, now, job_id, now, now, job_id)),
         ("""UPDATE processing_usage_buckets SET reserved=reserved-1,updated_at=?
             WHERE (billing_owner_id,period)=(SELECT l.billing_owner_id,l.period
                 FROM background_jobs j JOIN processing_usage_ledger l
@@ -458,6 +460,7 @@ def terminate_invalid_due_job(*, job_id, now):
             JOIN processing_usage_ledger l ON l.reservation_id=j.reservation_id
             WHERE j.id=? AND l.state='reserved')""", (job_id,)),
         ("""UPDATE background_jobs SET state=CASE
+            WHEN attempt>=3 THEN 'failed'
             WHEN NOT EXISTS(SELECT 1 FROM source_records s WHERE s.source_id=background_jobs.source_id
                 AND s.processing_mode='model' AND s.lifecycle='active'
                 AND s.latest_version=background_jobs.source_version_id
