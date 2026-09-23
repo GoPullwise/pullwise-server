@@ -267,6 +267,21 @@ revocation, bearer rejection and restart replay under
 `server-http-key-delete-state`. Direct local D1 inspection found revoked=true,
 lastUsed=NULL, zero provider attempts and unchanged entitlement revision 1.
 Key creation and complete account/OAuth integration remain open.
+Trusted session issuance/revocation has a separate `D1SessionTransactions`
+mapping. It reads the storage-form user and sessions map, then performs an
+exact-snapshot CAS with a `changes()=1` guard so a concurrent session cannot
+be lost. Revocation preserves unrelated sessions. Synthetic SQLite tests
+covered usable and revoked Cookie reads and concurrent map mutation; local
+workerd/D1 passed issue, duplicate rejection, real restart and revoke in
+`server-map-session-state`. This is not the OAuth callback or public login
+route; the caller must verify identity and generate a secure unique session ID.
+`D1OAuthStates` adds a separate trusted map-CAS for GitHub authorization state.
+It bounds expiry to ten minutes, permits only known state kinds, and consumes
+one state exactly once across process restart/concurrent callbacks. Two local
+SQLite tests and the combined `server-map-oauth-state` workerd probe passed
+issue, duplicate rejection, restart, single consume and replay rejection.
+Real OAuth code exchange, App installation authority, session cookie response
+and production credentials remain unconnected.
 The candidate now maps Cookie-only API-key creation too: trusted session/user
 snapshot is validated in a read batch, then a D1 write batch guards those
 exact persisted values before inserting one hashed `pwk_` token record. The

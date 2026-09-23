@@ -223,6 +223,18 @@ revision; pending or incomplete assessment must not silently close an item.
   rechecks exact session/user in its guarded D1 batch, and preserves billing
   owner/revision and model attempt spend. A key revoked between preflight and
   write rolls back; duplicate revoke returns 404.
+  `D1SessionTransactions` is trusted local-only mapping for issue/revoke after
+  an OAuth identity is verified. It CASes the persisted sessions JSON map and
+  storage-form user in one batch, preserves unrelated sessions, and rejects
+  concurrent map changes. It does not expose login/logout HTTP or validate
+  real GitHub OAuth; session IDs must be generated securely by the future caller.
+  `D1OAuthStates` similarly maps trusted `app_state.githubStates` issue/consume
+  with one D1 CAS batch and a 10-minute upper expiry bound. State consumption
+  is single-use across concurrent callbacks/restarts; it does not exchange
+  GitHub codes or expose `/auth/github/*` until runtime/credential gates pass.
+  Consume a present OAuth state before validating its expected kind/expiry,
+  matching local callback semantics: a wrong-kind or expired callback burns
+  the state and cannot replay it through another route.
   The synthetic local HTTP fixture now binds the queued analysis Job and one
   Source context to the first watch. Candidate DELETE must atomically leave
   `reserved=0`, cancel that Job, revoke the context, and keep provider attempts

@@ -52,9 +52,19 @@ class Default(WorkerEntrypoint):
         from pullwise_server.cloudflare_creem_handler import accept_signed_creem_webhook
         from pullwise_server.cloudflare_source_read import D1SourceReads
         from pullwise_server.cloudflare_watch_adapter import D1WatchTransactions
+        from pullwise_server.cloudflare_session_adapter import D1SessionTransactions
+        from pullwise_server.cloudflare_oauth_state_adapter import D1OAuthStates
         from pullwise_server import creem_event_rules
         import server_mapping as mapping
         name = url.path.removeprefix('/server-map/')
+        if request.method == 'GET' and name == 'session-state':
+            row = await self.env.DB.prepare("SELECT payload FROM app_state WHERE name='sessions'").first()
+            sessions = json.loads(row['payload']) if row else {}
+            return Response.json({'count': len(sessions), 'syntheticPresent': 'ses-synthetic' in sessions})
+        if request.method == 'GET' and name == 'oauth-state':
+            row = await self.env.DB.prepare("SELECT payload FROM app_state WHERE name='githubStates'").first()
+            states = json.loads(row['payload']) if row else {}
+            return Response.json({'count': len(states), 'syntheticPresent': 'state-synthetic' in states})
         if request.method == 'GET' and name == 'watch-state':
             row = await self.env.DB.prepare('''SELECT
                 (SELECT COUNT(*) FROM update_watches WHERE archived_at IS NULL) AS active,
@@ -121,6 +131,40 @@ class Default(WorkerEntrypoint):
                 return Response.json(watch)
             except Exception:
                 return Response.json({'error': 'watch create rejected'}, status=409)
+        if name == 'session-issue':
+            try:
+                session = await D1SessionTransactions(self.env.DB).issue_session(
+                    owner_id='owner', session_id='ses-synthetic',
+                    now=DATA['claim']['now'], expires_at=DATA['claim']['now'] + 86400)
+                return Response.json(session)
+            except Exception:
+                return Response.json({'error': 'session issue rejected'}, status=409)
+        if name == 'oauth-issue':
+            try:
+                await D1OAuthStates(self.env.DB).issue(state_id='state-synthetic',
+                    record={'kind': 'login', 'redirectTo': 'dashboard',
+                            'codeVerifier': 'synthetic-verifier',
+                            'expiresAt': DATA['claim']['now'] + 300},
+                    now=DATA['claim']['now'])
+                return Response.json({'issued': True})
+            except Exception:
+                return Response.json({'error': 'oauth state rejected'}, status=409)
+        if name == 'oauth-consume':
+            try:
+                record = await D1OAuthStates(self.env.DB).consume(
+                    state_id='state-synthetic', expected_kind='login',
+                    now=DATA['claim']['now'])
+                return Response.json({'kind': record['kind'],
+                    'redirectTo': record['redirectTo']})
+            except Exception:
+                return Response.json({'error': 'oauth state rejected'}, status=409)
+        if name == 'session-revoke':
+            try:
+                revoked = await D1SessionTransactions(self.env.DB).revoke_session(
+                    owner_id='owner', session_id='ses-synthetic', now=DATA['claim']['now'])
+                return Response.json({'revoked': revoked})
+            except Exception:
+                return Response.json({'error': 'session revoke rejected'}, status=409)
         if name in {'watch-update-queued', 'watch-update-a'}:
             row = await self.env.DB.prepare("""SELECT id,revision FROM update_watches
                 WHERE upstream_repository_id='github:101' AND archived_at IS NULL""").first()

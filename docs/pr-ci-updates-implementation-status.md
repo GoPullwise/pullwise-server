@@ -1898,6 +1898,33 @@ The real local workerd repeated issue/use/revoke and restart with this source;
 read-only D1 inspection found three synthetic key records, two revoked,
 minimum hash length 64 and zero provider attempts. This remains local runtime
 evidence, not a remote entropy audit.
+
+## Trusted session transaction mapping (2026-09-23 continuation)
+
+`D1SessionTransactions` now issues and revokes synthetic sessions after a
+future trusted OAuth caller has persisted the user. It preserves other
+sessions, CASes the exact session map and storage-form user in one D1 batch,
+and rejects concurrent map changes. A missing-module test failed first; two
+SQLite tests passed after implementation. The isolated local workerd/D1
+driver passed issue, duplicate-ID rejection, process restart and revoke in
+fresh `server-map-session-state`; port 8796 was stopped. No login/logout
+HTTP, real GitHub OAuth, production Cookie or account migration was enabled.
+
+## Trusted OAuth state transaction mapping (2026-09-23 continuation)
+
+`D1OAuthStates` now writes and consumes synthetic GitHub OAuth state using
+the persisted `githubStates` map with CAS and a ten-minute maximum lifetime.
+The missing-module tests failed first; two SQLite tests passed after the
+mapping, including concurrent map-change rollback. The combined local
+workerd/D1 session/OAuth-state driver passed issue, duplicate state rejection,
+real restart, single consume and replay rejection in fresh
+`server-map-oauth-state`; port 8796 was stopped. This is not GitHub code
+exchange or a public login/callback route, and no live credential was used.
+A subsequent failing test found wrong-kind callback attempts left the state
+reusable. Consumption now removes a present state under CAS first, then checks
+kind/expiry, matching the existing local callback semantics. Five focused
+session/OAuth-state tests passed; the synthetic local workerd probe passed
+again before/after restart in fresh `server-map-oauth-consume-state`.
 After moving local API-key parsing/projection to the shared pure rules, the
 legacy `tests/test_api_key_routes.py` file was rerun: **9 passed, 10 failed**.
 The ten failures are the same historical scan/repository-route expectations
@@ -1909,3 +1936,7 @@ shared account rules and explicit Workers Web Crypto token generation passes
 contract interpreter again passed lint, **49 files / 615 tests**, and build.
 Web `output/` remains untouched. Remote Server CI still has not run these
 unpushed changes.
+The expanded current Server CI selection after trusted session/OAuth-state
+mappings passes **701 tests, 68 subtests** locally. Web `npm run check`
+remains green at **615 tests** plus lint/build. No local candidate/probe
+process remains on 8796/8797. The edited Server CI has not run remotely.

@@ -43,6 +43,8 @@ def main():
                      "creem_signature", "creem_event_rules", "cloudflare_webhook_receipts",
                      "cloudflare_creem_handler", "cloudflare_source_read",
                      "cloudflare_watch_adapter",
+                     "cloudflare_session_adapter",
+                     "cloudflare_oauth_state_adapter",
                      "product_dto_rules", "update_filter", "product_domain"):
             source = Path(__file__).parents[1] / "pullwise_server" / f"{name}.py"
             (package / f"{name}.py").write_text(source.read_text(encoding="utf-8"), encoding="utf-8")

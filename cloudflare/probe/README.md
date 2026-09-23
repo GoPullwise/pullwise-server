@@ -12,6 +12,17 @@ analysis-off change and withdrawal after archiving its secondary watch. It
 never calls GitHub or Jev. The
 probe config has no cron trigger.
 
+`verify_session_mapping.py` is another local-only Server mapping driver. With
+`PYTHONPATH` set to the Server root, regenerate `src/server_fixture.py`, start
+workerd on 8796 using a fresh `.wrangler/server-map-session-state`, run the
+driver, restart with that same state, then run `--after-restart`. It proves
+synthetic session issue/duplicate/revoke persistence without OAuth or Cookie
+HTTP exposure.
+The same driver now also issues a synthetic GitHub login state, survives a
+real restart, consumes it once and rejects replay. Use a fresh
+`.wrangler/server-map-oauth-state` for this combined session/OAuth-state probe;
+no GitHub network call or real identity is used.
+
 This is a **local experiment, not the Server deployment or a production adapter**.
 The user approved the isolated validation dependencies in this session. No real
 GitHub/Jev credentials, model requests, remote D1 resources, deployments, DNS
