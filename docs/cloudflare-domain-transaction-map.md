@@ -238,6 +238,45 @@ local D1 inspection found zero active watches, zero reserved units, cancelled
 sync Job, inaccessible Source context, zero provider attempts and NULL API-key
 last-used. The old Source lease expired during earlier cold-start trials; this
 watch-only proof does not claim a full Source/Item HTTP rerun.
+Successful-processing history now has shared `product_usage_events.py`
+projection and keyset cursor rules. SQLite REST and candidate
+`GET /api/v1/usage/events` list only the owner's consumed ledger; the Worker
+adds current principal SELECTs to the ledger page SELECT in one read-only
+D1 batch. The synthetic local workerd driver passed historical usage read
+before and after restart in `server-http-usage-events-state`; direct D1
+inspection found one consumed event, zero provider attempts and NULL key
+last-used. A transient local ProxyWorker connection loss on the first PATCH
+after restart cleared on retry; this did not alter the usage event read.
+The later `server-http-usage-cursor-state` fixture had two historical consumed
+rows. Real local workerd returned two stable pages, rejected the same cursor
+under another module with 422, and passed again after a process restart.
+Read-only D1 inspection found two consumed events, zero provider attempts and
+NULL key last-used. One first PATCH hit transient local ProxyWorker connection
+loss; the subsequent watch-only run passed.
+The candidate's legacy account `GET /api-keys` now uses current session/user
+SELECTs and owner API-key rows in one read-only D1 batch. A shared pure DTO
+projects metadata without token or hash; revoked rows are excluded and the
+HTTP entry emits the existing no-store headers. The local workerd watch-only
+driver checked this before and after restart using synthetic credentials.
+Creation/revocation, login/OAuth and full account migration are still open.
+The candidate subsequently mapped Cookie-only API-key revocation. Its guarded
+D1 batch checks the exact persisted user and sessions map before updating one
+owner key, then forces a nonzero-row CHECK; a revoked Cookie between reads and
+write rolls back. Local workerd/D1 passed untrusted Origin rejection, durable
+revocation, bearer rejection and restart replay under
+`server-http-key-delete-state`. Direct local D1 inspection found revoked=true,
+lastUsed=NULL, zero provider attempts and unchanged entitlement revision 1.
+Key creation and complete account/OAuth integration remain open.
+The candidate now maps Cookie-only API-key creation too: trusted session/user
+snapshot is validated in a read batch, then a D1 write batch guards those
+exact persisted values before inserting one hashed `pwk_` token record. The
+plaintext token appears only in the successful 201 response; metadata GET
+and database rows never expose it. Local Server account routes now delegate
+scope/restriction/public DTO decisions to the same pure rules. Synthetic
+local workerd passed issue, Bearer use, revoke and restart under
+`server-http-key-create-state`; local D1 inspection found two key records,
+one revoked, 64-character hashes, zero provider attempts and entitlement
+revision 1. Cookie/session issuance, OAuth/App and production migration remain.
 The isolated local workerd probe also published a synthetic primary assessment
 depending on a secondary watch context; archiving that watch withdrew the
 assessment in the same D1 state. It passed after a real restart in

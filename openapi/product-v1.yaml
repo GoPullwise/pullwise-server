@@ -247,9 +247,13 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Module'
         - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/UsageLimit'
       responses:
         '200':
           description: Paginated successful-processing ledger for the current account.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UsageEventPage' }
   /api/v1/jobs/{jobId}:
     get:
       operationId: getRequestedSyncJob
@@ -316,6 +320,10 @@ components:
       name: cursor
       in: query
       schema: { type: string }
+    UsageLimit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
     IfMatch:
       name: If-Match
       in: header
@@ -573,6 +581,25 @@ components:
         entitlements: { type: object }
         usage: { type: object }
         runtimeUsage: { type: object }
+    UsageEvent:
+      type: object
+      additionalProperties: false
+      required: [id, metric, module, period, processedAt]
+      properties:
+        id: { type: string, description: Opaque reservation identifier; not a charge key. }
+        metric: { const: intelligent_processing }
+        module: { type: string, enum: [pr, ci, updates] }
+        period: { type: string }
+        processedAt: { type: string, format: date-time }
+    UsageEventPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor, hasMore, requestId]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/UsageEvent' } }
+        nextCursor: { type: [string, 'null'] }
+        hasMore: { type: boolean }
+        requestId: { type: string }
     Error:
       type: object
       additionalProperties: false

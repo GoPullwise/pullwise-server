@@ -41,7 +41,70 @@ def call(path, *, raw=None, signature=None, extra_headers=None, method=None,
 
 def main():
     same_site_none = "--same-site-none" in sys.argv
+    if "--key-create-only" in sys.argv:
+        status, before = call("/api-keys", extra_headers={
+            "Cookie": "pw_session=session-local"})
+        assert status == 200 and [row["id"] for row in before["items"]] == ["key-local"]
+        if "--after-restart" in sys.argv:
+            print("Local Server Worker API-key one-time token stayed absent after restart")
+            return
+        body = b'{"name":"Synthetic HTTP","scopes":["profile:read"]}'
+        headers = {"Cookie": "pw_session=session-local",
+            "Origin": "http://127.0.0.1:5173"}
+        assert call("/api-keys", raw=body, extra_headers={**headers,
+            "Origin": "https://evil.example"})[0] == 403
+        status, created, response_headers = call("/api-keys", raw=body,
+            extra_headers=headers, return_headers=True)
+        assert status == 201 and created["key"].startswith("pwk_")
+        assert next((value for key, value in response_headers.items()
+            if key.lower() == "cache-control"), None) == "no-store"
+        status, listed = call("/api-keys", extra_headers={
+            "Cookie": "pw_session=session-local"})
+        assert status == 200 and any(row["id"] == created["id"] for row in listed["items"])
+        assert created["key"] not in json.dumps(listed)
+        assert call("/api/v1/me", extra_headers={
+            "Authorization": "Bearer " + created["key"]})[0] == 200
+        assert call("/api-keys/" + created["id"], method="DELETE",
+            extra_headers=headers)[0] == 200
+        assert call("/api/v1/me", extra_headers={
+            "Authorization": "Bearer " + created["key"]})[0] == 401
+        print("Local Server Worker API-key issue/use/revoke passed")
+        return
+    if "--key-delete-only" in sys.argv:
+        status, keys = call("/api-keys", extra_headers={
+            "Cookie": "pw_session=session-local"})
+        assert status == 200
+        if "--after-restart" in sys.argv:
+            assert keys["items"] == []
+            assert call("/api-keys/key-local", method="DELETE",
+                extra_headers={"Cookie": "pw_session=session-local",
+                    "Origin": "http://127.0.0.1:5173"})[0] == 404
+            print("Local Server Worker API-key revocation persisted after restart")
+            return
+        assert [entry["id"] for entry in keys["items"]] == ["key-local"]
+        assert call("/api-keys/key-local", method="DELETE",
+            extra_headers={"Cookie": "pw_session=session-local",
+                "Origin": "https://evil.example"})[0] == 403
+        assert call("/api-keys/key-local", method="DELETE",
+            extra_headers={"Cookie": "pw_session=session-local",
+                "Origin": "http://127.0.0.1:5173"}) == (
+                    200, {"ok": True, "id": "key-local", "revoked": True})
+        assert call("/api-keys", extra_headers={
+            "Cookie": "pw_session=session-local"})[1]["items"] == []
+        assert call("/api/v1/me", extra_headers={
+            "Authorization": "Bearer pwk_local_http_test"})[0] == 401
+        print("Local Server Worker API-key revocation and Origin guard passed")
+        return
     if "--watch-only" in sys.argv:
+        status, keys, key_headers = call("/api-keys", extra_headers={
+            "Cookie": "pw_session=session-local"}, return_headers=True)
+        assert status == 200 and len(keys["items"]) == 1
+        assert keys["items"] == keys["apiKeys"]
+        assert "key_hash" not in json.dumps(keys) and "pwk_local_http_test" not in json.dumps(keys)
+        assert next((value for key, value in key_headers.items()
+            if key.lower() == "cache-control"), None) == "no-store"
+        assert call("/api-keys", extra_headers={
+            "Authorization": "Bearer pwk_local_http_test"})[0] == 401
         status, listing = call("/api/v1/watches", extra_headers={
             "Cookie": "pw_session=session-local"})
         assert status == 200 and listing["items"]
@@ -52,6 +115,16 @@ def main():
         status, before_usage = call("/api/v1/usage", extra_headers={
             "Cookie": "pw_session=session-local"})
         assert status == 200
+        status, history = call("/api/v1/usage/events?module=updates&limit=1",
+            extra_headers={"Cookie": "pw_session=session-local"})
+        assert status == 200 and [row["id"] for row in history["items"]] == ["res-historical-2"]
+        assert history["hasMore"] and history["nextCursor"]
+        status, next_page = call("/api/v1/usage/events?module=updates&limit=1&cursor=" +
+            history["nextCursor"], extra_headers={"Cookie": "pw_session=session-local"})
+        assert status == 200 and [row["id"] for row in next_page["items"]] == ["res-historical"]
+        assert next_page["hasMore"] is False
+        assert call("/api/v1/usage/events?module=pr&cursor=" + history["nextCursor"],
+            extra_headers={"Cookie": "pw_session=session-local"})[0] == 422
         body = b'{"analysisEnabled":true}'
         headers = {"Cookie": "pw_session=session-local",
             "Origin": "http://127.0.0.1:5173",
@@ -63,7 +136,7 @@ def main():
         status, updated, response_headers = call("/api/v1/watches/" + watch["id"],
             raw=body, method="PATCH", extra_headers=headers,
             return_headers=True)
-        assert status == 200 and updated["revision"] == watch["revision"] + 1
+        assert status == 200 and updated["revision"] == watch["revision"] + 1, (status, updated)
         assert next((value for key, value in response_headers.items()
             if key.lower() == "etag"), None) == f'"{updated["revision"]}"'
         assert call("/api/v1/watches/" + watch["id"], raw=body,

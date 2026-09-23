@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from . import _app_part_02_http_auth_settings as _previous_app_part
 from ._app_imports import import_compat_globals as _import_compat_globals
+from .api_key_dto_rules import api_key_public_payload as _pure_api_key_public_payload
+from .api_key_dto_rules import requested_api_key_scopes as _pure_requested_api_key_scopes
+from .api_key_dto_rules import parse_api_key_restrictions as _pure_parse_api_key_restrictions
 
 _import_compat_globals(vars(_previous_app_part), globals())
 del _import_compat_globals, _previous_app_part
@@ -371,28 +374,7 @@ def clean_api_key_scopes(value: object) -> list[str]:
 
 
 def requested_api_key_scopes(value: object, *, provided: bool) -> tuple[list[str], str | None]:
-    if not provided or value is None:
-        return list(API_KEY_DEFAULT_SCOPES), None
-    if isinstance(value, str):
-        candidates = [value]
-    elif isinstance(value, list) and all(isinstance(item, str) for item in value):
-        candidates = value
-    else:
-        return [], "API key scopes must be a string or a list of strings."
-
-    scopes: list[str] = []
-    invalid: list[str] = []
-    for candidate in candidates:
-        normalized = candidate.strip().lower()
-        if normalized in API_KEY_ALLOWED_SCOPES:
-            if normalized not in scopes:
-                scopes.append(normalized)
-        else:
-            invalid.append(candidate)
-    if invalid or not scopes:
-        allowed = ", ".join(sorted(API_KEY_ALLOWED_SCOPES))
-        return [], f"API key scopes must include only: {allowed}."
-    return scopes, None
+    return _pure_requested_api_key_scopes(value, provided=provided)
 
 
 def scan_request_id_from_body(body: dict) -> str:
@@ -425,58 +407,11 @@ def parse_api_key_scopes(value: object) -> list[str]:
 
 
 def parse_api_key_restrictions(value: object) -> dict:
-    if isinstance(value, dict):
-        source = value
-    elif isinstance(value, str) and value:
-        try:
-            decoded = json.loads(value)
-        except json.JSONDecodeError:
-            return {}
-        source = decoded if isinstance(decoded, dict) else {}
-    else:
-        return {}
-    kind = public_issue_text(source.get("kind") or source.get("purpose")).replace("-", "_")
-    if kind == "audit_bundle":
-        restrictions = {"kind": "audit_bundle"}
-        scan_id = public_issue_text(source.get("scanId") or source.get("scan_id"))
-        repo_id = clean_github_access_text(source.get("repoId") or source.get("repo_id"), allow_int=True)
-        if scan_id:
-            restrictions["scanId"] = scan_id
-        if repo_id:
-            restrictions["repoId"] = repo_id
-        return restrictions
-    restrictions = {}
-    for input_key, output_key in (("repositoryIds", "repositoryIds"), ("watchIds", "watchIds")):
-        values = source.get(input_key)
-        if not isinstance(values, list):
-            continue
-        normalized = []
-        for value in values:
-            item = clean_github_access_text(value, allow_int=True)
-            if item and item not in normalized:
-                normalized.append(item)
-        restrictions[output_key] = normalized
-    return restrictions
+    return _pure_parse_api_key_restrictions(value)
 
 
 def api_key_public_payload(record: dict, *, token: str | None = None) -> dict:
-    payload = {
-        "id": public_issue_text(record.get("id")),
-        "name": public_issue_text(record.get("name")) or "API key",
-        "userId": public_issue_text(record.get("user_id")),
-        "prefix": public_issue_text(record.get("key_prefix")),
-        "scopes": parse_api_key_scopes(record.get("scopes")),
-        "createdAt": pull_request_timestamp(record.get("created_at")) or 0,
-        "expiresAt": pull_request_timestamp(record.get("expires_at")),
-        "lastUsedAt": pull_request_timestamp(record.get("last_used_at")),
-        "revokedAt": pull_request_timestamp(record.get("revoked_at")),
-    }
-    restrictions = parse_api_key_restrictions(record.get("restrictions"))
-    if restrictions:
-        payload["restrictions"] = restrictions
-    if token:
-        payload["key"] = token
-    return payload
+    return _pure_api_key_public_payload(record, token=token)
 
 
 def navigation_payload() -> dict:

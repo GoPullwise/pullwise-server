@@ -57,6 +57,40 @@ def test_cookie_me_and_api_key_usage_match_existing_read_dtos(tmp_path):
         assert db.execute("SELECT last_used_at FROM api_keys WHERE id='key-local'").fetchone()[0] is None
 
 
+def test_usage_events_match_store_and_recheck_identity_in_one_batch(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("usage:read",))
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE processing_usage_ledger SET state='consumed',finished_at=? WHERE charge_key='charge'",
+            (fixture.now,))
+        db.execute("UPDATE processing_usage_buckets SET reserved=0,used=1")
+    binding = D1ShapedSQLite(fixture.store)
+    status, payload = _get(binding, "/api/v1/usage/events",
+        {"Authorization": f"Bearer {TOKEN}"}, fixture.now, params={"module": ["pr"]})
+    assert status == 200
+    expected = fixture.store.list_processing_usage_events("owner", module="pr")
+    assert {key: payload[key] for key in expected} == expected
+    assert binding.batch_count == 1
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT last_used_at FROM api_keys WHERE id='key-local'").fetchone()[0] is None
+
+
+def test_usage_events_do_not_return_after_cookie_revocation_before_batch(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture)
+    binding = D1ShapedSQLite(fixture.store)
+
+    def revoke_before_snapshot():
+        with fixture.store._immediate() as db:
+            db.execute("UPDATE app_state SET payload='{}' WHERE name='sessions'")
+
+    binding.before_batch = revoke_before_snapshot
+    status, payload = _get(binding, "/api/v1/usage/events",
+        {"Cookie": "pw_session=session-local"}, fixture.now)
+    assert status == 401 and payload["error"]["code"] == "UNAUTHENTICATED"
+    assert binding.batch_count == 1
+
+
 def test_product_read_rejects_mixed_expired_and_unscoped_credentials(tmp_path):
     fixture, _, _ = seed(tmp_path / "domain.db")
     _seed_auth(fixture, scopes=("profile:read",),

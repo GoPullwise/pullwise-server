@@ -1812,3 +1812,100 @@ inspection of that local D1 file found `(active watches, reserved,
 sync-job state, Source accessible, provider attempts, API-key last-used)` =
 `(0, 0, cancelled, 0, 0, NULL)`. The full HTTP driver was not re-claimed on
 this state after its short Source authorization lease expired.
+
+## Successful-processing usage history (2026-09-23 continuation)
+
+Added the shared, owner-scoped `/api/v1/usage/events` contract with saved
+consumed ledger rows only, module filter, bounded limit (20 default, 50 max)
+and stable finishedAt/reservationId keyset cursor. Its opaque event ID is
+the reservation ID; chargeKey remains private. Local ProductStore/REST and
+the candidate Worker share projection and cursor rules. A missing-method
+test and both missing-route tests failed first; focused product/OpenAPI and
+candidate read suites passed. `openapi/product-v1.yaml` now defines the
+typed page. A synthetic historical event was read through real local
+workerd/D1 before and after restart in `server-http-usage-events-state`.
+One first PATCH after restart hit transient ProxyWorker connection loss;
+retry passed. Read-only D1 inspection found `(consumed events, attempts,
+key last-used) = (1, 0, NULL)`. This is not remote billing/Cloudflare proof.
+
+The current Server CI target selection including usage-event pagination and
+the candidate public-watch routes passes **674 tests, 68 subtests** locally.
+This remains Python 3.13/local D1 evidence; remote CI has not run the edits.
+An additional failing pagination test showed a cursor could be reused under a
+different owner or module. The shared cursor now binds an owner+module digest
+and requires canonical encoding; local REST/D1 product tests pass after the
+fix. Authorization still comes from the current owner-scoped query, never the
+cursor itself.
+The synthetic fixture was expanded to two historical consumed rows. Real
+local workerd returned two `limit=1` pages and rejected cursor reuse with a
+different module; the watch-only driver passed before and after restart in
+`server-http-usage-cursor-state`. Read-only D1 inspection found
+`(consumed, attempts, key last-used) = (2, 0, NULL)`. Its first PATCH once
+hit the same local ProxyWorker connection loss and passed on retry.
+
+## Candidate session-only API-key metadata (2026-09-23 continuation)
+
+The local Worker now serves legacy `GET /api-keys` only for a Cookie session.
+It rechecks current session/user and reads owner active keys in one D1 batch,
+uses the shared pure public DTO to exclude token/hash, and emits no-store
+headers. A bearer key cannot list keys. The missing-route tests failed first;
+three focused tests passed after implementation, including Cookie revocation
+between preliminary auth and the batch. The synthetic workerd watch-only
+driver checked redaction and headers before and after restart in
+`server-http-usage-cursor-state`; no live credential was used. API-key
+creation/revocation and complete session/OAuth lifecycle remain CF2 work.
+
+## Candidate API-key revocation (2026-09-23 continuation)
+
+The candidate now serves Cookie-only `DELETE /api-keys/{id}` with the existing
+200 ACK shape. A missing-route test failed first. Six focused tests passed
+after implementation, including key redaction, session revocation between
+preflight and read, session revocation before the write batch with full
+rollback, and SameSite=None untrusted Origin rejection before D1. The real
+local workerd/D1 driver passed valid/rejected DELETE, original Bearer key
+denial and process restart under `server-http-key-delete-state`; port 8797 was
+stopped. Read-only D1 inspection found revoked=true, last-used=NULL,
+provider attempts=0 and unchanged account entitlement revision=1. API-key
+issuance, Cookie/session issuance, OAuth/App and migration remain open.
+The local account response now delegates to the same pure API-key DTO as the
+Worker. Three additional edge-shape parity cases passed before switching the
+local function; the focused Cloudflare API-key, product route and billing
+route set then passed **88 tests, 2 subtests**. This removes a redaction/
+restriction drift path while keeping old key storage and payment facts intact.
+
+## Candidate API-key creation and shared account rules (2026-09-23 continuation)
+
+Cookie-only `POST /api-keys` now validates scopes/restrictions, checks
+SameSite=None Origin, returns a random one-time `pwk_` token only after a
+session/user-guarded D1 insert, and stores only SHA-256 hash and public prefix.
+The missing-route test failed first. Twelve focused tests passed after
+implementation, including session revocation before the write batch and
+untrusted Origin rejection. Requested scopes, restrictions and public API-key
+DTOs were compared against the existing local account rules before delegating
+those local functions to the shared pure module. The focused account/product/
+billing set passed **100 tests, 2 subtests**. Real local workerd/D1 under
+`server-http-key-create-state` passed issue → Bearer `/me` → revoke → Bearer
+401, then process restart with no token in the list. Read-only D1 inspection
+found two keys, one revoked, minimum hash length 64, zero provider attempts
+and unchanged entitlement revision 1. Only synthetic credentials were used.
+OAuth/App, session issuance, full account migration and remote CF2 remain open.
+The token generator was then changed to use Cloudflare Workers Web Crypto
+`getRandomValues` explicitly through the Python FFI, following the
+[runtime API](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/)
+and [Workers security guidance](https://developers.cloudflare.com/workers/best-practices/workers-best-practices/).
+A missing-function test failed first; the FFI-path and account tests passed.
+The real local workerd repeated issue/use/revoke and restart with this source;
+read-only D1 inspection found three synthetic key records, two revoked,
+minimum hash length 64 and zero provider attempts. This remains local runtime
+evidence, not a remote entropy audit.
+After moving local API-key parsing/projection to the shared pure rules, the
+legacy `tests/test_api_key_routes.py` file was rerun: **9 passed, 10 failed**.
+The ten failures are the same historical scan/repository-route expectations
+observed in the earlier full legacy run; no additional API-key account failure
+appeared. The current Server/Web product selections remain the delivery gates.
+The current Server CI selection after session-only API-key list/create/revoke,
+shared account rules and explicit Workers Web Crypto token generation passes
+**696 tests, 68 subtests** locally. Web `npm run check` with the sibling Server
+contract interpreter again passed lint, **49 files / 615 tests**, and build.
+Web `output/` remains untouched. Remote Server CI still has not run these
+unpushed changes.

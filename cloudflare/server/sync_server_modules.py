@@ -7,8 +7,11 @@ from pathlib import Path
 
 MODULES = (
     "account_cycle_rules",
+    "api_key_dto_rules",
     "billing_account_rules",
     "cloudflare_account_adapter",
+    "cloudflare_api_key_read",
+    "cloudflare_api_key_write",
     "cloudflare_creem_handler",
     "cloudflare_d1_batch",
     "cloudflare_d1_mapping",
@@ -26,6 +29,7 @@ MODULES = (
     "product_domain",
     "product_item_filters",
     "product_source_filters",
+    "product_usage_events",
     "update_filter",
 )
 

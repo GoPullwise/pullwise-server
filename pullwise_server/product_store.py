@@ -16,6 +16,7 @@ from .product_dto_rules import (
     handling_event_dto, item_read_dto, item_dependencies_current,
 )
 from .update_filter import project_saved_updates
+from .product_usage_events import parse_usage_events_query, usage_events_page
 
 
 _UNIT_TYPES = frozenset(
@@ -3081,6 +3082,28 @@ class ProductStore:
             "state": state,
             "reused": False,
         }
+
+    def list_processing_usage_events(self, billing_owner_id: str, *,
+                                     module: str | None = None,
+                                     cursor: str | None = None,
+                                     limit: int = 20) -> dict:
+        owner_id = _identifier(billing_owner_id, "billing_owner_id")
+        selected_module, position, page_limit = parse_usage_events_query({
+            "module": module, "cursor": cursor, "limit": str(limit)}, owner_id=owner_id)
+        at, reservation = position if position else (None, None)
+        with self._read() as connection:
+            rows = connection.execute("""SELECT reservation_id,module,period,finished_at
+                FROM processing_usage_ledger
+                WHERE billing_owner_id=? AND state='consumed'
+                  AND finished_at IS NOT NULL
+                  AND (? IS NULL OR module=?)
+                  AND (? IS NULL OR finished_at<?
+                       OR (finished_at=? AND reservation_id<?))
+                ORDER BY finished_at DESC,reservation_id DESC LIMIT ?""",
+                (owner_id, selected_module, selected_module, at, at, at,
+                 reservation, page_limit + 1)).fetchall()
+        return usage_events_page(rows, page_limit,
+            owner_id=owner_id, module=selected_module)
 
     def processing_usage(self, *, billing_owner_id: str, period: str) -> dict:
         owner_id = _identifier(billing_owner_id, "billing_owner_id")

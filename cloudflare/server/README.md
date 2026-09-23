@@ -2,6 +2,10 @@
 
 This is the first real Server HTTP entry candidate. It exposes `/health`,
 authenticated `GET /api/v1/me`, `GET /api/v1/usage`, `GET /api/v1/watches`,
+`GET /api/v1/usage/events` for owner successful-processing history,
+session-only `GET /api-keys` for redacted owner API-key metadata,
+session-only `DELETE /api-keys/{id}` for guarded revocation,
+session-only `POST /api-keys` for one-time token issuance,
 `GET /api/v1/watches/{id}`,
 `GET /api/v1/sources` and `GET /api/v1/sources/{id}`, and
 `GET /api/v1/items`, `GET /api/v1/items/{id}`, `GET /api/v1/items/overview` and
@@ -27,7 +31,18 @@ missing GitHub session tokens and audit-bundle restrictions fail closed. They
 read saved entitlements, buckets and attempts without invoking GitHub/Jev or
 writing D1. Profile, usage and watch reads recheck current identity in the
 same D1 batch as their response rows; usage counts share that batch. The
-existing local Server updates API-key `last_used_at` on access;
+usage-events page also shares that identity snapshot and exposes only consumed
+owner rows with module/cursor/limit filters; charge keys stay private. The
+legacy API-key list also rechecks Cookie/user in one batch, excludes revoked
+rows and sends no-store headers. DELETE rechecks the exact Cookie session and
+stored user in its D1 write batch, applies the SameSite=None Origin rule,
+and returns 404 for a duplicate. POST stores only SHA-256 hash/prefix and
+metadata in a guarded D1 batch; the random `pwk_` token appears only in the
+201 response. Local Server and Worker share scope/restriction/public DTO rules.
+Python Workers obtains the token's 32 random bytes from
+[`crypto.getRandomValues`](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/)
+through its JS FFI; local CPython tests use `secrets.token_bytes`.
+The existing local Server updates API-key `last_used_at` on access;
 this candidate deliberately leaves it untouched on GET to avoid write charges.
 A bounded operational last-used policy is still needed before migration.
 The watch list uses the same Server-owned DTO projection as ProductStore,
@@ -89,6 +104,19 @@ Read-only D1 inspection should find zero active watches, `reserved=0`, a
 cancelled synthetic sync Job, revoked Source context, no provider attempt and
 no API-key last-used write. Use a fresh ignored state directory before repeating the
 two-run sequence.
+For the usage-event cursor probe, seed another fresh ignored directory such as
+`.wrangler/server-http-usage-cursor-state` and run
+`verify_local_http.py --watch-only --same-site-none` before and after restart.
+Its two historical consumed rows must page in order, reject cursor reuse under
+another module, and leave provider attempts and key last-used unchanged.
+The same watch-only driver checks session-only `/api-keys` redaction and
+no-store headers before and after restart.
+To check revocation separately, seed a fresh ignored directory and run
+`verify_local_http.py --key-delete-only --same-site-none`, restart workerd,
+then run `verify_local_http.py --key-delete-only --after-restart --same-site-none`.
+For synthetic issue/use/revoke, seed a fresh ignored directory and run
+`verify_local_http.py --key-create-only --same-site-none`, restart, then
+`verify_local_http.py --key-create-only --after-restart --same-site-none`.
 The fixture exporter
 opens only temporary synthetic SQLite
 data; it never opens an account database. Preserve existing `.wrangler` state
@@ -99,7 +127,7 @@ directories as local evidence.
 - Repository, public-watch creation, private/shared watch mutations,
   visualization, sync and other
   product-v1 REST paths are not routed yet. Session issuance, OAuth/App
-  lifecycle, API-key management and complete authorization still need D1
+  lifecycle, bounded API-key last-used/rotation policy and complete authorization still need D1
   adaptation. Web and external clients must share the eventual Server REST.
 - Real Creem secret and product-ID binding, checkout/account writer coverage,
   pending reconciliation invocation, receipt retention, encrypted account

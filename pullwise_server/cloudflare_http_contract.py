@@ -11,6 +11,8 @@ from .cloudflare_creem_handler import (
 )
 from .creem_signature import verify_creem_signature
 from .cloudflare_product_read import read_product, patch_item, patch_watch, delete_watch, _cookie_sessions
+from .cloudflare_api_key_read import list_api_keys
+from .cloudflare_api_key_write import revoke_api_key, create_api_key
 
 
 def _header(headers: Mapping[str, object], name: str) -> str:
@@ -47,7 +49,49 @@ async def handle_http_request(*, method: str, path: str,
         except Exception:
             pass
         return 503, {"ok": False, "service": "pullwise-server"}
-    if method == "GET" and path in {"/api/v1/me", "/api/v1/usage",
+    if method == "GET" and path == "/api-keys":
+        try:
+            return await list_api_keys(binding=binding, headers=headers, now=now)
+        except Exception:
+            return 503, {"error": {"code": "SERVER_UNAVAILABLE"}}
+    if method == "POST" and path == "/api-keys":
+        if cookie_same_site.casefold() == "none" and _cookie_sessions(headers):
+            claimed_origin = _header(headers, "Origin") or _header(headers, "Referer")
+            parsed = urlsplit(claimed_origin)
+            origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else ""
+            if origin not in (trusted_origins or set()):
+                return 403, {"error": {"code": "UNTRUSTED_ORIGIN"}}
+        length_text = _header(headers, "Content-Length")
+        if not length_text.isdigit() or int(length_text) > 8192:
+            return 400, {"error": {"code": "INVALID_REQUEST"}}
+        try:
+            raw = await read_body()
+            if not isinstance(raw, bytes) or len(raw) != int(length_text):
+                raise ValueError("invalid body length")
+            body = json.loads(raw)
+        except (ValueError, UnicodeError):
+            return 400, {"error": {"code": "INVALID_REQUEST"}}
+        try:
+            return await create_api_key(binding=binding, headers=headers,
+                body=body, now=now)
+        except Exception:
+            return 503, {"error": {"code": "SERVER_UNAVAILABLE"}}
+    if method == "DELETE" and path.startswith("/api-keys/"):
+        key_id = path[len("/api-keys/"):]
+        if not key_id or "/" in key_id:
+            return 404, {"error": {"code": "NOT_FOUND"}}
+        if cookie_same_site.casefold() == "none" and _cookie_sessions(headers):
+            claimed_origin = _header(headers, "Origin") or _header(headers, "Referer")
+            parsed = urlsplit(claimed_origin)
+            origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else ""
+            if origin not in (trusted_origins or set()):
+                return 403, {"error": {"code": "UNTRUSTED_ORIGIN"}}
+        try:
+            return await revoke_api_key(binding=binding, key_id=key_id,
+                headers=headers, now=now)
+        except Exception:
+            return 503, {"error": {"code": "SERVER_UNAVAILABLE"}}
+    if method == "GET" and path in {"/api/v1/me", "/api/v1/usage", "/api/v1/usage/events",
                                        "/api/v1/watches", "/api/v1/sources"} or (
             method == "GET" and (path.startswith("/api/v1/sources/")
                 or path == "/api/v1/items" or path.startswith("/api/v1/items/")

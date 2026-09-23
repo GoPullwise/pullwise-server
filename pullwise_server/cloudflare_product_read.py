@@ -19,6 +19,7 @@ from .cloudflare_item_handling import D1ItemHandling
 from .cloudflare_watch_adapter import D1WatchTransactions
 from .product_source_filters import apply_source_restrictions, filter_sources
 from .product_item_filters import apply_item_restrictions, filter_items
+from .product_usage_events import parse_usage_events_query, usage_events_page
 
 SESSION_COOKIE = "pw_session"
 API_KEY_PREFIX = "pwk_"
@@ -190,6 +191,27 @@ async def _watches(binding: Any, user: dict, restrictions: dict,
             "requestId": _header(headers, "X-Request-Id") or f"req_{uuid.uuid4().hex}"}
 
 
+async def _usage_events(binding: Any, user: dict, restrictions: dict,
+                        headers: Mapping[str, object], now: int,
+                        params: Mapping[str, object]) -> dict:
+    module, position, limit = parse_usage_events_query(params, owner_id=user["id"])
+    at, reservation = position if position else (None, None)
+    auth, validate = _resource_auth_snapshot(binding, headers, user,
+        restrictions, now, "usage:read")
+    result = await binding.batch([*auth, binding.prepare("""SELECT
+        reservation_id,module,period,finished_at FROM processing_usage_ledger
+        WHERE billing_owner_id=? AND state='consumed' AND finished_at IS NOT NULL
+          AND (? IS NULL OR module=?)
+          AND (? IS NULL OR finished_at<?
+               OR (finished_at=? AND reservation_id<?))
+        ORDER BY finished_at DESC,reservation_id DESC LIMIT ?""").bind(
+            user["id"], module, module, at, at, at, reservation, limit + 1)])
+    validate([part.results for part in result[:len(auth)]])
+    page = usage_events_page(result[-1].results, limit,
+        owner_id=user["id"], module=module)
+    return {**page, "requestId": _header(headers, "X-Request-Id") or f"req_{uuid.uuid4().hex}"}
+
+
 def _resource_auth_snapshot(binding: Any, headers: Mapping[str, object],
                             user: dict, restrictions: dict, now: int,
                             scope: str | tuple[str, ...], proof: dict | None = None):
@@ -306,10 +328,11 @@ async def read_product(*, binding: Any, path: str, headers: Mapping[str, object]
     item_path = path == "/api/v1/items" or path.startswith("/api/v1/items/")
     watch_path = path.startswith("/api/v1/watches/")
     job_path = path.startswith("/api/v1/jobs/")
-    if path not in {"/api/v1/me", "/api/v1/usage", "/api/v1/watches"} and not source_path and not item_path and not job_path and not watch_path:
+    if path not in {"/api/v1/me", "/api/v1/usage", "/api/v1/usage/events", "/api/v1/watches"} and not source_path and not item_path and not job_path and not watch_path:
         return 404, {"error": {"code": "NOT_FOUND"}}
     scope = ("profile:read" if path.endswith("/me") else "usage:read"
-             if path.endswith("/usage") else "items:read" if source_path or item_path or job_path else "watches:read")
+             if path in {"/api/v1/usage", "/api/v1/usage/events"}
+             else "items:read" if source_path or item_path or job_path else "watches:read")
     try:
         user, restrictions = await _principal(binding, headers, scope=scope, now=now)
     except ProductReadAuthError as error:
@@ -329,6 +352,19 @@ async def read_product(*, binding: Any, path: str, headers: Mapping[str, object]
         return 200, {"id": user["id"], "name": user.get("name") or "",
                      "email": user.get("email") or "",
                      "modules": ["pr", "ci", "updates"]}
+    if path == "/api/v1/usage/events":
+        try:
+            return 200, await _usage_events(binding, user, restrictions,
+                headers, now, params or {})
+        except ProductReadAuthError as error:
+            return error.status, {"error": {"code": error.code,
+                "message": error.message, "retryable": False},
+                "requestId": f"req_{uuid.uuid4().hex}"}
+        except ValueError as error:
+            code = str(error) if str(error) in {"INVALID_CONFIGURATION", "INVALID_CURSOR"} else "INVALID_CONFIGURATION"
+            return 422, {"error": {"code": code,
+                "message": "Invalid usage event filters.", "retryable": False},
+                "requestId": f"req_{uuid.uuid4().hex}"}
     if path.endswith("/watches"):
         try:
             return 200, await _watches(binding, user, restrictions, headers, now)

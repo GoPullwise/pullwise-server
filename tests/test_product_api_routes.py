@@ -171,6 +171,23 @@ class ProductApiRoutesTest(unittest.TestCase):
         self.assertEqual(request.status, HTTPStatus.UNPROCESSABLE_ENTITY)
         self.assertEqual(request.payload["error"]["code"], "INVALID_CONFIGURATION")
 
+    def test_usage_events_list_only_consumed_owner_ledger(self) -> None:
+        with self.store._immediate() as connection:
+            connection.execute("""INSERT INTO processing_usage_ledger(
+                charge_key,reservation_id,billing_owner_id,period,module,state,
+                reserved_at,finished_at) VALUES('event-one','res-one','usr_1',
+                'period','pr','consumed',1,2)""")
+            connection.execute("""INSERT INTO processing_usage_ledger(
+                charge_key,reservation_id,billing_owner_id,period,module,state,
+                reserved_at,finished_at) VALUES('other-event','res-other','other',
+                'period','ci','consumed',1,2)""")
+        request = RouteHarness("/api/v1/usage/events?module=pr",
+            cookie=f"{app.SESSION_COOKIE}=ses_1")
+        app.PullwiseHandler.route(request, "GET")
+        self.assertEqual(request.status, HTTPStatus.OK)
+        self.assertEqual([row["id"] for row in request.payload["items"]], ["res-one"])
+        self.assertFalse(request.payload["hasMore"])
+
     def test_manual_sync_from_session_and_key_never_creates_analysis_job(self) -> None:
         session = RouteHarness(
             f"/api/v1/watches/{self.watch['id']}/sync",

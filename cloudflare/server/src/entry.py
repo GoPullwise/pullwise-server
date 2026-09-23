@@ -50,7 +50,9 @@ class Default(WorkerEntrypoint):
         )
         if status == 204:
             return Response(None, status=status)
-        response_headers = None
+        response_headers = ({"Cache-Control": "no-store", "Pragma": "no-cache",
+            "Vary": "Cookie, Authorization, X-Pullwise-Api-Key"}
+            if path == "/api-keys" or path.startswith("/api-keys/") else None)
         if (status == 200 and isinstance(payload, dict)
                 and type(payload.get("revision")) is int
                 and (path.startswith("/api/v1/items/")

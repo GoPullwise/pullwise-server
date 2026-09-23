@@ -15,6 +15,7 @@ from .product_jobs import ProductJobScheduler
 from .product_store import ProductStore
 from .product_source_filters import apply_source_restrictions, filter_sources
 from .product_item_filters import apply_item_restrictions, filter_items, item_in_view
+from .product_usage_events import parse_usage_events_query
 
 
 def _header(handler: object, name: str) -> str:
@@ -137,6 +138,7 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
         or segments == ["items"]
         or segments == ["items", "overview"]
         or segments == ["usage"]
+        or segments == ["usage", "events"]
         or (len(segments) == 2 and segments[0] == "jobs")
         or (len(segments) == 3 and segments[0] == "repositories" and segments[2] == "service")
         or (len(segments) == 2 and segments[0] in {"sources", "items"})
@@ -151,7 +153,7 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
         else "repositories:read"
         if segments == ["repositories"]
         else "usage:read"
-        if segments == ["usage"]
+        if segments == ["usage"] or segments == ["usage", "events"]
         else "repositories:read"
         if len(segments) == 3 and segments[0] == "repositories"
         else "items:read"
@@ -247,6 +249,19 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
         return True
     if segments == ["usage"]:
         handler.json(product_usage_payload(store, principal["user"]))
+        return True
+    if segments == ["usage", "events"]:
+        try:
+            module, _position, limit = parse_usage_events_query(params, owner_id=user_id)
+            page = store.list_processing_usage_events(user_id, module=module,
+                cursor=_query_value(params, "cursor") or None, limit=limit)
+        except ValueError as error:
+            code = str(error)
+            _error(handler, HTTPStatus.UNPROCESSABLE_ENTITY,
+                   code if code in {"INVALID_CONFIGURATION", "INVALID_CURSOR"} else "INVALID_CONFIGURATION",
+                   "Invalid usage event filters.")
+            return True
+        handler.json({**page, "requestId": _request_id(handler)})
         return True
     if segments == ["watches"]:
         items = store.list_watches_for_billing_owner(user_id)

@@ -201,6 +201,28 @@ revision; pending or incomplete assessment must not silently close an item.
   paths recheck credential and user snapshots inside the write batch; a key
   revoked after preflight rolls back. Analysis-off alone is
   config-only and preserves saved historical judgments for reads/handling.
+  `GET /api/v1/usage/events` is shared local REST/Worker: only the
+  authenticated billing owner's consumed processing ledger is visible, with
+  module filter and stable finishedAt/reservationId cursor (default 20,
+  maximum 50). The cursor includes a digest of owner+module and rejects
+  cross-owner/filter reuse. Return opaque reservation ID, never chargeKey; the Worker
+  batches current principal with event rows and performs no write/model call.
+  Candidate legacy `GET /api-keys` is session-only. It batches current Cookie
+  session/user with owner API-key rows, projects only public metadata through
+  `api_key_dto_rules`, redacts token/hash, excludes revoked keys, and sends
+  no-store headers. Bearer API keys cannot enumerate other keys. The local
+  Server API-key response, requested scopes and restriction normalization now
+  delegate to the same pure rules. Candidate Cookie-only `POST /api-keys`
+  generates a one-time token, stores only its hash under a session/user-guarded
+  D1 batch, and returns the token once with no-store headers. SameSite=None
+  Origin is required. Python Workers token bytes come from Web Crypto
+  `crypto.getRandomValues` through FFI; CPython tests use `secrets.token_bytes`.
+  Do not depend on unverified Pyodide `os.urandom` behavior for production
+  token entropy. Complete session/OAuth lifecycle remains unmapped. Candidate
+  `DELETE /api-keys/{id}` is also Cookie-only, checks SameSite=None Origin,
+  rechecks exact session/user in its guarded D1 batch, and preserves billing
+  owner/revision and model attempt spend. A key revoked between preflight and
+  write rolls back; duplicate revoke returns 404.
   The synthetic local HTTP fixture now binds the queued analysis Job and one
   Source context to the first watch. Candidate DELETE must atomically leave
   `reserved=0`, cancel that Job, revoke the context, and keep provider attempts

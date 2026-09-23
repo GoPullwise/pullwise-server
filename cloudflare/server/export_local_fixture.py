@@ -57,6 +57,22 @@ def main() -> None:
         with fixture.store._immediate() as db:
             db.execute("UPDATE source_contexts SET watch_id=? WHERE source_id='1'",
                 (first_watch["id"],))
+            db.execute("""INSERT INTO processing_usage_buckets(
+                billing_owner_id,period,metric,used,reserved,limit_value,updated_at)
+                VALUES('owner','historical','intelligent_processing',2,0,5000,?)""",
+                (fixture.now - 1000,))
+            db.execute("""INSERT INTO processing_usage_ledger(
+                charge_key,reservation_id,billing_owner_id,period,module,state,
+                reserved_at,finished_at)
+                VALUES('historical-unit','res-historical','owner','historical',
+                       'updates','consumed',?,?)""",
+                (fixture.now - 1200, fixture.now - 1000))
+            db.execute("""INSERT INTO processing_usage_ledger(
+                charge_key,reservation_id,billing_owner_id,period,module,state,
+                reserved_at,finished_at)
+                VALUES('historical-unit-2','res-historical-2','owner','historical',
+                       'updates','consumed',?,?)""",
+                (fixture.now - 1100, fixture.now - 900))
         item = fixture.store.create_item(context_id="repo:repo:pr",
             unit_type="pr_thread", unit_key="thread-local-http")
         sources = [dict(sourceId=source_id, sourceVersion=record["sourceVersion"],
