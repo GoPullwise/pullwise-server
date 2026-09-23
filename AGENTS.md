@@ -76,7 +76,15 @@ revision; pending or incomplete assessment must not silently close an item.
   updates under `STATE_LOCK`; `persist_state` later flushes them through
   `db.save_state` and `state_for_storage`. The probe event batch is not this
   path. An async D1 adapter must cover every account writer with revision
-  changes and preserve encrypted fields, pending and late events.
+  changes and preserve encrypted fields, pending and late events. Its billing
+  reducer also calls synchronous `ensure_billing_quota_bucket_for_user`;
+  extract or inject that effect when reusing the existing lifecycle on D1.
+  ACK must follow durable receipt persistence, unlike the current HTTP
+  response-before-finally flush order.
+- `product_api._store()` constructs a synchronous SQLite `ProductStore` for
+  each product-v1 route; some reads also call `db` directly and authenticate
+  through the in-memory users map. Cloudflare REST adaptation must map all
+  three seams while preserving the same Cookie/API-key contract and DTOs.
 
 - `pr_followup.reconcile_thread` aggregates saved pr-followup/v3 answers inside
   the fact/result transaction. One verified thread/context has one Item; source

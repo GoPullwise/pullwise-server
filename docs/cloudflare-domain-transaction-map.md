@@ -167,6 +167,11 @@ maps with `db.save_state` and `state_for_storage`. Its pending association,
 late-event audit and encryption need a designed durable boundary before the
 D1 revision commands can protect actual events. The probe does not prove
 durable webhook acknowledgment or account CAS across Worker invocations.
+The current handler sends ACK before `route` runs `persist_state` in `finally`,
+and that persistence catches exceptions. The billing reducer also calls the
+synchronous quota-bucket writer. Worker adaptation must retain the existing
+payment decisions while moving receipt durability before ACK and including
+the quota limit update in the guarded account transaction.
 ProductStore's reservation bucket limit update also needs a D1 command when
 a plan upgrades; projection alone does not alter existing bucket limits.
 

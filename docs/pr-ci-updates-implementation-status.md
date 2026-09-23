@@ -1238,3 +1238,13 @@ releases the reservation in one guarded batch without a fourth provider
 attempt. The combined async adapter and actual-schema tests reported **42
 passed**. The added scheduled local workerd/D1 case passed in
 `verify_server_mapping.py`; no remote runtime or model request was involved.
+
+The real wiring audit found two additional effects behind the existing
+billing handler: `apply_billing_update_to_user` writes a synchronous quota
+bucket, and `product_api._store()` constructs a SQLite ProductStore for every
+product-v1 route while some GETs call `db` directly. D1 REST adaptation must
+replace those storage seams under the same authenticated DTO contract. The
+Creem lifecycle needs an injected durable quota write alongside its account,
+event and pending-state decisions; merely copying its in-memory maps into D1
+would still leave a split transaction. These are implementation findings, not
+completed Cloudflare integration.
