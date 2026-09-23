@@ -999,6 +999,37 @@ REST/proxy cases on local Workers. Full source-result production orchestration,
 real provider quality/bounded-exit and live-ingestion readiness remain separate
 gates; P5b remains deferred.
 
+## D1 owner-cycle budget, reservation and failure continuation (2026-09-23)
+
+Added `period_start` to the local entitlement authority. The owner monthly
+provider-attempt budget now spans the actual billing cycle, including attempts
+from the preceding UTC month, while the global monthly budget stays UTC.
+The old count admitted a fixed Jan-to-Feb counterexample; the corrected test
+rejects it without partial claim or attempt writes.
+
+Added an async `D1AnalysisTransactions` adapter that reads persisted owner
+snapshot/revision/limit before a first reservation or claim, and the frozen
+claim revision before first-result publication. A first reservation upserts
+the current bucket limit without resetting usage and atomically inserts its
+ledger entry; duplicate first-charge attempts, quota exhaustion, dirty
+projection and stale snapshots reject as a whole. Retryable job failure
+persists a deadline and retains reservation/attempt spend. Terminal failure
+or attempt 3 releases the reservation and marks job/context failed in one
+batch; expired tokens cannot release newer work.
+
+The same Server modules ran in local workerd/D1 and after an actual process
+restart under the new ignored `.wrangler/server-map-cycle-state` directory.
+Fresh local Python Worker startup exceeded the old 20-second probe timeout,
+so the probe driver now allows 90 seconds; warm requests stayed fast. The
+process was stopped. This is not remote Cloudflare validation, a full async
+ProductStore, or CF2. Real Creem, scheduling, REST, source-only/cache replay,
+charge-key reuse and revocation/cancellation remain open.
+
+After this slice, the broader selected Server regression reported **764 passed,
+84 subtests** with Python 3.13 and workspace TEMP/TMP. Server CI remained at
+run 35824307016, failed before tests while checking out the retired Gateway
+Worker; Web Actions remained empty. No push or remote validation occurred.
+
 ## Async D1 account boundary continuation (2026-09-23)
 
 Moved finite mapping commands into Server `cloudflare_d1_mapping.py` and

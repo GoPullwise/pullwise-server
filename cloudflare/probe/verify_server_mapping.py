@@ -10,7 +10,8 @@ def call(path, method="POST"):
     request = urllib.request.Request("http://127.0.0.1:8796/server-map/" + path, method=method,
                                      data=b"{}" if method == "POST" else None)
     try:
-        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=20) as response:
+        # A fresh local Python Worker/D1 import can cold-start slowly.
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=90) as response:
             return response.status, json.load(response)
     except urllib.error.HTTPError as response:
         return response.code, json.load(response)
@@ -34,6 +35,25 @@ def main():
     assert sorted(statuses) == [200, 409], statuses
     assert call("publish")[0] == 200
     assert call("publish")[0] == 409
+    assert call("reset")[0] == 200
+    assert call("reserve-first")[0] == 200
+    assert call("reserve-first")[0] == 409
+    state = call("state", "GET")[1]
+    assert state["reserved"] == 2 and state["limitValue"] == 5000, state
+    assert state["secondReservation"] == state["encryptedToken"] == 1, state
+    assert call("reset")[0] == 200
+    assert call("claim")[0] == 200
+    assert call("retry-claim")[0] == 200
+    state = call("state", "GET")[1]
+    assert state["jobState"] == "retry_wait" and state["jobAttempt"] == 1, state
+    assert state["reserved"] == 1 and state["attempts"] == 1, state
+    assert call("claim")[0] == 409
+    assert call("claim-after-retry")[0] == 200
+    assert call("terminal-claim")[0] == 200
+    assert call("terminal-claim")[0] == 409
+    state = call("state", "GET")[1]
+    assert state["jobState"] == "failed" and state["jobAttempt"] == 2, state
+    assert state["reserved"] == state["used"] == 0 and state["attempts"] == 2, state
     for fault in ("edit-parent", "change-account", "break-reservation"):
         assert call("reset")[0] == 200
         assert call("claim")[0] == 200
@@ -54,7 +74,7 @@ def main():
     assert state["accountRevision"] == 2 and state["accountDirty"] == 1, state
     assert call("account-write-b")[0] == 200
     assert call("refresh-account")[0] == 200
-    assert call("claim")[0] == 409
+    assert call("claim-frozen")[0] == 409
     assert call("claim-current")[0] == 200
     assert call("publish-current")[0] == 200
     assert call("reset")[0] == 200
@@ -78,7 +98,7 @@ def main():
     assert state["eventA"] == 1 and state["originalPaymentFactPreserved"] == 1
     assert call("event-b")[0] == 200
     assert call("refresh-account")[0] == 200
-    assert call("claim")[0] == 409  # Old revision remains fenced after A→B→A.
+    assert call("claim-frozen")[0] == 409  # Old revision remains fenced after A→B→A.
     assert call("claim-current")[0] == 200
     assert call("publish-current")[0] == 200
     state = call("state", "GET")[1]

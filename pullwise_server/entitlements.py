@@ -1,26 +1,11 @@
 from __future__ import annotations
 
-import calendar
-import time
 from typing import Any
 
 from . import quota
 from .product_store import ProductStore
 from .product_entitlement_rules import PLAN_ENTITLEMENTS, entitlements_for_user
-
-
-def _period_start(period: str, reset_at: int) -> int:
-    if period.startswith("cycle:"):
-        try:
-            return max(0, int(period.removeprefix("cycle:")))
-        except ValueError:
-            return max(0, reset_at - 31 * 24 * 60 * 60)
-    try:
-        year_text, month_text = period.split("-", 1)
-        return calendar.timegm((int(year_text), int(month_text), 1, 0, 0, 0))
-    except (TypeError, ValueError):
-        current = time.gmtime()
-        return calendar.timegm((current.tm_year, current.tm_mon, 1, 0, 0, 0))
+from .account_cycle_rules import period_start_for_key as _period_start
 
 
 def product_usage_payload(

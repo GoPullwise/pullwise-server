@@ -24,8 +24,10 @@ def execute(store, statements):
             db.execute(sql, params)
 
 
-def seed(path):
+def seed(path, *, now=None):
     f = ThreadFixture(path)
+    if now is not None:
+        f.now = now
     f.source("1", "Please change")
     f.source("2", "Question", reply="1")
     account = dict(id="owner", createdAt=f.now - 864000,
@@ -241,10 +243,10 @@ def test_projection_rolls_monthly_period_and_paid_expiry_from_snapshot():
     frozen = json.dumps(user)
     january = m._projection("owner", frozen, stamp(1, 20))
     february = m._projection("owner", frozen, stamp(2, 20))
-    assert january == ("pro", f"cycle:{anchor}", 5000, stamp(2, 15))
-    assert february == ("pro", f"cycle:{stamp(2, 15)}", 5000, stamp(3, 15))
+    assert january == ("pro", f"cycle:{anchor}", anchor, 5000, stamp(2, 15))
+    assert february == ("pro", f"cycle:{stamp(2, 15)}", stamp(2, 15), 5000, stamp(3, 15))
     expired = m._projection("owner", frozen, end)
-    assert expired[0] == "free" and expired[2] == 200 and expired[3] > end
+    assert expired[0] == "free" and expired[3] == 200 and expired[4] > end
     with pytest.raises(ValueError):
         m._projection("other", frozen, end)
 
@@ -335,3 +337,127 @@ def test_probe_fixture_preserves_encrypted_account_fields_without_plaintext(tmp_
     assert "synthetic_identity_token" not in frozen
     with closing(f.store.connect()) as db:
         assert db.execute("SELECT payload FROM app_state WHERE name='billingEvents'").fetchone()[0] == '{"event_fixture":{"status":"processed"}}'
+
+
+def test_owner_monthly_attempt_budget_uses_billing_cycle_across_utc_month(tmp_path):
+    from datetime import datetime, timezone
+    now = int(datetime(2027, 2, 1, 12, tzinfo=timezone.utc).timestamp())
+    previous_month_attempt = int(datetime(2027, 1, 25, tzinfo=timezone.utc).timestamp())
+    f, job, frozen = seed(tmp_path / "domain.db", now=now)
+    m = mapping()
+    with f.store._immediate() as db:
+        for index in range(10):
+            db.execute("""INSERT INTO provider_attempts
+                (attempt_id,billing_owner_id,input_key,period_utc,occurred_at,created_at)
+                VALUES (?,?,?,?,?,?)""", (f"older-{index}", "owner", f"old-{index}",
+                "2027-01", previous_month_attempt, previous_month_attempt))
+    with pytest.raises(sqlite3.IntegrityError):
+        execute(f.store, m.claim(**claim_args(f, job, frozen)))
+    with closing(f.store.connect()) as db:
+        assert db.execute("SELECT COUNT(*) FROM provider_attempts").fetchone()[0] == 10
+        assert f.store.get_background_job(job["id"])["status"] == "queued"
+
+
+def test_first_d1_reservation_uses_projected_limit_without_resetting_usage(tmp_path):
+    m = mapping()
+    f, _, frozen = seed(tmp_path / "domain.db")
+    with f.store._immediate() as db:
+        db.execute("UPDATE processing_usage_buckets SET used=3 WHERE billing_owner_id='owner'")
+    changed = json.dumps({**json.loads(frozen), "billing": {**json.loads(frozen)["billing"],
+        "plan": "max"}}, separators=(",", ":"))
+    execute(f.store, m.stage_account_event(owner_id="owner", expected_revision=1,
+        account_snapshot=frozen, next_account_json=changed, event_id="upgrade-reserve",
+        event_record_json='{"applied":true}', now=f.now))
+    execute(f.store, m.refresh_account_entitlement(owner_id="owner", expected_revision=2,
+        account_snapshot=changed, now=f.now))
+    args = dict(owner_id="owner", account_snapshot=changed, account_revision=3,
+        charge_key="new-charge", reservation_id="new-reservation", module="ci", now=f.now)
+    execute(f.store, m.reserve_first_processing_unit(**args))
+    with closing(f.store.connect()) as db:
+        bucket = db.execute("SELECT used,reserved,limit_value FROM processing_usage_buckets WHERE billing_owner_id='owner'").fetchone()
+        assert tuple(bucket) == (3, 2, 25000)
+        assert db.execute("SELECT state FROM processing_usage_ledger WHERE charge_key='new-charge'").fetchone()[0] == "reserved"
+    with pytest.raises(sqlite3.IntegrityError):
+        execute(f.store, m.reserve_first_processing_unit(**args))
+    with closing(f.store.connect()) as db:
+        assert tuple(db.execute("SELECT used,reserved FROM processing_usage_buckets WHERE billing_owner_id='owner'").fetchone()) == (3, 2)
+
+
+@pytest.mark.parametrize("fault", ["quota", "dirty", "stale_snapshot"])
+def test_first_d1_reservation_rejection_has_no_partial_ledger_or_usage(tmp_path, fault):
+    m = mapping()
+    f, _, frozen = seed(tmp_path / "domain.db")
+    args = dict(owner_id="owner", account_snapshot=frozen, account_revision=1,
+        charge_key="new-charge", reservation_id="new-reservation", module="ci", now=f.now)
+    if fault == "quota":
+        with f.store._immediate() as db:
+            db.execute("UPDATE processing_usage_buckets SET used=4999 WHERE billing_owner_id='owner'")
+    elif fault == "dirty":
+        changed = json.dumps({**json.loads(frozen), "githubLogin": "new"}, separators=(",", ":"))
+        execute(f.store, m.stage_account_write(owner_id="owner", expected_revision=1,
+            account_snapshot=frozen, next_account_json=changed, now=f.now))
+        args.update(account_snapshot=changed, account_revision=2)
+    else:
+        args["account_snapshot"] = "{}"
+    with pytest.raises(sqlite3.IntegrityError):
+        execute(f.store, m.reserve_first_processing_unit(**args))
+    with closing(f.store.connect()) as db:
+        assert db.execute("SELECT COUNT(*) FROM processing_usage_ledger WHERE charge_key='new-charge'").fetchone()[0] == 0
+        assert db.execute("SELECT reserved FROM processing_usage_buckets WHERE billing_owner_id='owner'").fetchone()[0] == 1
+
+
+def test_d1_retry_and_terminal_failure_persist_deadline_and_release_once(tmp_path):
+    m = mapping()
+    f, job, frozen = seed(tmp_path / "domain.db")
+    args = claim_args(f, job, frozen)
+    execute(f.store, m.claim(**args))
+    execute(f.store, m.record_claim_failure(job_id=job["id"], token=args["token"],
+        now=f.now + 1, retryable=True, next_attempt_at=f.now + 40))
+    with closing(f.store.connect()) as db:
+        assert tuple(db.execute("SELECT state,next_attempt_at FROM background_jobs").fetchone()) == ("retry_wait", f.now + 40)
+        assert db.execute("SELECT reserved FROM processing_usage_buckets").fetchone()[0] == 1
+    next_claim = {**args, "token": "claim-two", "now": f.now + 39}
+    with pytest.raises(sqlite3.IntegrityError):
+        execute(f.store, m.claim(**next_claim))
+    next_claim["now"] = f.now + 40
+    execute(f.store, m.claim(**next_claim))
+    execute(f.store, m.record_claim_failure(job_id=job["id"], token="claim-two",
+        now=f.now + 41, retryable=False, next_attempt_at=None))
+    with pytest.raises(sqlite3.IntegrityError):
+        execute(f.store, m.record_claim_failure(job_id=job["id"], token="claim-two",
+            now=f.now + 42, retryable=False, next_attempt_at=None))
+    with closing(f.store.connect()) as db:
+        assert db.execute("SELECT state FROM background_jobs").fetchone()[0] == "failed"
+        assert db.execute("SELECT state FROM processing_usage_ledger").fetchone()[0] == "released"
+        assert tuple(db.execute("SELECT used,reserved FROM processing_usage_buckets").fetchone()) == (0, 0)
+        assert db.execute("SELECT COUNT(*) FROM provider_attempts").fetchone()[0] == 2
+
+
+def test_d1_expired_claim_cannot_release_or_retry(tmp_path):
+    m = mapping()
+    f, job, frozen = seed(tmp_path / "domain.db")
+    args = claim_args(f, job, frozen)
+    execute(f.store, m.claim(**args))
+    with pytest.raises(sqlite3.IntegrityError):
+        execute(f.store, m.record_claim_failure(job_id=job["id"], token=args["token"],
+            now=f.now + 120, retryable=False, next_attempt_at=None))
+    with closing(f.store.connect()) as db:
+        assert db.execute("SELECT state FROM background_jobs").fetchone()[0] == "running"
+        assert db.execute("SELECT state FROM processing_usage_ledger").fetchone()[0] == "reserved"
+        assert db.execute("SELECT reserved FROM processing_usage_buckets").fetchone()[0] == 1
+
+
+def test_d1_attempt_three_is_terminal_even_when_failure_is_retryable(tmp_path):
+    m = mapping()
+    f, job, frozen = seed(tmp_path / "domain.db")
+    args = claim_args(f, job, frozen)
+    for attempt in range(3):
+        token = f"claim-{attempt}"
+        now = f.now + attempt * 40
+        execute(f.store, m.claim(**{**args, "token": token, "now": now}))
+        execute(f.store, m.record_claim_failure(job_id=job["id"], token=token,
+            now=now + 1, retryable=True, next_attempt_at=now + 40))
+    with closing(f.store.connect()) as db:
+        assert tuple(db.execute("SELECT state,attempt,next_attempt_at FROM background_jobs").fetchone()) == ("failed", 3, None)
+        assert db.execute("SELECT state FROM processing_usage_ledger").fetchone()[0] == "released"
+        assert db.execute("SELECT COUNT(*) FROM provider_attempts").fetchone()[0] == 3

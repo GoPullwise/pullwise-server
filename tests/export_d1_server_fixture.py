@@ -36,7 +36,7 @@ def main():
         package.mkdir(exist_ok=True)
         (package / "__init__.py").write_text("", encoding="utf-8")
         for name in ("account_cycle_rules", "product_entitlement_rules", "cloudflare_d1_batch",
-                     "cloudflare_d1_mapping", "cloudflare_account_adapter"):
+                     "cloudflare_d1_mapping", "cloudflare_account_adapter", "cloudflare_analysis_adapter"):
             source = Path(__file__).parents[1] / "pullwise_server" / f"{name}.py"
             (package / f"{name}.py").write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
         print("Generated synthetic Server schema fixture")

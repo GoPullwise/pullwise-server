@@ -159,3 +159,17 @@ def quota_cycle_for_user(user: dict[str, Any] | None, plan: str, *, timestamp: i
 
     period = current_period(current_time)
     return period, reset_at_for_period(period)
+
+
+def period_start_for_key(period: str, reset_at: int) -> int:
+    if period.startswith("cycle:"):
+        try:
+            return max(0, int(period.removeprefix("cycle:")))
+        except ValueError:
+            return max(0, reset_at - 31 * 24 * 60 * 60)
+    try:
+        year_text, month_text = period.split("-", 1)
+        return calendar.timegm((int(year_text), int(month_text), 1, 0, 0, 0))
+    except (TypeError, ValueError):
+        current = time.gmtime()
+        return calendar.timegm((current.tm_year, current.tm_mon, 1, 0, 0, 0))

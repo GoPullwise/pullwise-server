@@ -13,6 +13,7 @@ def schema():
         ("""CREATE TABLE IF NOT EXISTS account_entitlement_authority(
             owner_id TEXT PRIMARY KEY, revision INTEGER NOT NULL CHECK(revision>=1),
             plan TEXT NOT NULL, period TEXT NOT NULL,
+            period_start INTEGER NOT NULL CHECK(period_start>=0),
             monthly_processing_limit INTEGER NOT NULL CHECK(monthly_processing_limit>=0),
             valid_until INTEGER NOT NULL, dirty INTEGER NOT NULL CHECK(dirty IN (0,1))
         )""", ()),
@@ -37,14 +38,16 @@ def _account(job_id, frozen, revision, now):
         JOIN account_entitlement_authority authority ON authority.owner_id=j.billing_owner_id
         JOIN processing_usage_ledger ledger ON ledger.reservation_id=j.reservation_id
         WHERE a.name='users' AND u.key=j.billing_owner_id AND u.value=? AND j.id=?
-        AND authority.revision=? AND authority.dirty=0 AND authority.valid_until>?
-        AND authority.period=ledger.period)""", (frozen, job_id, revision, now))
+        AND authority.revision=? AND authority.dirty=0
+        AND authority.period_start<=? AND authority.valid_until>?
+        AND authority.period=ledger.period)""", (frozen, job_id, revision, now, now))
 
 
 def _projection(owner_id, account_snapshot, now):
     # Imported only by the Server-side fixture/adapter. The isolated Worker
     # executes exported commands and carries no second copy of billing rules.
     from pullwise_server.product_entitlement_rules import entitlements_for_user
+    from pullwise_server.account_cycle_rules import period_start_for_key
 
     user = json.loads(account_snapshot)
     if not isinstance(user, dict) or user.get("id") != owner_id:
@@ -54,18 +57,19 @@ def _projection(owner_id, account_snapshot, now):
     if valid_until <= now:
         raise ValueError("expired entitlement projection")
     return (entitlement["plan"], entitlement["period"],
+            period_start_for_key(entitlement["period"], valid_until),
             entitlement["entitlements"]["monthlyProcessingLimit"], valid_until)
 
 
 def initialize_account(*, owner_id, account_snapshot, now):
     """Local synthetic seed after the account has been persisted; no API entrypoint."""
-    plan, period, monthly_processing_limit, valid_until = _projection(owner_id, account_snapshot, now)
+    plan, period, period_start, monthly_processing_limit, valid_until = _projection(owner_id, account_snapshot, now)
     return [_check("""EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u
         WHERE a.name='users' AND u.key=? AND u.value=?)""", (owner_id, account_snapshot)),
         ("""INSERT INTO account_entitlement_authority
-        (owner_id,revision,plan,period,monthly_processing_limit,valid_until,dirty)
-        VALUES (?,1,?,?,?,?,0)""",
-        (owner_id, plan, period, monthly_processing_limit, valid_until)),
+        (owner_id,revision,plan,period,period_start,monthly_processing_limit,valid_until,dirty)
+        VALUES (?,1,?,?,?,?,?,0)""",
+        (owner_id, plan, period, period_start, monthly_processing_limit, valid_until)),
         ("DELETE FROM d1_command_guard", ())]
 
 
@@ -185,15 +189,52 @@ def stage_account_event(*, owner_id, expected_revision, account_snapshot,
 
 def refresh_account_entitlement(*, owner_id, expected_revision, account_snapshot, now):
     """Commit a trusted entitlement calculation over the persisted account."""
-    plan, period, monthly_processing_limit, valid_until = _projection(owner_id, account_snapshot, now)
+    plan, period, period_start, monthly_processing_limit, valid_until = _projection(owner_id, account_snapshot, now)
     return [
         _check("""EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u,
             account_entitlement_authority authority WHERE a.name='users' AND u.key=?
             AND u.value=? AND authority.owner_id=? AND authority.revision=?)""",
             (owner_id, account_snapshot, owner_id, expected_revision)),
         ("""UPDATE account_entitlement_authority SET revision=revision+1,plan=?,period=?,
-            monthly_processing_limit=?,valid_until=?,dirty=0 WHERE owner_id=? AND revision=?""",
-            (plan, period, monthly_processing_limit, valid_until, owner_id, expected_revision)), _changed(),
+            period_start=?,monthly_processing_limit=?,valid_until=?,dirty=0
+            WHERE owner_id=? AND revision=?""",
+            (plan, period, period_start, monthly_processing_limit, valid_until, owner_id, expected_revision)), _changed(),
+        ("DELETE FROM d1_command_guard", ()),
+    ]
+
+
+def reserve_first_processing_unit(*, owner_id, account_snapshot, account_revision,
+                                  charge_key, reservation_id, module, now):
+    """Reserve a new charge key under the current persisted entitlement.
+
+    Replay/released-charge semantics remain a separate transaction mapping.
+    """
+    if (not all(isinstance(value, str) and value for value in
+                (owner_id, charge_key, reservation_id)) or module not in {"pr", "ci", "updates"}):
+        raise ValueError("invalid processing reservation identity")
+    return [
+        _check("""EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u,
+            account_entitlement_authority authority WHERE a.name='users' AND u.key=?
+            AND u.value=? AND authority.owner_id=? AND authority.revision=?
+            AND authority.dirty=0 AND authority.period_start<=? AND authority.valid_until>?)""",
+            (owner_id, account_snapshot, owner_id, account_revision, now, now)),
+        _check("""NOT EXISTS(SELECT 1 FROM processing_usage_ledger
+            WHERE charge_key=? OR reservation_id=?)""", (charge_key, reservation_id)),
+        ("""INSERT INTO processing_usage_buckets
+            (billing_owner_id,period,metric,used,reserved,limit_value,updated_at)
+            SELECT owner_id,period,'intelligent_processing',0,0,monthly_processing_limit,?
+            FROM account_entitlement_authority WHERE owner_id=?
+            ON CONFLICT(billing_owner_id,period,metric) DO UPDATE SET
+            limit_value=excluded.limit_value,updated_at=excluded.updated_at""", (now, owner_id)), _changed(),
+        ("""UPDATE processing_usage_buckets SET reserved=reserved+1,updated_at=?
+            WHERE billing_owner_id=? AND period=(SELECT period FROM account_entitlement_authority WHERE owner_id=?)
+            AND metric='intelligent_processing' AND used+reserved<limit_value""",
+            (now, owner_id, owner_id)), _changed(),
+        ("""INSERT INTO processing_usage_ledger
+            (charge_key,reservation_id,billing_owner_id,period,module,state,reserved_at,finished_at)
+            SELECT ?,?,owner_id,period,?,'reserved',?,NULL
+            FROM account_entitlement_authority WHERE owner_id=?""",
+            (charge_key, reservation_id, module, now, owner_id)), _changed(),
         ("DELETE FROM d1_command_guard", ()),
     ]
 
@@ -231,16 +272,55 @@ def claim(*, job_id, token, now, account_snapshot, account_revision, owner_month
         ("""INSERT INTO provider_attempts(attempt_id,billing_owner_id,input_key,period_utc,occurred_at,created_at)
             SELECT ?,j.billing_owner_id,j.logical_key,?,?,? FROM background_jobs j WHERE j.id=?
               AND (SELECT COUNT(*) FROM provider_attempts WHERE period_utc=?)<?
-              AND (SELECT COUNT(*) FROM provider_attempts WHERE period_utc=? AND billing_owner_id=j.billing_owner_id)<?
+              AND (SELECT COUNT(*) FROM provider_attempts attempts
+                   JOIN account_entitlement_authority authority ON authority.owner_id=j.billing_owner_id
+                   WHERE attempts.billing_owner_id=j.billing_owner_id
+                   AND attempts.occurred_at>=authority.period_start
+                   AND attempts.occurred_at<authority.valid_until)<?
               AND (SELECT COUNT(*) FROM provider_attempts WHERE occurred_at BETWEEN ? AND ?)<?
               AND (SELECT COUNT(*) FROM provider_attempts WHERE occurred_at BETWEEN ? AND ? AND billing_owner_id=j.billing_owner_id)<?""",
-         (token, period, now, now, job_id, period, global_monthly_limit, period, owner_monthly_limit,
+         (token, period, now, now, job_id, period, global_monthly_limit, owner_monthly_limit,
           max(0, now - 59), now, global_rolling_limit, max(0, now - 59), now, owner_rolling_limit)), _changed(),
         ("""UPDATE source_contexts SET processing_status='processing',updated_at=? WHERE (source_id,context_id)=
             (SELECT source_id,context_id FROM background_jobs WHERE id=?)""", (now, job_id)), _changed(),
         ("""INSERT INTO analysis_claim_owners(billing_owner_id,last_claim_order)
             SELECT billing_owner_id,(SELECT COALESCE(MAX(last_claim_order),0)+1 FROM analysis_claim_owners)
             FROM background_jobs WHERE id=? ON CONFLICT(billing_owner_id) DO UPDATE SET last_claim_order=excluded.last_claim_order""", (job_id,)),
+        ("DELETE FROM d1_command_guard", ()),
+    ]
+
+
+def record_claim_failure(*, job_id, token, now, retryable, next_attempt_at):
+    """Fence one failed execution and release its reservation only if terminal."""
+    if not isinstance(retryable, bool):
+        raise ValueError("retryable must be boolean")
+    if retryable and (type(next_attempt_at) is not int or next_attempt_at <= now):
+        raise ValueError("retry requires a future deadline")
+    retry_or_changed = """changes()=1 OR EXISTS(SELECT 1 FROM background_jobs
+        WHERE id=? AND state='retry_wait')"""
+    return [
+        _check("""EXISTS(SELECT 1 FROM background_jobs WHERE id=?
+            AND job_type='analyze_source' AND state='running' AND claim_token=?
+            AND claimed_until>?)""", (job_id, token, now)),
+        ("""UPDATE background_jobs SET
+            state=CASE WHEN ? AND attempt<3 THEN 'retry_wait' ELSE 'failed' END,
+            claim_token=NULL,claimed_until=NULL,
+            next_attempt_at=CASE WHEN ? AND attempt<3 THEN ? ELSE NULL END,
+            updated_at=? WHERE id=? AND state='running' AND claim_token=? AND claimed_until>?""",
+            (int(retryable), int(retryable), next_attempt_at, now, job_id, token, now)), _changed(),
+        ("""UPDATE processing_usage_buckets SET reserved=reserved-1,updated_at=?
+            WHERE (billing_owner_id,period)=(SELECT ledger.billing_owner_id,ledger.period
+                FROM background_jobs job JOIN processing_usage_ledger ledger
+                ON ledger.reservation_id=job.reservation_id WHERE job.id=?)
+            AND metric='intelligent_processing' AND reserved>=1
+            AND EXISTS(SELECT 1 FROM background_jobs WHERE id=? AND state='failed')""",
+            (now, job_id, job_id)), _check(retry_or_changed, (job_id,)),
+        ("""UPDATE processing_usage_ledger SET state='released',finished_at=?
+            WHERE reservation_id=(SELECT reservation_id FROM background_jobs WHERE id=? AND state='failed')
+            AND state='reserved'""", (now, job_id)), _check(retry_or_changed, (job_id,)),
+        ("""UPDATE source_contexts SET processing_status='failed',updated_at=?
+            WHERE (source_id,context_id)=(SELECT source_id,context_id FROM background_jobs
+                WHERE id=? AND state='failed')""", (now, job_id)), _check(retry_or_changed, (job_id,)),
         ("DELETE FROM d1_command_guard", ()),
     ]
 

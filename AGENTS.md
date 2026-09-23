@@ -36,6 +36,16 @@ revision; pending or incomplete assessment must not silently close an item.
   caller must pass `state_for_storage` account JSON and validated billing
   handler output. Pending association updates users, billingEvents and
   billingPendingUpdates in one guarded batch; this is not yet wired to Creem.
+- In D1 claim, global monthly provider attempts use the UTC month, while
+  billing-owner monthly attempts use the account entitlement's persisted
+  `period_start`/strict `valid_until`. Do not count owner attempts by
+  `provider_attempts.period_utc`: a paid cycle can cross a UTC month.
+- `cloudflare_analysis_adapter.py` reads owner snapshot/revision/limit from D1
+  for a first reservation or claim and reads the claim-frozen revision for
+  first-result publication. Retry/terminal failure keeps attempt spend,
+  persists the deadline or atomically releases reservation and job state.
+  Replay/released charge keys, full job scheduling, source-only/cache replay
+  and all cancellation/revocation paths still need mapping.
 - The real Creem handler mutates in-memory users, billingEvents and pending
   updates under `STATE_LOCK`; `persist_state` later flushes them through
   `db.save_state` and `state_for_storage`. The probe event batch is not this

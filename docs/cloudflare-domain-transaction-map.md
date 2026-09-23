@@ -73,6 +73,24 @@ conservatively retained while successful processing remains charge-key guarded.
 
 ## Persisted-account projection boundary
 
+The local projection now stores `period_start` as well as strict validUntil.
+Claim uses the UTC month for global attempts and the billing owner's projected
+cycle interval for owner monthly attempts. A fixed Jan-to-Feb paid-cycle test
+failed under the old shared UTC-month count and passes after the mapping
+change. The old local D1 state directory remains untouched; the revised
+schema was exercised under `.wrangler/server-map-cycle-state` with a real
+process restart.
+
+`cloudflare_analysis_adapter.py` derives owner snapshot, revision and monthly
+attempt limit from D1 rather than trusting caller values. The first-charge
+reservation command updates a bucket's limit on an upgrade without clearing
+used/reserved counts. Its current scope deliberately rejects replayed charge
+keys; released-charge reuse still needs mapping. Failed execution commands
+fence the active token/lease, persist retry_wait deadlines, and on terminal
+failure release ledger/bucket and mark the job failed in one batch. Attempt
+spend remains. These paths passed local SQLite and workerd/D1 restart probes;
+no real scheduler or provider call uses them yet.
+
 The command builders now live in Server `cloudflare_d1_mapping.py`, with
 `cloudflare_account_adapter.py` providing async snapshot reads and one D1
 `batch()` call per guarded write. The isolated probe packages the same Server

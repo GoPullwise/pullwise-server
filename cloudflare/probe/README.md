@@ -132,6 +132,15 @@ aggregation and unseen-PR coverage remain separate work.
 
 ## Actual Server schema mapping continuation
 
+The current generated Server mapping has an additional persisted
+`period_start` column. Run the local actual-schema driver with
+`--persist-to .wrangler/server-map-cycle-state` on port 8796; retain the
+previous `.wrangler/server-map-state` directory as historical local evidence.
+The driver now checks account-cycle owner attempt limits through Server tests,
+first reservation, retry deadline, terminal release and replay after a real
+restart. Fresh local Worker cold start can exceed 20 seconds; the driver uses
+a 90-second request timeout. None of these results is remote validation.
+
 The synthetic fixture generator now copies Server-owned D1 mapping, async
 batch/account adapter and pure entitlement-rule modules into an ignored local
 Worker package. `/server-map/*` uses that adapter for account event, generic

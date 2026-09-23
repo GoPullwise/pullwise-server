@@ -44,15 +44,23 @@ class Default(WorkerEntrypoint):
         from server_fixture import DATA
         from pullwise_server.cloudflare_d1_batch import execute_d1_batch
         from pullwise_server.cloudflare_account_adapter import D1AccountTransactions
+        from pullwise_server.cloudflare_analysis_adapter import D1AnalysisTransactions
         import server_mapping as mapping
         name = url.path.removeprefix('/server-map/')
         if request.method == 'GET' and name == 'state':
             return Response.json(await self.env.DB.prepare('''SELECT
                 (SELECT used FROM processing_usage_buckets LIMIT 1) AS used,
+                (SELECT reserved FROM processing_usage_buckets LIMIT 1) AS reserved,
+                (SELECT limit_value FROM processing_usage_buckets LIMIT 1) AS limitValue,
+                (SELECT COUNT(*) FROM processing_usage_ledger WHERE charge_key='probe-second') AS secondReservation,
+                (SELECT json_extract(value,'$.githubAccessToken.__encrypted')='pullwise-state-secret-v1'
+                    FROM app_state,json_each(payload) WHERE name='users' AND key='owner') AS encryptedToken,
                 (SELECT COUNT(*) FROM provider_attempts) AS attempts,
                 (SELECT COUNT(*) FROM assessments) AS results,
                 (SELECT COUNT(*) FROM item_versions) AS versions,
                 (SELECT state FROM background_jobs LIMIT 1) AS jobState,
+                (SELECT attempt FROM background_jobs LIMIT 1) AS jobAttempt,
+                (SELECT next_attempt_at FROM background_jobs LIMIT 1) AS nextAttemptAt,
                 (SELECT revision FROM account_entitlement_authority LIMIT 1) AS accountRevision,
                 (SELECT dirty FROM account_entitlement_authority LIMIT 1) AS accountDirty,
                 (SELECT json_type(payload,'$."event-a"') IS NOT NULL FROM app_state
@@ -73,26 +81,28 @@ class Default(WorkerEntrypoint):
             await self.env.DB.batch([self.env.DB.prepare(sql) for sql in DATA['schemas']]
                 + [self.env.DB.prepare(sql) for sql, _ in mapping.schema()])
             commands = [('DELETE FROM ' + table, ()) for table in reversed(DATA['names'])] + DATA['inserts']
+        elif name == 'claim-frozen':
+            commands = mapping.claim(**DATA['claim'])
         elif name in {'claim', 'claim-current', 'claim-reconciled'}:
-            args = dict(DATA['claim'])
-            if name == 'claim-current':
-                args['account_revision'] = 4
-            elif name == 'claim-reconciled':
-                args['account_revision'] = 3
-                account = json.loads(args['account_snapshot'])
-                args['account_snapshot'] = json.dumps(dict(account,
-                    billing=dict(account['billing'], customerId='customer')), separators=(',', ':'))
-            commands = mapping.claim(**args)
+            args = DATA['claim']
+            try:
+                await D1AnalysisTransactions(self.env.DB).claim(
+                    job_id=args['job_id'], token=args['token'], now=args['now'],
+                    global_monthly_limit=args['global_monthly_limit'],
+                    owner_rolling_limit=args['owner_rolling_limit'],
+                    global_rolling_limit=args['global_rolling_limit'])
+                return Response.json({'committed': True})
+            except Exception:
+                return Response.json({'committed': False}, status=409)
         elif name in {'publish', 'publish-current', 'publish-reconciled'}:
             args = dict(DATA['publication'])
-            if name == 'publish-current':
-                args['account_revision'] = 4
-            elif name == 'publish-reconciled':
-                args['account_revision'] = 3
-                account = json.loads(args['account_snapshot'])
-                args['account_snapshot'] = json.dumps(dict(account,
-                    billing=dict(account['billing'], customerId='customer')), separators=(',', ':'))
-            commands = mapping.publication(**args)
+            args.pop('account_snapshot')
+            args.pop('account_revision')
+            try:
+                await D1AnalysisTransactions(self.env.DB).publication(**args)
+                return Response.json({'committed': True})
+            except Exception:
+                return Response.json({'committed': False}, status=409)
         elif name in {'event-a', 'event-b'}:
             account = json.loads(DATA['claim']['account_snapshot'])
             changed = dict(account, billing=dict(account['billing'], plan='free'))
@@ -149,6 +159,36 @@ class Default(WorkerEntrypoint):
             try:
                 await D1AccountTransactions(self.env.DB).refresh_account_entitlement(
                     owner_id='owner', expected_revision=2, now=DATA['claim']['now'])
+                return Response.json({'committed': True})
+            except Exception:
+                return Response.json({'committed': False}, status=409)
+        elif name == 'reserve-first':
+            try:
+                await D1AnalysisTransactions(self.env.DB).reserve_first_processing_unit(
+                    owner_id='owner', charge_key='probe-second', reservation_id='probe-second-reservation',
+                    module='ci', now=DATA['claim']['now'])
+                return Response.json({'committed': True})
+            except Exception:
+                return Response.json({'committed': False}, status=409)
+        elif name in {'retry-claim', 'terminal-claim'}:
+            retry = name == 'retry-claim'
+            try:
+                await D1AnalysisTransactions(self.env.DB).record_claim_failure(
+                    job_id=DATA['claim']['job_id'],
+                    token='claim-fixture' if retry else 'claim-after-retry',
+                    now=DATA['claim']['now'] + (1 if retry else 41),
+                    retryable=retry, next_attempt_at=DATA['claim']['now'] + 40 if retry else None)
+                return Response.json({'committed': True})
+            except Exception:
+                return Response.json({'committed': False}, status=409)
+        elif name == 'claim-after-retry':
+            args = DATA['claim']
+            try:
+                await D1AnalysisTransactions(self.env.DB).claim(
+                    job_id=args['job_id'], token='claim-after-retry', now=args['now'] + 40,
+                    global_monthly_limit=args['global_monthly_limit'],
+                    owner_rolling_limit=args['owner_rolling_limit'],
+                    global_rolling_limit=args['global_rolling_limit'])
                 return Response.json({'committed': True})
             except Exception:
                 return Response.json({'committed': False}, status=409)
