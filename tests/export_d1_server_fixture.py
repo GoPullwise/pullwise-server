@@ -14,7 +14,8 @@ def main():
         names = ["source_records", "source_versions", "source_contexts", "assessments",
                  "source_assessment_publications", "items", "item_versions", "provider_attempts",
                  "processing_usage_buckets", "processing_usage_ledger", "background_jobs",
-                 "analysis_claim_owners", "app_state"]
+                 "analysis_claim_owners", "app_state", "account_entitlement_authority",
+                 "d1_claim_authority"]
         schemas, inserts = [], []
         with closing(f.store.connect()) as db:
             for name in names:

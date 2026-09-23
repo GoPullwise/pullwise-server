@@ -23,6 +23,8 @@ def main():
     if args.after_restart:
         status, state = call("state", "GET")
         assert status == 200 and state["used"] == 1 and state["attempts"] == 1 and state["results"] == 1, state
+        assert state["accountRevision"] == 4 and state["accountDirty"] == 0, state
+        assert state["eventA"] == state["eventB"] == state["originalPaymentFactPreserved"] == 1, state
         assert call("publish")[0] == 409
         print("Server mapping restart/replay passed on local D1")
         return
@@ -46,9 +48,21 @@ def main():
     state = call("state", "GET")[1]
     assert state["attempts"] == 0 and state["jobState"] == "queued", state
     assert call("reset")[0] == 200
-    assert call("claim")[0] == 200
-    assert call("publish")[0] == 200
-    print("Actual Server schema: combined claim/budget, multi-source/account fencing and atomic publication passed on local D1")
+    assert call("event-a")[0] == 200
+    assert call("event-a")[0] == 409
+    assert call("claim")[0] == 409
+    state = call("state", "GET")[1]
+    assert state["accountRevision"] == 2 and state["accountDirty"] == 1
+    assert state["eventA"] == 1 and state["originalPaymentFactPreserved"] == 1
+    assert call("event-b")[0] == 200
+    assert call("refresh-account")[0] == 200
+    assert call("claim")[0] == 409  # Old revision remains fenced after A→B→A.
+    assert call("claim-current")[0] == 200
+    assert call("publish-current")[0] == 200
+    state = call("state", "GET")[1]
+    assert state["accountRevision"] == 4 and state["accountDirty"] == 0
+    assert state["eventA"] == state["eventB"] == state["originalPaymentFactPreserved"] == 1
+    print("Actual Server schema: combined claim/budget, payment-fact revision fencing and atomic publication passed on local D1")
 
 
 if __name__ == "__main__":

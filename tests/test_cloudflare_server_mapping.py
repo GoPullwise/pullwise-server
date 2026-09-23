@@ -41,11 +41,16 @@ def seed(path):
         db.execute("INSERT INTO app_state VALUES('users',?,?)", (json.dumps({"owner": account}), f.now))
         db.execute("INSERT INTO app_state VALUES('billingEvents',?,?)", ('{"event_fixture":{"status":"processed"}}', f.now))
         frozen = db.execute("SELECT value FROM app_state,json_each(payload) WHERE name='users' AND key='owner'").fetchone()[0]
+    m = mapping()
+    execute(f.store, m.schema())
+    execute(f.store, m.initialize_account(owner_id="owner", plan="pro", period="period",
+        monthly_processing_limit=100, valid_until=f.now + 60))
     return f, job, frozen
 
 
 def claim_args(f, job, frozen):
     return dict(job_id=job["id"], token="claim-fixture", now=f.now, account_snapshot=frozen,
+                account_revision=1,
                 owner_monthly_limit=10, global_monthly_limit=10, owner_rolling_limit=6, global_rolling_limit=60)
 
 
@@ -95,6 +100,7 @@ def publication_args(f, job, frozen):
     version = dict(item_id=item["id"], item_version=1, snapshot_hash="synthetic", sources_json=json.dumps(sources),
         context_fences_json=json.dumps(fences), snapshot_json='{"module":"pr","actionTypes":["change_requested"]}', observed_at=f.now)
     return dict(job_id=job["id"], token="claim-fixture", now=f.now, account_snapshot=frozen,
+        account_revision=1,
         sources=sources, fences=fences, assessment=assessment, source_publication=public,
         item=item, expected_item_revision=item["revision"], version=version)
 
@@ -136,3 +142,52 @@ def test_publication_is_once_and_preserves_account_and_creem_facts(tmp_path):
     assert f.store.processing_usage(billing_owner_id="owner", period="period")["used"] == 1
     with closing(f.store.connect()) as db:
         assert list(db.execute("SELECT * FROM app_state ORDER BY name")) == before
+
+
+def test_account_event_and_reprojection_fence_claim_across_aba(tmp_path):
+    m = mapping()
+    f, job, frozen = seed(tmp_path / "domain.db")
+    execute(f.store, m.schema())
+    args = claim_args(f, job, frozen)
+    changed = json.dumps(dict(id="owner", billing=dict(plan="free", status="active"), githubId="author"),
+                         separators=(",", ":"))
+    execute(f.store, m.stage_account_event(owner_id="owner", expected_revision=1,
+        account_snapshot=frozen, next_account_json=changed, event_id="event-a",
+        event_record_json='{"applied":true}', now=f.now))
+    with pytest.raises(sqlite3.IntegrityError):
+        execute(f.store, m.claim(**args))
+    with closing(f.store.connect()) as db:
+        assert db.execute("SELECT json_extract(payload,'$.\"event-a\".applied') FROM app_state WHERE name='billingEvents'").fetchone()[0] == 1
+    execute(f.store, m.stage_account_event(owner_id="owner", expected_revision=2,
+        account_snapshot=changed, next_account_json=frozen, event_id="event-b",
+        event_record_json='{"applied":true}', now=f.now))
+    execute(f.store, m.refresh_account_entitlement(owner_id="owner", expected_revision=3,
+        account_snapshot=frozen, plan="pro", period="period", monthly_processing_limit=100,
+        valid_until=f.now + 30, now=f.now))
+    with pytest.raises(sqlite3.IntegrityError):
+        execute(f.store, m.claim(**args))
+    assert f.store.get_background_job(job["id"])["status"] == "queued"
+
+
+def test_account_time_expiry_and_accepted_event_block_publication(tmp_path):
+    m = mapping()
+    f, job, frozen = seed(tmp_path / "domain.db")
+    execute(f.store, m.schema())
+    with pytest.raises(sqlite3.IntegrityError):
+        execute(f.store, m.claim(**{**claim_args(f, job, frozen), "now": f.now + 60}))
+    assert f.store.get_background_job(job["id"])["status"] == "queued"
+    execute(f.store, m.claim(**claim_args(f, job, frozen)))
+    args = publication_args(f, job, frozen)
+    args["now"] = f.now + 61
+    with pytest.raises(sqlite3.IntegrityError):
+        execute(f.store, m.publication(**args))
+    assert f.store.processing_usage(billing_owner_id="owner", period="period")["used"] == 0
+    execute(f.store, m.stage_account_event(owner_id="owner", expected_revision=1,
+        account_snapshot=frozen, next_account_json=frozen, event_id="event-c",
+        event_record_json='{"applied":false,"stale":true}', now=f.now + 1))
+    args["now"] = f.now + 2
+    with pytest.raises(sqlite3.IntegrityError):
+        execute(f.store, m.publication(**args))
+    with closing(f.store.connect()) as db:
+        assert db.execute("SELECT COUNT(*) FROM assessments").fetchone()[0] == 0
+        assert db.execute("SELECT state FROM processing_usage_ledger").fetchone()[0] == "reserved"

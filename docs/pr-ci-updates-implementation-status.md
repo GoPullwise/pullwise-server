@@ -998,3 +998,39 @@ adapter with account/entitlement revision and Creem protection, then run the sam
 REST/proxy cases on local Workers. Full source-result production orchestration,
 real provider quality/bounded-exit and live-ingestion readiness remain separate
 gates; P5b remains deferred.
+
+## D1 account revision and accepted-event boundary (2026-09-23 continuation)
+
+The previous product and probe work was committed in the two independent
+repositories as Server `1b7a65d` and Web `02c45ed`; the Web `output/` screenshots
+remain untracked. This continuation changes only the Server's local D1 mapping,
+tests and documentation. No changes were pushed or deployed.
+
+The finite mapping now includes `account_entitlement_authority` and
+`d1_claim_authority`. An already accepted synthetic billing event updates the
+matching `app_state.users` entry and `billingEvents` record while incrementing
+the owner's revision and marking its entitlement projection dirty, in one D1
+batch. A trusted projection command checks the persisted user and revision,
+then records the period, limit and strict validUntil. Claim checks that authority
+and records the revision; publication checks it again. The mapping rejects
+duplicate events without partial writes, a stale/dirty account, expiry at the
+boundary and old claims after A→B→A. It preserves the original payment event.
+
+Test-first evidence: new tests initially failed because the event/reprojection
+commands were absent and expired accounts could still publish. After the
+mapping change, `D:/Python313/python.exe -m pytest
+tests/test_cloudflare_server_mapping.py -q` reported **10 passed** with
+TEMP/TMP=F:/Pullwise/.test-tmp/discovery. Generated a fresh synthetic fixture,
+ran `verify_server_mapping.py` against local workerd/D1 on 127.0.0.1:8796, then
+stopped/restarted Wrangler using `.wrangler/server-map-state` and passed
+`verify_server_mapping.py --after-restart`. The owned workerd process was
+stopped afterward. These are local platform-simulation results, not a remote
+Cloudflare deployment or real Creem/SDK test.
+
+The actual Creem handler, encrypted account persistence, pending/late event
+semantics, current effective-plan calculation, every account writer and Server
+REST runtime remain to be adapted. A single bypassing account writer would
+invalidate this revision guarantee, so production Jev and live GitHub ingestion
+remain disabled. The mapped publication still covers one first-result Item;
+source-only/cache replay, full thread projection and release/retry paths remain
+CF2 work. No credentials, payment settings or provider transactions changed.

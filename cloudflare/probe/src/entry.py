@@ -1,5 +1,6 @@
 """Local-only CF1 experiment. Never mount this probe in the product router."""
 import importlib
+import json
 import sys
 import re
 import time
@@ -50,18 +51,46 @@ class Default(WorkerEntrypoint):
                 (SELECT COUNT(*) FROM assessments) AS results,
                 (SELECT COUNT(*) FROM item_versions) AS versions,
                 (SELECT state FROM background_jobs LIMIT 1) AS jobState,
+                (SELECT revision FROM account_entitlement_authority LIMIT 1) AS accountRevision,
+                (SELECT dirty FROM account_entitlement_authority LIMIT 1) AS accountDirty,
+                (SELECT json_type(payload,'$."event-a"') IS NOT NULL FROM app_state
+                    WHERE name='billingEvents') AS eventA,
+                (SELECT json_type(payload,'$."event-b"') IS NOT NULL FROM app_state
+                    WHERE name='billingEvents') AS eventB,
                 (SELECT payload='{"event_fixture":{"status":"processed"}}' FROM app_state
-                    WHERE name='billingEvents') AS paymentFactsPreserved''').first())
+                    WHERE name='billingEvents') AS paymentFactsPreserved,
+                (SELECT json_type(payload,'$."event_fixture"') IS NOT NULL FROM app_state
+                    WHERE name='billingEvents') AS originalPaymentFactPreserved''').first())
         if request.method != 'POST':
             return Response('Not found', status=404)
         if name == 'reset':
             await self.env.DB.batch([self.env.DB.prepare(sql) for sql in DATA['schemas']]
                 + [self.env.DB.prepare(sql) for sql, _ in mapping.schema()])
             commands = [('DELETE FROM ' + table, ()) for table in reversed(DATA['names'])] + DATA['inserts']
-        elif name == 'claim':
-            commands = mapping.claim(**DATA['claim'])
-        elif name == 'publish':
-            commands = mapping.publication(**DATA['publication'])
+        elif name in {'claim', 'claim-current'}:
+            args = dict(DATA['claim'])
+            if name == 'claim-current':
+                args['account_revision'] = 4
+            commands = mapping.claim(**args)
+        elif name in {'publish', 'publish-current'}:
+            args = dict(DATA['publication'])
+            if name == 'publish-current':
+                args['account_revision'] = 4
+            commands = mapping.publication(**args)
+        elif name in {'event-a', 'event-b'}:
+            account = json.loads(DATA['claim']['account_snapshot'])
+            changed = dict(account, billing=dict(account['billing'], plan='free'))
+            changed = json.dumps(changed, separators=(',', ':'))
+            current, next_value, revision = (DATA['claim']['account_snapshot'], changed, 1) if name == 'event-a' else (
+                changed, DATA['claim']['account_snapshot'], 2)
+            commands = mapping.stage_account_event(owner_id='owner', expected_revision=revision,
+                account_snapshot=current, next_account_json=next_value, event_id=name,
+                event_record_json='{"applied":true}', now=DATA['claim']['now'])
+        elif name == 'refresh-account':
+            commands = mapping.refresh_account_entitlement(owner_id='owner', expected_revision=3,
+                account_snapshot=DATA['claim']['account_snapshot'], plan='pro', period='period',
+                monthly_processing_limit=100, valid_until=DATA['claim']['now']+30,
+                now=DATA['claim']['now'])
         elif name == 'edit-parent':
             commands = [("UPDATE source_records SET source_revision=source_revision+1 WHERE source_id='2'", ())]
         elif name == 'change-account':

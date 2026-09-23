@@ -41,8 +41,15 @@ revision; pending or incomplete assessment must not silently close an item.
   DTOs against OpenAPI with the already available PyYAML/jsonschema environment.
 - `docs/cloudflare-domain-transaction-map.md` maps actual domain tables to finite
   local D1 batches. The synthetic account CAS/payment-fact preservation tests
-  are not a Creem runtime adapter or a CF2 pass; account entitlement revisions,
-  effective-period expiry and all production migration gates remain required.
+  are not a Creem runtime adapter or a CF2 pass; production account/entitlement
+  integration and all migration gates remain required.
+- The local D1 account mapping now freezes a monotonic owner entitlement
+  revision at claim and rechecks it at publication. A trusted accepted-event
+  batch stores the user and billing-event entry together and marks projection
+  dirty; a separate trusted recalculation restores it with strict validUntil.
+  A→B→A and expiry are locally tested. Every real account/Creem writer must
+  participate before enabling this protocol; the existing handler and encrypted
+  state have not yet been adapted to Workers.
 
 - Server and Web both target Cloudflare; follow deployment appendix 08 alongside
   the PR/CI/Updates product design. P3 adapters and P5a continue in parallel with

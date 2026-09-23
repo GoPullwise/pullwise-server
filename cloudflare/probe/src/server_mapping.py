@@ -3,11 +3,23 @@
 No API, credentials, network, payment interpretation or production wiring.
 Each returned list must be one D1 batch; never execute it as separate awaits.
 """
+import json
 from datetime import datetime, timezone
 
 
 def schema():
-    return [("CREATE TABLE IF NOT EXISTS d1_command_guard(ok INTEGER NOT NULL CHECK(ok=1))", ())]
+    return [
+        ("CREATE TABLE IF NOT EXISTS d1_command_guard(ok INTEGER NOT NULL CHECK(ok=1))", ()),
+        ("""CREATE TABLE IF NOT EXISTS account_entitlement_authority(
+            owner_id TEXT PRIMARY KEY, revision INTEGER NOT NULL CHECK(revision>=1),
+            plan TEXT NOT NULL, period TEXT NOT NULL,
+            monthly_processing_limit INTEGER NOT NULL CHECK(monthly_processing_limit>=0),
+            valid_until INTEGER NOT NULL, dirty INTEGER NOT NULL CHECK(dirty IN (0,1))
+        )""", ()),
+        ("""CREATE TABLE IF NOT EXISTS d1_claim_authority(
+            job_id TEXT PRIMARY KEY, account_revision INTEGER NOT NULL CHECK(account_revision>=1)
+        )""", ()),
+    ]
 
 
 def _check(predicate, params=()):
@@ -18,11 +30,78 @@ def _changed():
     return _check("changes()=1")
 
 
-def _account(job_id, frozen):
+def _account(job_id, frozen, revision, now):
     # Match the actual persisted users entry, including billing facts, not an
     # in-memory plan or checkout-return URL. Equality is deliberately conservative.
     return _check("""EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u,background_jobs j
-        WHERE a.name='users' AND u.key=j.billing_owner_id AND u.value=? AND j.id=?)""", (frozen, job_id))
+        JOIN account_entitlement_authority authority ON authority.owner_id=j.billing_owner_id
+        JOIN processing_usage_ledger ledger ON ledger.reservation_id=j.reservation_id
+        WHERE a.name='users' AND u.key=j.billing_owner_id AND u.value=? AND j.id=?
+        AND authority.revision=? AND authority.dirty=0 AND authority.valid_until>?
+        AND authority.period=ledger.period)""", (frozen, job_id, revision, now))
+
+
+def initialize_account(*, owner_id, plan, period, monthly_processing_limit, valid_until):
+    """Local synthetic seed after the account has been persisted; no API entrypoint."""
+    return [("""INSERT INTO account_entitlement_authority
+        (owner_id,revision,plan,period,monthly_processing_limit,valid_until,dirty)
+        VALUES (?,1,?,?,?,?,0)""",
+        (owner_id, plan, period, monthly_processing_limit, valid_until))]
+
+
+def _json_path(identifier):
+    if not isinstance(identifier, str) or not identifier:
+        raise ValueError("non-empty account/event identity required")
+    return '$.' + json.dumps(identifier, ensure_ascii=False)
+
+
+def stage_account_event(*, owner_id, expected_revision, account_snapshot,
+                        next_account_json, event_id, event_record_json, now):
+    """Persist a previously accepted Creem fact and invalidate its projection.
+
+    The caller must supply only state_for_storage output and the validated,
+    deduplicated event record from the existing billing handler.
+    """
+    user_path, event_path = _json_path(owner_id), _json_path(event_id)
+    for raw in (next_account_json, event_record_json):
+        if not isinstance(json.loads(raw), dict):
+            raise ValueError("account/event record must be a JSON object")
+    return [
+        _check("""EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u,
+            account_entitlement_authority authority WHERE a.name='users' AND u.key=?
+            AND u.value=? AND authority.owner_id=? AND authority.revision=?)""",
+            (owner_id, account_snapshot, owner_id, expected_revision)),
+        _check("""EXISTS(SELECT 1 FROM app_state WHERE name='billingEvents'
+            AND json_type(payload,?) IS NULL)""", (event_path,)),
+        ("""UPDATE app_state SET payload=json_set(payload,?,json(?)),updated_at=?
+            WHERE name='users' AND (SELECT value FROM json_each(payload) WHERE key=?)=?""",
+            (user_path, next_account_json, now, owner_id, account_snapshot)), _changed(),
+        ("""UPDATE app_state SET payload=json_set(payload,?,json(?)),updated_at=?
+            WHERE name='billingEvents' AND json_type(payload,?) IS NULL""",
+            (event_path, event_record_json, now, event_path)), _changed(),
+        ("""UPDATE account_entitlement_authority SET revision=revision+1,dirty=1,valid_until=?
+            WHERE owner_id=? AND revision=?""", (now, owner_id, expected_revision)), _changed(),
+        ("DELETE FROM d1_command_guard", ()),
+    ]
+
+
+def refresh_account_entitlement(*, owner_id, expected_revision, account_snapshot,
+                                plan, period, monthly_processing_limit, valid_until, now):
+    """Commit a trusted entitlement calculation over the persisted account."""
+    if (plan not in {"free", "pro", "max"} or not isinstance(period, str) or not period
+            or type(monthly_processing_limit) is not int or monthly_processing_limit < 0
+            or type(valid_until) is not int or valid_until <= now):
+        raise ValueError("invalid entitlement projection")
+    return [
+        _check("""EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u,
+            account_entitlement_authority authority WHERE a.name='users' AND u.key=?
+            AND u.value=? AND authority.owner_id=? AND authority.revision=?)""",
+            (owner_id, account_snapshot, owner_id, expected_revision)),
+        ("""UPDATE account_entitlement_authority SET revision=revision+1,plan=?,period=?,
+            monthly_processing_limit=?,valid_until=?,dirty=0 WHERE owner_id=? AND revision=?""",
+            (plan, period, monthly_processing_limit, valid_until, owner_id, expected_revision)), _changed(),
+        ("DELETE FROM d1_command_guard", ()),
+    ]
 
 
 def _job_binding(job_id, now):
@@ -39,16 +118,22 @@ def _job_binding(job_id, now):
         AND l.state='reserved')""", (job_id, now))
 
 
-def claim(*, job_id, token, now, account_snapshot, owner_monthly_limit,
+def claim(*, job_id, token, now, account_snapshot, account_revision, owner_monthly_limit,
           global_monthly_limit, owner_rolling_limit, global_rolling_limit):
     period = datetime.fromtimestamp(now, timezone.utc).strftime("%Y-%m")
     return [
-        _account(job_id, account_snapshot), _job_binding(job_id, now),
+        _account(job_id, account_snapshot, account_revision, now), _job_binding(job_id, now),
+        _check("""EXISTS(SELECT 1 FROM account_entitlement_authority authority,
+            background_jobs j WHERE j.id=? AND authority.owner_id=j.billing_owner_id
+            AND ?<=authority.monthly_processing_limit*3)""", (job_id, owner_monthly_limit)),
         ("""UPDATE background_jobs SET state='running',attempt=attempt+1,claim_token=?,
             claimed_until=?,next_attempt_at=NULL,updated_at=? WHERE id=? AND attempt<3 AND (
               (state IN ('queued','retry_wait') AND COALESCE(next_attempt_at,0)<=?)
               OR (state='running' AND COALESCE(claimed_until,0)<=?))""",
          (token, now + 120, now, job_id, now, now)), _changed(),
+        ("""INSERT INTO d1_claim_authority(job_id,account_revision) VALUES (?,?)
+            ON CONFLICT(job_id) DO UPDATE SET account_revision=excluded.account_revision""",
+            (job_id, account_revision)),
         ("""INSERT INTO provider_attempts(attempt_id,billing_owner_id,input_key,period_utc,occurred_at,created_at)
             SELECT ?,j.billing_owner_id,j.logical_key,?,?,? FROM background_jobs j WHERE j.id=?
               AND (SELECT COUNT(*) FROM provider_attempts WHERE period_utc=?)<?
@@ -66,14 +151,16 @@ def claim(*, job_id, token, now, account_snapshot, owner_monthly_limit,
     ]
 
 
-def publication(*, job_id, token, now, account_snapshot, sources, fences,
+def publication(*, job_id, token, now, account_snapshot, account_revision, sources, fences,
                 assessment, source_publication, item, expected_item_revision, version):
     """Publish a prevalidated immutable result; CAS every read used to build it.
 
     Rows use actual SQLite column names. Assessment validation/semantic projection
     remains in Server; this experiment validates the persistence boundary only.
     """
-    commands = [_account(job_id, account_snapshot), _job_binding(job_id, now),
+    commands = [_account(job_id, account_snapshot, account_revision, now), _job_binding(job_id, now),
+        _check("""EXISTS(SELECT 1 FROM d1_claim_authority WHERE job_id=?
+            AND account_revision=?)""", (job_id, account_revision)),
         _check("""EXISTS(SELECT 1 FROM background_jobs WHERE id=? AND state='running'
             AND claim_token=? AND claimed_until>?)""", (job_id, token, now))]
     if len({s["sourceId"] for s in sources}) != len(sources) or {s["sourceId"] for s in sources} != {f["sourceId"] for f in fences}:

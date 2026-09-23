@@ -147,8 +147,16 @@ two-scope attempt admission, secondary-source and persisted-account fencing,
 atomic assessment/ItemVersion/usage/job publication, final-guard rollback,
 payment-fact preservation, and replay after a real workerd restart. The account
 data and assessment are synthetic. Account encryption, Creem processing and
-entitlement expiry/revision adaptation remain unproved; this does not migrate
+production entitlement integration remain unproved; this does not migrate
 Server or pass CF2. No real account/payment data is loaded or changed.
+
+Continuation: the synthetic mapping now also executes a finite accepted-event
+batch over `app_state.users`, `app_state.billingEvents` and a monotonic owner
+entitlement revision. A dirty or expired projection blocks claim/publication;
+the claim freezes the revision. Local workerd/D1 proved duplicate-event rollback,
+A→B→A rejection of an old revision, trusted reprojection, and restart persistence.
+This tests the database boundary only: no real Creem webhook, encrypted user
+payload or subscription runtime was run in workerd.
 
 The original probe_* routes remain separate. Only this explicit local mapping
 fixture uses product table names; do not mount any probe in the product router.

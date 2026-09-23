@@ -24,8 +24,8 @@ Separate awaits for the statements would invalidate the proof.
 | `provider_attempts` | Owner/global monthly and inclusive last-60-second counts plus the new attempt in the claim batch | SQLite tests show budget rejection rolls the job back; local D1 executes the combined command. Existing isolated monthly/rolling rollover tests remain separate evidence |
 | `assessments`, `source_assessment_publications`, `items`, `item_versions` | Validate every source and context plus lease, then insert immutable result and CAS the current Item version | Local D1 rejects a changed secondary dependency and an expired/stale claim; current test result is synthetic, not model-quality evidence |
 | `processing_usage_buckets`, `processing_usage_ledger`, `background_jobs` | Result, ItemVersion, reserved→used and succeeded state in the publication batch | Local D1 final reservation failure rolls back earlier result/version inserts. Replay after process restart cannot consume again |
-| `app_state.users` | Exact persisted account-entry fence before claim and publication, including saved billing facts | Account mutation blocks both commands; no account payload is returned by probe routes. This conservative CAS is an experiment, not the final entitlement revision protocol |
-| `app_state.billingEvents` | Opaque preserved payment facts; model/usage commands never update this row | Synthetic event payload remains byte-for-byte unchanged on success and failure. This does not execute a Creem webhook in Workers |
+| `app_state.users`, `account_entitlement_authority`, `d1_claim_authority` | Match the exact persisted account entry and monotonic entitlement revision, effective period and time limit before claim and publication; freeze the revision at claim | Local D1 rejects stale or dirty projection, expiry, A→B→A replay and a result from an older claim revision. Other account writers must participate in this protocol before production use |
+| `app_state.billingEvents` | After the existing billing handler accepts a fact, the candidate batch updates that event record and the affected stored user, increments the entitlement revision and marks it dirty together | Synthetic event payload persists, duplicate event rejects atomically, and existing event/other-account records survive. This does not execute a Creem webhook in Workers |
 
 ## Account and Creem write boundary
 
@@ -44,15 +44,27 @@ analysis command can run, the projection must correspond to the current durable
 payment/account revision and effective period; stale or absent projection must
 deny admission, not reuse the old paid limit.
 
-The candidate exact-account CAS demonstrates where that guard belongs. It does
-not yet implement a monotonic account/entitlement revision, time-based paid-plan
-expiry, encrypted-state runtime compatibility, or a payment write adapter. A
-future authoritative account write must update its revision and mark any derived
-entitlements dirty atomically with the accepted fact; a trusted recomputation
-must CAS that revision and preserve used/reserved and provider attempts. Annual
-billing still releases monthly quota, upgrades do not reset usage, and a
-checkout return URL never grants paid rights. Keep all of those cases in the
-existing billing protection tests while adding target-runtime equivalents.
+The finite local mapping now has `account_entitlement_authority` and
+`d1_claim_authority`. A previously accepted synthetic event updates the matching
+user entry and billingEvents entry, increments the owner revision, and marks the
+projection dirty in one batch. The trusted projection command checks that same
+persisted entry and revision, then records plan, period, limit and a strict
+validUntil boundary. Claim additionally checks the ledger's period and freezes
+the revision; publication checks it again. An old claim cannot publish after
+event A→B→A even when the final user JSON equals the original. Expiry denies a
+claim or publication at the boundary. Local SQLite and workerd/D1 tests cover
+these transitions and a real restart.
+
+The experiment still has **no actual Creem handler or account persistence
+adapter on Workers**. The production caller must provide the existing handler's
+validated/deduplicated event record and `state_for_storage` user payload; every
+accepted account/checkout/Creem write must bump the durable revision. A missing
+writer would break the A→B→A fence. Projection must calculate the current
+effective plan and expiry from the persisted account using Server's entitlement
+rules, then CAS the revision. Annual billing still releases monthly quota,
+upgrades do not reset usage, and a checkout return URL never grants paid rights.
+Keep those cases in the existing billing protection tests while adding target
+runtime equivalents.
 
 No model result, transaction rollback, or compensation may erase a valid Creem
 event, change an amount/currency, or manufacture provider confirmation. A
@@ -70,8 +82,9 @@ conservatively retained while successful processing remains charge-key guarded.
 - Queue fairness selection, retry/backoff, cancellation/revocation releases,
   webhook receipts and cron execution over the same authority. Existing local
   protocol probes validate mechanisms, not all Server commands.
-- Account/Creem and encryption/runtime compatibility, payment-event projection
-  recovery, entitlement expiry and monotonic revision fencing as above.
+- Connect all real account/Creem writes, encrypted payload handling, pending and
+  late event behavior, and trusted entitlement calculation to the mapped revision
+  protocol. The local synthetic expiry/revision proof is not that integration.
 - Real Server HTTP on Workers, real provider bounded exit and actual model
   quality. The new Web HTTP integration uses local CPython and the Web proxy
   function in Node, with synthetic cookies/keys; it is not a browser or remote
