@@ -1,6 +1,9 @@
 import pytest
 
-from pullwise_server.product_api import _apply_source_restrictions, _filter_sources
+from pullwise_server.product_source_filters import (
+    apply_source_restrictions as _apply_source_restrictions,
+    filter_sources as _filter_sources,
+)
 
 
 def source():

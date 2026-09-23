@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import urlsplit
 from typing import Any, Awaitable, Callable, Mapping
 
 from .cloudflare_creem_handler import (
@@ -9,7 +10,7 @@ from .cloudflare_creem_handler import (
     accept_signed_creem_webhook,
 )
 from .creem_signature import verify_creem_signature
-from .cloudflare_product_read import read_product
+from .cloudflare_product_read import read_product, patch_item, _cookie_sessions
 
 
 def _header(headers: Mapping[str, object], name: str) -> str:
@@ -24,7 +25,10 @@ async def handle_http_request(*, method: str, path: str,
                               headers: Mapping[str, object],
                               read_body: Callable[[], Awaitable[bytes]],
                               binding: Any, creem_secret: str,
-                              configured_products: dict, now: int) -> tuple[int, dict]:
+                              configured_products: dict, now: int,
+                              params: Mapping[str, object] | None = None,
+                              cookie_same_site: str = "Lax",
+                              trusted_origins: set[str] | None = None) -> tuple[int, dict]:
     if method == "GET" and path == "/health":
         try:
             row = await binding.prepare("""SELECT COUNT(*) AS table_count FROM sqlite_master
@@ -32,18 +36,49 @@ async def handle_http_request(*, method: str, path: str,
                     'billing_webhook_receipts','processing_usage_buckets',
                     'processing_usage_ledger','provider_attempts','api_keys',
                     'd1_command_guard','watch_controls',
-                    'update_watches')""").first()
-            if row and row.get("table_count") == 10:
+                    'update_watches','source_records','source_versions',
+                    'source_contexts','source_assessment_publications',
+                    'items','item_versions','item_handling_events',
+                    'background_jobs','repository_services')""").first()
+            if row and row.get("table_count") == 19:
                 return 200, {"ok": True, "service": "pullwise-server",
                              "database": {"type": "d1", "configured": True}}
         except Exception:
             pass
         return 503, {"ok": False, "service": "pullwise-server"}
     if method == "GET" and path in {"/api/v1/me", "/api/v1/usage",
-                                       "/api/v1/watches"}:
+                                       "/api/v1/watches", "/api/v1/sources"} or (
+            method == "GET" and (path.startswith("/api/v1/sources/")
+                or path == "/api/v1/items" or path.startswith("/api/v1/items/")
+                or path.startswith("/api/v1/jobs/"))):
         try:
             return await read_product(binding=binding, path=path,
-                headers=headers, now=now)
+                headers=headers, now=now, params=params)
+        except Exception:
+            return 503, {"error": {"code": "SERVER_UNAVAILABLE"}}
+    if method == "PATCH" and path.startswith("/api/v1/items/"):
+        if cookie_same_site.casefold() == "none" and _cookie_sessions(headers):
+            claimed_origin = _header(headers, "Origin") or _header(headers, "Referer")
+            parsed = urlsplit(claimed_origin)
+            origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else ""
+            if origin not in (trusted_origins or set()):
+                return 403, {"error": {"code": "UNTRUSTED_ORIGIN"}}
+        item_id = path[len("/api/v1/items/"):]
+        if not item_id or "/" in item_id:
+            return 404, {"error": {"code": "NOT_FOUND"}}
+        length_text = _header(headers, "Content-Length")
+        if not length_text.isdigit() or int(length_text) > 8192:
+            return 400, {"error": {"code": "INVALID_REQUEST"}}
+        try:
+            raw = await read_body()
+            if not isinstance(raw, bytes) or len(raw) != int(length_text):
+                raise ValueError("invalid body length")
+            body = json.loads(raw)
+        except (ValueError, UnicodeError):
+            return 400, {"error": {"code": "INVALID_REQUEST"}}
+        try:
+            return await patch_item(binding=binding, item_id=item_id,
+                headers=headers, body=body, now=now)
         except Exception:
             return 503, {"error": {"code": "SERVER_UNAVAILABLE"}}
     if method != "POST" or path != "/webhooks/creem":

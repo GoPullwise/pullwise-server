@@ -14,11 +14,18 @@ MODULES = (
     "cloudflare_d1_mapping",
     "cloudflare_http_contract",
     "cloudflare_product_read",
+    "cloudflare_item_read",
+    "cloudflare_item_handling",
+    "cloudflare_source_read",
     "cloudflare_webhook_receipts",
     "creem_event_rules",
     "creem_signature",
     "product_entitlement_rules",
     "product_dto_rules",
+    "product_domain",
+    "product_item_filters",
+    "product_source_filters",
+    "update_filter",
 )
 
 

@@ -40,6 +40,36 @@ def test_d1_source_read_expires_publication_after_secondary_source_change(tmp_pa
     assert expired[0]["contexts"][0]["assessments"] == []
 
 
+def test_d1_source_read_expires_publication_after_secondary_configuration_change(tmp_path):
+    fixture, job, frozen = seed(tmp_path / "domain.db")
+    publication = publication_args(fixture, job, frozen)
+    execute(fixture.store, mapping().claim(**claim_args(fixture, job, frozen)))
+    execute(fixture.store, mapping().publication(**publication))
+    reader = D1SourceReads(D1ShapedSQLite(fixture.store))
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE source_contexts SET configuration_revision=configuration_revision+1 WHERE source_id='2'")
+    result = asyncio.run(reader.list_sources_for_billing_owner(owner_id="owner",
+        source_id="1", include_content=True, now=fixture.now))
+    assert result[0]["contexts"][0]["assessments"] == []
+    assert result == fixture.store.list_sources_for_billing_owner("owner",
+        source_id="1", include_content=True)
+
+
+def test_source_read_hides_publication_with_missing_dependency_fences(tmp_path):
+    fixture, job, frozen = seed(tmp_path / "domain.db")
+    publication = publication_args(fixture, job, frozen)
+    execute(fixture.store, mapping().claim(**claim_args(fixture, job, frozen)))
+    execute(fixture.store, mapping().publication(**publication))
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE source_assessment_publications SET fences_json='[]' WHERE source_id='1'")
+    reader = D1SourceReads(D1ShapedSQLite(fixture.store))
+    actual = asyncio.run(reader.list_sources_for_billing_owner(owner_id="owner",
+        source_id="1", include_content=True, now=fixture.now))
+    assert actual[0]["contexts"][0]["assessments"] == []
+    assert actual == fixture.store.list_sources_for_billing_owner("owner",
+        source_id="1", include_content=True)
+
+
 def test_d1_source_read_keeps_unclassified_release_without_item_and_fences_access(tmp_path):
     fixture, _, _ = seed(tmp_path / "domain.db")
     watch = fixture.store.create_watch(owner_id="owner", target_repository_id=None,

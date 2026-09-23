@@ -13,6 +13,7 @@ from .product_domain import context_hash, validate_watch_interests, watch_scope_
 from .product_dto_rules import (
     iso_timestamp as _iso_timestamp,
     source_context_dto, source_record_dto, watch_dto,
+    handling_event_dto, item_read_dto, item_dependencies_current,
 )
 from .update_filter import project_saved_updates
 
@@ -1734,7 +1735,19 @@ class ProductStore:
                 ).fetchone()
                 current = publication is not None and not context["contextStale"]
                 if current:
-                    for source in json.loads(publication["sources_json"]):
+                    dependencies = json.loads(publication["sources_json"])
+                    fences = json.loads(publication["fences_json"])
+                    dependency_ids = [source.get("sourceId") for source in dependencies]
+                    fence_ids = [fence.get("sourceId") for fence in fences]
+                    if (not dependencies or len(dependencies) != len(fences)
+                            or len(set(dependency_ids)) != len(dependencies)
+                            or set(dependency_ids) != set(fence_ids)
+                            or row["source_id"] not in dependency_ids
+                            or not any(fence.get("sourceId") == row["source_id"]
+                                       and fence.get("contextId") == row["context_id"]
+                                       for fence in fences)):
+                        current = False
+                    for source in dependencies:
                         stored = connection.execute(
                             "SELECT latest_version, source_revision FROM source_records WHERE source_id=?",
                             (source["sourceId"],),
@@ -1742,7 +1755,7 @@ class ProductStore:
                         if (stored is None or stored["latest_version"] != source["sourceVersion"]
                                 or stored["source_revision"] != source["sourceRevision"]):
                             current = False
-                    for fence in json.loads(publication["fences_json"]):
+                    for fence in fences:
                         stored = connection.execute(
                             "SELECT * FROM source_contexts WHERE source_id=? AND context_id=?",
                             (fence["sourceId"], fence["contextId"]),
@@ -1751,6 +1764,7 @@ class ProductStore:
                                 or stored["authorization_valid_until"] < timestamp
                                 or stored["billing_owner_id"] != owner_id
                                 or stored["context_version"] != fence["contextVersion"]
+                                or stored["configuration_revision"] != fence["configurationRevision"]
                                 or stored["authorization_revision"] != fence["authorizationRevision"]):
                             current = False
                 public_assessment = json.loads(publication["assessment_json"]) if current else None
@@ -1780,7 +1794,8 @@ class ProductStore:
                 connection.execute("BEGIN")  # Item, authority and history share one read snapshot.
             rows = connection.execute(
                 """
-                SELECT i.*, iv.sources_json, iv.snapshot_json, iv.observed_at
+                SELECT i.*, iv.sources_json, iv.context_fences_json,
+                       iv.snapshot_json, iv.observed_at
                 FROM items i
                 JOIN item_versions iv
                   ON iv.item_id = i.id AND iv.item_version = i.current_item_version
@@ -1796,14 +1811,19 @@ class ProductStore:
             ).fetchall()
             readable_sources = connection.execute(
                     """
-                    SELECT sc.source_id, sc.context_id, sr.last_synced_at
+                    SELECT sc.source_id, sc.context_id, sc.billing_owner_id,
+                           sc.accessible, sc.authorization_valid_until,
+                           sc.context_stale, sc.context_version,
+                           sc.configuration_revision, sc.authorization_revision,
+                           sr.latest_version, sr.source_revision, sr.last_synced_at
                     FROM source_contexts sc JOIN source_records sr ON sr.source_id=sc.source_id
                     WHERE sc.billing_owner_id = ? AND sc.accessible = 1
                       AND sc.authorization_valid_until >= ?
                     """,
                     (owner_id, timestamp),
                 ).fetchall()
-            sync_times = {(row["source_id"], row["context_id"]): row["last_synced_at"] for row in readable_sources}
+            context_rows = {(row["source_id"], row["context_id"]): row for row in readable_sources}
+            sync_times = {key: row["last_synced_at"] for key, row in context_rows.items()}
             allowed_pairs = set(sync_times)
             handling_rows = connection.execute(
                 """
@@ -1826,6 +1846,10 @@ class ProductStore:
         for row in rows:
             sources = json.loads(row["sources_json"])
             if any((source["sourceId"], row["context_id"]) not in allowed_pairs for source in sources):
+                continue
+            if not item_dependencies_current(sources, json.loads(row["context_fences_json"]),
+                                             context_rows, context_id=row["context_id"],
+                                             owner_id=owner_id, now=timestamp):
                 continue
             snapshot = json.loads(row["snapshot_json"])
             event = handling.get(row["id"])
@@ -2706,19 +2730,7 @@ class ProductStore:
 
     @staticmethod
     def _handling_event_dto(row: sqlite3.Row) -> dict:
-        return {
-            "id": row["id"],
-            "itemId": row["item_id"],
-            "itemVersion": int(row["item_version"]),
-            "actorId": row["actor_id"],
-            "disposition": row["disposition"],
-            "assigneeId": row["assignee_id"],
-            "note": row["note"],
-            "feedback": row["feedback"],
-            "eventKind": row["event_kind"],
-            "carriedFromItemVersion": row["carried_from_item_version"],
-            "createdAt": int(row["created_at"]),
-        }
+        return handling_event_dto(row)
 
     def admit_provider_attempt(
         self,
@@ -3704,54 +3716,7 @@ class ProductStore:
         snapshot: dict,
         handling_event: sqlite3.Row | None,
     ) -> dict:
-        handling = {
-            "disposition": "open",
-            "assigneeId": None,
-            "note": None,
-            "feedback": None,
-            "carriedFromItemVersion": None,
-        }
-        if handling_event is not None and handling_event["item_version"] == row["current_item_version"]:
-            handling = {
-                "disposition": handling_event["disposition"],
-                "assigneeId": handling_event["assignee_id"],
-                "note": handling_event["note"],
-                "feedback": handling_event["feedback"],
-                "carriedFromItemVersion": handling_event["carried_from_item_version"],
-            }
-        lifecycle = snapshot.get("lifecycle") or "active"
-        attention = snapshot.get("attentionState") or "needs_confirmation"
-        closure = snapshot.get("closureReason")
-        if lifecycle != "active":
-            attention, closure = "closed", lifecycle
-        elif closure in {"same_run_retry_succeeded", "later_run_succeeded"}:
-            attention = "closed"
-        elif handling["disposition"] in {"done", "dismissed"}:
-            attention, closure = "closed", "handled_" + handling["disposition"]
-        return {
-            "id": row["id"],
-            "module": snapshot.get("module"),
-            "repositoryId": snapshot.get("repositoryId"),
-            "watchId": snapshot.get("watchId"),
-            "unit": {"type": row["unit_type"], "externalId": row["unit_key"]},
-            "itemVersion": int(row["current_item_version"]),
-            "sources": sources,
-            "actionTypes": snapshot.get("actionTypes") or [],
-            "title": snapshot.get("title") or "",
-            "sourceUrl": snapshot.get("sourceUrl"),
-            "sourceFacts": snapshot.get("sourceFacts") or {},
-            "evidence": snapshot.get("evidence") or [],
-            "assessments": snapshot.get("assessments") or [],
-            "nextActors": snapshot.get("nextActors") or [],
-            "lifecycle": lifecycle,
-            "attentionState": attention,
-            "handling": handling,
-            "closureReason": closure,
-            "revision": int(row["revision"]),
-            "attentionUpdatedAt": snapshot.get("attentionUpdatedAt") or _iso_timestamp(int(row["observed_at"])),
-            "updatedAt": _iso_timestamp(int(row["updated_at"])),
-            "lastSyncedAt": snapshot.get("lastSyncedAt") or _iso_timestamp(int(row["observed_at"])),
-        }
+        return item_read_dto(row, sources, snapshot, handling_event)
 
     @staticmethod
     def _item_dto(row: sqlite3.Row) -> dict:

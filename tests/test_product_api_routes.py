@@ -449,7 +449,7 @@ class ProductApiRoutesTest(unittest.TestCase):
         self.assertEqual(self.store.count_jobs(job_type="analyze_source"), 0)
 
     def test_item_views_use_github_identity_and_manual_assignment_precedes_roles(self):
-        from pullwise_server.product_api import _item_in_view
+        from pullwise_server.product_item_filters import item_in_view as _item_in_view
         item = {"attentionState": "needs_action", "nextActors": [{"kind": "user", "githubId": "7"}], "handling": {}}
         self.assertTrue(_item_in_view(item, "mine", "7"))
         self.assertFalse(_item_in_view(item, "mine", "usr_1"))

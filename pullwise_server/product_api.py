@@ -13,6 +13,8 @@ from .entitlements import product_usage_payload
 from .github_sources import resolve_upstream_repository
 from .product_jobs import ProductJobScheduler
 from .product_store import ProductStore
+from .product_source_filters import apply_source_restrictions, filter_sources
+from .product_item_filters import apply_item_restrictions, filter_items, item_in_view
 
 
 def _header(handler: object, name: str) -> str:
@@ -123,129 +125,6 @@ def _query_value(params: Mapping[str, object], name: str) -> str:
     if isinstance(value, list):
         value = value[0] if value else ""
     return str(value or "").strip()
-
-
-def _source_module(source: Mapping[str, object]) -> str:
-    source_type = source.get("type")
-    if source_type == "ci_failure":
-        return "ci"
-    if source_type == "release":
-        return "updates"
-    return "pr"
-
-
-def _filter_sources(sources: list[dict], params: Mapping[str, object]) -> list[dict]:
-    module = _query_value(params, "module")
-    repository_id = _query_value(params, "repositoryId")
-    watch_id = _query_value(params, "watchId")
-    relevance = _query_value(params, "relevance")
-    signal = _query_value(params, "updateSignal")
-    processing = _query_value(params, "processingStatus")
-    if ((relevance or signal) and module != "updates"
-            or relevance and relevance not in {"relevant", "not_relevant", "unclear"}
-            or signal and signal not in {"migration_stated", "deprecation_stated", "breaking_change_stated", "security_fix_stated"}):
-        raise ValueError("INVALID_CONFIGURATION")
-    result = []
-    for source in sources:
-        if module and _source_module(source) != module:
-            continue
-        if repository_id and source.get("repositoryId") != repository_id:
-            continue
-        contexts = [context for context in source.get("contexts") or []
-                    if (not watch_id or context.get("watchId") == watch_id)
-                    and (not relevance or context.get("relevance") == relevance)
-                    and (not signal or context.get("updateSignals", {}).get(signal) == "present")
-                    and (not processing or context.get("processingStatus") == processing)]
-        if not contexts:
-            continue
-        result.append({**source, "contexts": contexts})
-    return result
-
-
-def _apply_source_restrictions(sources: list[dict], restrictions: Mapping[str, object]) -> list[dict]:
-    repository_ids = restrictions.get("repositoryIds")
-    watch_ids = restrictions.get("watchIds")
-    if repository_ids is None and watch_ids is None:
-        return sources
-    allowed_repositories = set(repository_ids or ())
-    allowed_watches = set(watch_ids or ())
-    def allowed(source, context):
-        if not context.get("watchId"):
-            return source.get("repositoryId") in allowed_repositories
-        target = context.get("targetRepositoryId")
-        if target:
-            return ((repository_ids is None or target in allowed_repositories)
-                    and (watch_ids is None or context["watchId"] in allowed_watches))
-        return context["watchId"] in allowed_watches
-    result = []
-    for source in sources:
-        contexts = [context for context in source.get("contexts") or []
-                    if allowed(source, context)]
-        if contexts:
-            result.append({**source, "contexts": contexts})
-    return result
-
-
-def _apply_item_restrictions(items: list[dict], restrictions: Mapping[str, object]) -> list[dict]:
-    repository_ids = restrictions.get("repositoryIds")
-    watch_ids = restrictions.get("watchIds")
-    if repository_ids is None and watch_ids is None:
-        return items
-    allowed_repositories = set(repository_ids or ())
-    allowed_watches = set(watch_ids or ())
-    return [
-        item
-        for item in items
-        if item.get("repositoryId") in allowed_repositories or item.get("watchId") in allowed_watches
-    ]
-
-
-def _item_in_view(item: Mapping[str, object], view: str, github_user_id: str) -> bool:
-    if view == "all":
-        return True
-    attention = item.get("attentionState")
-    handling = item.get("handling") if isinstance(item.get("handling"), Mapping) else {}
-    next_actors = item.get("nextActors") if isinstance(item.get("nextActors"), list) else []
-    assignee = handling.get("assigneeId")
-    users = [actor.get("githubId") for actor in next_actors
-             if isinstance(actor, Mapping) and actor.get("kind") == "user" and actor.get("githubId")]
-    assigned_to_user = bool(github_user_id) and (assignee == github_user_id if assignee else github_user_id in users)
-    # Team membership has no verified resolver yet. Keep such work visible in
-    # unassigned rather than guessing that another person is handling it.
-    has_actor = bool(assignee) or bool(users)
-    if view == "mine":
-        return attention in {"needs_action", "needs_confirmation"} and assigned_to_user
-    if view == "unassigned":
-        return attention in {"needs_action", "needs_confirmation"} and not has_actor
-    if view == "waiting":
-        return attention == "waiting" or (
-            attention in {"needs_action", "needs_confirmation"} and has_actor and not assigned_to_user
-        )
-    return False
-
-
-def _filter_items(items: list[dict], params: Mapping[str, object], user_id: str, *, include_view: bool) -> list[dict]:
-    module = _query_value(params, "module")
-    repository_id = _query_value(params, "repositoryId")
-    watch_id = _query_value(params, "watchId")
-    attention_state = _query_value(params, "attentionState")
-    view = _query_value(params, "view") or "all"
-    if view not in {"mine", "unassigned", "waiting", "all"}:
-        raise ValueError("INVALID_VIEW")
-    result = []
-    for item in items:
-        if module and item.get("module") != module:
-            continue
-        if repository_id and item.get("repositoryId") != repository_id:
-            continue
-        if watch_id and item.get("watchId") != watch_id:
-            continue
-        if attention_state and item.get("attentionState") != attention_state:
-            continue
-        if include_view and not _item_in_view(item, view, user_id):
-            continue
-        result.append(item)
-    return result
 
 
 def handle_get(handler: object, segments: list[str], params: dict, users: Mapping[str, dict]) -> bool:
@@ -387,8 +266,8 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
         return True
     restrictions = principal.get("restrictions") or {}
     try:
-        sources = _filter_sources(
-            _apply_source_restrictions(store.list_sources_for_billing_owner(
+        sources = filter_sources(
+            apply_source_restrictions(store.list_sources_for_billing_owner(
                 user_id, include_content=len(segments) == 2 and segments[0] == "sources",
                 source_id=segments[1] if len(segments) == 2 and segments[0] == "sources" else None
             ), restrictions),
@@ -414,20 +293,20 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
         else:
             handler.json(source)
         return True
-    all_items = _apply_item_restrictions(store.list_items_for_billing_owner(
+    all_items = apply_item_restrictions(store.list_items_for_billing_owner(
         user_id, include_history=len(segments) == 2 and segments[0] == "items" and segments[1] != "overview",
         item_id=segments[1] if len(segments) == 2 and segments[0] == "items" and segments[1] != "overview" else None
     ), restrictions)
     github_user_id = str(principal["user"].get("githubId") or "")
-    resource_items = _filter_items(all_items, params, github_user_id, include_view=False)
+    resource_items = filter_items(all_items, params, github_user_id, include_view=False)
     if segments == ["items", "overview"]:
-        selected = _filter_items(all_items, params, github_user_id, include_view=True)
+        selected = filter_items(all_items, params, github_user_id, include_view=True)
         counts = {
             state: sum(1 for item in selected if item.get("attentionState") == state)
             for state in ("needs_action", "needs_confirmation", "waiting", "optional", "closed")
         }
         view_counts = {
-            view: sum(1 for item in resource_items if _item_in_view(item, view, github_user_id))
+            view: sum(1 for item in resource_items if item_in_view(item, view, github_user_id))
             for view in ("mine", "unassigned", "waiting", "all")
         }
         handler.json(
@@ -465,7 +344,7 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
         )
         return True
     if segments == ["items"]:
-        items = _filter_items(all_items, params, github_user_id, include_view=True)
+        items = filter_items(all_items, params, github_user_id, include_view=True)
         handler.json(
             {
                 "items": items,

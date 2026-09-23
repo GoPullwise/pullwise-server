@@ -116,30 +116,68 @@ revision; pending or incomplete assessment must not silently close an item.
   `watchIds` restrictions and returns an empty list for a key restricted only
   by repositories. Its GET has no D1 batch write/model side effect. Source and
   Item reads still require multi-source, permission and publication fences.
-- `product_dto_rules.source_context_dto` and `source_record_dto` now own the
-  exact SQLite/D1 Source projection. `D1SourceReads` reads authorized source
-  rows, publications, source revisions and context fences as four SELECTs in
-  one D1 `batch()` snapshot; it exposes a saved assessment only while every
-  dependency remains current. Unclassified Release rows remain visible
-  without an Item and inaccessible contexts do not return. The isolated
-  `/server-map/source-read` proves this on local workerd/D1. Do not route the
-  candidate `/api/v1/sources` until Cookie/API-key authority is rechecked
-  inside that same read snapshot and REST filtering/detail parity is tested.
+- `product_dto_rules.source_context_dto` and `source_record_dto` own the
+  exact SQLite/D1 Source projection. Candidate `/api/v1/sources` list/detail
+  prepends API-key, session and user SELECTs to the four Source/publication/
+  dependency/fence SELECTs in one D1 `batch()`. It denies a changed or revoked
+  identity before projecting rows. Keep this same-snapshot auth proof when
+  changing Source reads; an earlier `_principal` call alone is insufficient.
+  `product_source_filters.py` is shared by local REST and Worker for module,
+  context and API-key resource filters. An unclassified Release without an
+  Item stays visible; stale secondary dependencies hide assessments. The
+  local HTTP candidate and tests verify this narrow slice, not full CF2.
+  For Source publication, compare saved `configurationRevision` as well as
+  context and authorization revisions for every dependency; otherwise a
+  secondary watch/repository config change can leave an old assessment visible.
+  Require one matching saved context fence per publication dependency,
+  including the primary Source/context; an empty or mismatched fence set must
+  hide the assessment even if its rows still exist.
+- Candidate `/api/v1/items` list/detail uses one D1 read batch for current
+  ItemVersions, accessible source contexts and handling events, prepended by
+  the same-snapshot Cookie/API-key/user proof. `product_dto_rules.py` shares
+  Item and handling DTOs with SQLite; `product_item_filters.py` shares view
+  and API-key restrictions. Both readers must check every ItemVersion source
+  and context fence before returning it, including secondary source version,
+  configuration and authorization revisions. Empty or stale fences do not
+  authorize private Item content. Candidate Item PATCH checks `itemVersion`
+  and `If-Match`, then atomically guards the same persisted identity and every
+  dependency fence while incrementing Item revision and inserting a handling
+  event. A failed guard rolls back both writes; GET/PATCH never charges model
+  usage. Candidate Item overview joins the seven Source, three Item and three
+  principal SELECTs into one read-only D1 batch before counting; never build
+  dashboard counts from separate authority snapshots. This is local-only
+  HTTP evidence.
+  Candidate `GET /api/v1/jobs/{id}` uses the same batch-local identity proof
+  and returns only the requester's manual sync Jobs, never an analysis Job.
+  It also requires the associated watch to remain unarchived under that owner,
+  or the repository service to remain active under that owner, in the same
+  read snapshot. Member sync resource authorization remains unmapped and must
+  fail closed. Job GET is read-only and does not schedule, renew or charge.
+  Candidate Cookie Item PATCH must enforce a trusted Origin or Referer when
+  `PULLWISE_COOKIE_SAME_SITE=None`, before reading the body or touching D1.
+  The Worker reads `PULLWISE_ALLOWED_ORIGINS`/`PULLWISE_APP_URL`; absent trust
+  configuration fails closed. Bearer API keys do not require browser Origin.
+  A non-empty malformed `X-Pullwise-Api-Key` header combined with Cookie or
+  bearer session is ambiguous authentication (400); never let preliminary
+  Cookie resolution silently fall through to a different batch identity.
 - `cloudflare/server` is a separate **local-only candidate** for the actual
   Server Python Worker HTTP entry. `src/entry.py` routes read-only `/health`,
-  authenticated `GET /api/v1/me`, `/api/v1/usage`, `/api/v1/watches`, and raw-byte
-  `POST /webhooks/creem` through Server-owned modules; unported product routes
-  return 404. `cloudflare_product_read.py` checks persisted Cookie sessions
-  and hashed API keys, rejects mixed/expired/restricted identities, and reads
-  saved usage without Jev or a D1 write. The candidate does not update API-key
+  authenticated product GETs for profile, usage, watches, Sources, Items,
+  overview and requester-owned sync Jobs; Item handling PATCH; and raw-byte
+  `POST /webhooks/creem` through Server-owned modules. Unported routes return
+  404. `cloudflare_product_read.py` checks persisted Cookie sessions and hashed
+  API keys, rejects mixed/expired/restricted identities, and rechecks identity
+  in the same D1 read batch as `/me`, `/usage`, `/watches` and protected
+  product rows. Usage bucket, ledger and owner-cycle attempts share one
+  read-only batch. The candidate does not update API-key
   last-used metadata on every GET; define a bounded policy before migration.
-  Its read-only health checks presence of the ten D1 tables required by
+  Its read-only health checks presence of the 19 D1 tables required by
   currently routed endpoints; it is not a full schema/migration readiness gate.
   Its Wrangler config has no cron/public route, uses a synthetic `remote: false`
   D1 ID, and must not be deployed. Sync exact Server modules into its ignored
   `src/pullwise_server` before running. The local candidate passed a real
   process restart and webhook replay; this does not validate remote runtime,
-  real secrets, session/API-key auth or the shared product-v1 REST.
+  real secrets, full account/session lifecycle or all shared product-v1 REST.
 - D1 charges by rows written, including indexed writes. Keep scheduled D1
   commands bounded to changed rows; never refresh an entire waiting backlog
   on each wake. Inspect D1 `meta.rows_written` and per-query analytics before

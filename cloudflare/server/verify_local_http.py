@@ -2,6 +2,7 @@
 import hashlib
 import hmac
 import json
+import sys
 import urllib.error
 import urllib.request
 
@@ -12,14 +13,14 @@ RAW = (b'{"id":"evt-http-worker","eventType":"subscription.canceled",'
        b'"object":{"id":"sub_fixture","metadata":{"userId":"owner"}}}')
 
 
-def call(path, *, raw=None, signature=None, extra_headers=None):
+def call(path, *, raw=None, signature=None, extra_headers=None, method=None):
     headers = dict(extra_headers or {})
     if raw is not None:
         headers.update({"Content-Length": str(len(raw)),
                         "Content-Type": "application/json",
                         "creem-signature": signature or ""})
     request = urllib.request.Request(BASE + path, data=raw, headers=headers,
-                                     method="POST" if raw is not None else "GET")
+                                     method=method or ("POST" if raw is not None else "GET"))
     try:
         with OPENER.open(request, timeout=30) as response:
             return response.status, json.load(response)
@@ -28,6 +29,7 @@ def call(path, *, raw=None, signature=None, extra_headers=None):
 
 
 def main():
+    same_site_none = "--same-site-none" in sys.argv
     assert call("/health") == (200, {"ok": True, "service": "pullwise-server",
         "database": {"type": "d1", "configured": True}})
     assert call("/api/v1/me", extra_headers={
@@ -42,10 +44,55 @@ def main():
     status, restricted_watches = call("/api/v1/watches", extra_headers={
         "Authorization": "Bearer pwk_local_http_test"})
     assert status == 200 and len(restricted_watches["items"]) == 1
+    status, sources = call("/api/v1/sources?module=pr", extra_headers={
+        "Cookie": "pw_session=session-local"})
+    assert status == 200 and len(sources["items"]) == 2
+    status, detail = call("/api/v1/sources/1", extra_headers={
+        "Cookie": "pw_session=session-local"})
+    assert status == 200 and detail["id"] == "1" and "content" in detail
+    status, restricted_sources = call("/api/v1/sources", extra_headers={
+        "Authorization": "Bearer pwk_local_http_test"})
+    assert status == 200 and restricted_sources["items"] == []
+    assert call("/api/v1/sources?updateSignal=security_fix_stated", extra_headers={
+        "Cookie": "pw_session=session-local"})[0] == 422
+    status, items = call("/api/v1/items?view=all", extra_headers={
+        "Cookie": "pw_session=session-local"})
+    assert status == 200 and len(items["items"]) == 1
+    status, overview = call("/api/v1/items/overview", extra_headers={
+        "Cookie": "pw_session=session-local"})
+    assert status == 200 and overview["totalCount"] == 1
+    assert overview["sourceCoverage"]["total"] == 2
+    status, item = call("/api/v1/items/" + items["items"][0]["id"], extra_headers={
+        "Cookie": "pw_session=session-local"})
+    assert status == 200 and item["id"] == items["items"][0]["id"]
+    assert isinstance(item["handlingHistory"], list)
+    patch_body = json.dumps({"itemVersion": item["itemVersion"],
+                             "disposition": "done"}).encode()
+    if same_site_none:
+        assert call("/api/v1/items/" + item["id"], raw=patch_body,
+            method="PATCH", extra_headers={"Cookie": "pw_session=session-local",
+                "Origin": "https://evil.example", "If-Match": str(item["revision"])})[0] == 403
+    status, handled = call("/api/v1/items/" + item["id"], raw=patch_body,
+        method="PATCH", extra_headers={"Cookie": "pw_session=session-local",
+            "Origin": "http://127.0.0.1:5173",
+            "If-Match": str(item["revision"])})
+    assert status == 200 and handled["handling"]["disposition"] == "done"
+    assert handled["revision"] == item["revision"] + 1
+    assert call("/api/v1/items/" + item["id"], raw=patch_body,
+        method="PATCH", extra_headers={"Cookie": "pw_session=session-local",
+            "Origin": "http://127.0.0.1:5173",
+            "If-Match": str(item["revision"])})[0] == 412
+    status, restricted_items = call("/api/v1/items", extra_headers={
+        "Authorization": "Bearer pwk_local_http_test"})
+    assert status == 200 and restricted_items["items"] == []
+    status, sync_job = call("/api/v1/jobs/sync-local", extra_headers={
+        "Cookie": "pw_session=session-local"})
+    assert status == 200 and sync_job["operation"] == "sync_watch"
+    assert sync_job["status"] == "queued"
     assert call("/api/v1/me", extra_headers={
         "Cookie": "pw_session=session-local",
         "Authorization": "Bearer pwk_local_http_test"})[0] == 400
-    assert call("/api/v1/items")[0] == 404
+    assert call("/api/v1/repositories")[0] == 404
     assert call("/webhooks/creem", raw=RAW, signature="bad")[0] == 400
     signature = hmac.new(b"synthetic-secret", RAW, hashlib.sha256).hexdigest()
     assert call("/webhooks/creem", raw=RAW, signature=signature) == (200, {"received": True})

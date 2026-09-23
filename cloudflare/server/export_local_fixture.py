@@ -22,6 +22,15 @@ TABLES = (
     "update_watches",
     "d1_command_guard",
     "api_keys",
+    "source_records",
+    "source_versions",
+    "source_contexts",
+    "source_assessment_publications",
+    "items",
+    "item_versions",
+    "item_handling_events",
+    "background_jobs",
+    "repository_services",
 )
 
 
@@ -30,6 +39,7 @@ def main() -> None:
     sys.path.insert(0, str(server_root))
     sys.path.insert(0, str(server_root / "tests"))
     from test_cloudflare_server_mapping import seed
+    from pullwise_server.product_jobs import ProductJobScheduler
 
     output = Path(__file__).resolve().parent / ".wrangler" / "local-seed.sql"
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -42,6 +52,24 @@ def main() -> None:
         fixture.store.create_watch(owner_id="owner", target_repository_id=None,
             upstream_repository_id="github:102", billing_owner_id="owner",
             interests=["database"], enabled=True, analysis_enabled=False)
+        item = fixture.store.create_item(context_id="repo:repo:pr",
+            unit_type="pr_thread", unit_key="thread-local-http")
+        sources = [dict(sourceId=source_id, sourceVersion=record["sourceVersion"],
+                        sourceRevision=record["sourceRevision"])
+                   for source_id, record in fixture.records.items()]
+        fences = [dict(sourceId=source["sourceId"], contextId="repo:repo:pr",
+                       contextVersion=1, configurationRevision=1,
+                       authorizationRevision=1) for source in sources]
+        fixture.store.publish_item_snapshot(item_id=item["id"],
+            expected_item_revision=item["revision"], sources=sources,
+            context_fences=fences, snapshot={"module": "pr", "title": "Synthetic follow-up"},
+            observed_at=fixture.now)
+        sync_job = ProductJobScheduler(fixture.store).request_manual_sync(
+            resource_kind="watch", resource_id=first_watch["id"],
+            requester_id="owner")
+        with fixture.store._immediate() as db:
+            db.execute("UPDATE background_jobs SET id='sync-local' WHERE id=?",
+                (sync_job["id"],))
         with fixture.store._immediate() as db:
             db.execute("INSERT INTO app_state(name,payload,updated_at) VALUES('sessions',?,?)",
                 (json.dumps({"session-local": {"userId": "owner",
@@ -55,7 +83,7 @@ def main() -> None:
             db.execute("INSERT INTO api_keys VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                 ("key-local", "owner", "Synthetic", token[:16],
                  hashlib.sha256(token.encode()).hexdigest(),
-                 '["profile:read","usage:read","watches:read"]', fixture.now + 86400,
+                 '["profile:read","usage:read","watches:read","items:read"]', fixture.now + 86400,
                  json.dumps({"watchIds": [first_watch["id"]]}),
                  fixture.now, None, None))
         with closing(fixture.store.connect()) as db:

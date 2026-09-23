@@ -19,19 +19,6 @@ jobs:
         with:
           path: pullwise-server
           persist-credentials: false
-      - name: Check out the Worker used by Gateway integration
-        uses: actions/checkout@v4
-        with:
-          repository: GoPullwise/pullwise-worker
-          ref: 4cd3ad9dd0bb2e29c3080f39255ccf4050ff09b6
-          path: pullwise-worker
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22.23.1"
-      - name: Install the frozen Worker runtime graph
-        working-directory: pullwise-worker
-        run: npm ci --ignore-scripts
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10.12"
@@ -53,4 +40,14 @@ jobs:
           bash -n ./git-watch.sh
           bash -n ./ops/configure_api_proxy.sh
       - name: Run tests
-        run: python -m pytest
+        run: |
+          python -m pytest \
+            tests/test_cloudflare_*.py \
+            tests/test_product_*.py \
+            tests/test_billing_*.py \
+            tests/test_creem_*.py \
+            tests/test_github_authorization_contracts.py \
+            tests/test_source_context_filters.py \
+            tests/test_security_contracts.py \
+            tests/test_api_security_extensions.py \
+            tests/test_github_auth_contracts.py

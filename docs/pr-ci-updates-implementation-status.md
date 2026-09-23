@@ -1496,3 +1496,162 @@ Combined Cloudflare/Product regression after this change: **279 passed,
 previous local head during this work; this agent did not push. Latest visible
 CI run 35848982912 still fails while checking out the retired Worker before
 tests. Web Actions remain empty, and Web `output/` stays untracked.
+
+## Candidate Source REST with same-snapshot identity (2026-09-23 continuation)
+
+The independent local Python Worker now routes Source list/detail through
+`D1SourceReads`. After preliminary `_principal` resolution, it prepends
+API-key, session and persisted-user SELECTs to the four existing Source reads
+in one D1 batch. It validates the current identity before projecting any
+Source. Tests first failed with 404, then proved an API-key or Cookie revoked
+between preliminary authentication and the batch returns 401. Scope loss
+returns 403 and a changed user returns 401. Source list/detail share the
+local REST's `product_source_filters.py` rules, including API-key watch and
+repository restrictions and invalid Updates filters. The health check now
+requires fourteen tables used by mounted routes; its missing-Source-table
+test failed first. The candidate fixture exports synthetic Source tables and
+the local HTTP driver exercises list/detail, restriction and invalid filter.
+
+Focused Cloudflare HTTP/Source and ProductStore regression: **52 passed**.
+Combined `test_cloudflare_*.py` and `test_product_*.py`: **284 passed,
+8 subtests**. `sync_server_modules.py --check` passed. A fresh local D1
+directory `server-http-sources-state` passed the HTTP driver before and after
+a real workerd process restart; port 8797 was then stopped. No remote D1,
+cron, deployment, live GitHub or Jev. This is a Source read slice, not full
+account authorization or CF2 validation. Item/handling, remaining REST,
+P5b, real Cloudflare and model-quality/bounded-exit gates remain open.
+
+## Candidate Item read and ItemVersion visibility (2026-09-23 continuation)
+
+The local candidate now serves Item list/detail with the same batch-local
+Cookie/API-key/user recheck as Source. `D1ItemReads` reads current ItemVersion,
+source/context authority and handling history in one D1 batch; shared
+`product_dto_rules` and `product_item_filters` retain SQLite REST DTOs,
+views and API-key resource restrictions. An initially missing module and
+route failed tests first. A later failing authorization-revision test exposed
+that both SQLite and D1 could return a stale ItemVersion while its secondary
+context remained accessible. Both readers now require every saved source
+version/revision and context version/configuration/authorization fence;
+missing/stale fences hide the Item. The health check requires the three Item
+tables added to the candidate, 17 routed tables total; its missing-table
+test failed before the fix.
+
+The synthetic local Worker fixture contains one saved PR Item. The HTTP
+driver passed Item list/detail and restricted-key filtering before and after
+a real workerd restart with fresh `server-http-items-state`; port 8797 was
+stopped. The combined Cloudflare/Product run first found one test importing
+the moved private `_item_in_view` helper; it now imports the shared pure
+module and its focused regression passes. Full rerun is required before
+claiming a combined green result. Handling writes, overview, remaining REST,
+full account authority and remote Cloudflare validation remain open.
+
+## Candidate handling PATCH and CI correction (2026-09-23 continuation)
+
+`PATCH /api/v1/items/{id}` now accepts saved Item handling fields, requires
+`itemVersion` and `If-Match`, and uses `D1ItemHandling` to atomically guard
+the current credential/user, Item revision and every Source/context fence
+before committing one event and revision increment. The missing route test
+failed at 404, then passed; a second test revoked an API key just before the
+write batch and verified rollback of event and revision. The local workerd
+HTTP driver passed handling and stale If-Match before and after restart in
+fresh `server-http-handling-state`; port 8797 was stopped. No model call or
+added provider attempt occurs on GET or handling.
+
+Combined Cloudflare/Product regression after Item changes: **289 passed,
+8 subtests**. A broader local `pytest --ignore=tests/test_model_gateway_end_to_end.py`
+run reported **2032 passed, 46 skipped, 2057 subtests passed, 13 failed**.
+Ten failures are old scan/API-key route expectations in `test_api_key_routes.py`,
+two are retired Worker Node publication fixtures, and one is a Windows
+temporary SQLite lock in a Worker update test. The source-filter test import
+was updated after moving the pure helper. The CI workflow no longer checks
+out the retired Worker or installs its npm graph and ignores its specific
+Gateway end-to-end suite. This local CI edit has not been pushed or run
+remotely; legacy test curation is still needed for a green full CI. Latest
+visible remote run is 35848982912, failed before tests at the retired Worker
+checkout. Web Actions remain empty.
+
+## Candidate overview snapshot (2026-09-23 continuation)
+
+`GET /api/v1/items/overview` now composes principal, Source and Item reads
+in one D1 read-only batch and applies the same resource/view filters as the
+local REST before counting. A missing-route test failed first. Unit tests
+verify counts, coverage and API-key revocation between preliminary principal
+resolution and the combined batch. The local workerd HTTP driver passed
+overview before and after a real restart in fresh `server-http-overview-state`;
+port 8797 was stopped. Reusing an earlier synthetic state yielded empty
+Source rows because its 300-second source permission lease had expired; this
+was treated as correct authorization behavior, and no old lease was extended.
+
+A later failing regression found Source publication still visible after a
+secondary context's configuration revision changed. Both SQLite ProductStore
+and D1SourceReads now compare `configurationRevision` in every saved fence;
+the focused Source/ProductStore run passes **36 tests** after the fix.
+Another failing test found a saved Source publication with an empty fence set
+still returned its assessment. Both readers now require a matching fence for
+every dependency, including the primary Source/context. Source/ProductStore
+focused verification passes **37 tests** after this correction.
+
+The local current-product protection selection now passes **424 tests,
+42 subtests**: Cloudflare, Product, billing, Creem, GitHub authorization and
+Source context filters. Server CI was narrowed to this current target after
+the full legacy run exposed old scan and retired Worker fixtures; it retains
+Python dependency audit/check and shell checks. This local workflow edit has
+not run remotely or been pushed.
+
+## Candidate manual sync Job read (2026-09-23 continuation)
+
+`GET /api/v1/jobs/{id}` now returns requester-owned manual sync status in the
+same read-only D1 batch as current identity. It excludes analysis Jobs and
+does not enqueue or charge work. The missing-route test failed first; the
+focused HTTP/product tests then passed **26 tests**. The local workerd HTTP
+driver passed before and after restart with a synthetic sync Job in fresh
+`server-http-jobs-state`; port 8797 was stopped. The broader current-product,
+billing, Creem, GitHub authorization and security selection passed **620 tests,
+68 subtests** before this final Job route addition; a final rerun remains.
+
+A follow-up failing test showed archived watch sync Jobs still visible to the
+original requester. The candidate now checks current watch or active owned
+repository service in the same Job read batch. It fails closed for unmapped
+member repository sync. Health requires the repository service table, bringing
+the routed table count to 19. The focused HTTP/product suite passes **27
+tests**, and a fresh local workerd HTTP run passed before and after restart in
+`server-http-job-fence-state`; port 8797 was stopped.
+
+## Same-snapshot profile, usage and watch reads (2026-09-23 continuation)
+
+The candidate now rechecks current Cookie/API-key/user authority in the same
+read-only D1 batch as `/me`, `/usage` and `/watches`. Usage bucket, consumed
+module counts and owner-cycle attempts also share that batch. Tests first
+failed by returning 200 after API-key revocation before each read batch, then
+passed with 401; a Cookie revocation before usage likewise returns 401.
+The product read suite passed **20 tests** after this change. Local workerd
+HTTP passed before and after restart in fresh `server-http-read-snapshot-state`;
+port 8797 was stopped. Read-only inspection of its synthetic D1 file showed
+zero provider attempts, NULL API-key last-used and two handling events from
+the driver's explicit PATCHes. A Wrangler CLI read-only query hit an `esbuild`
+spawn EPERM locally, so inspection used Python sqlite3 on the preserved local
+D1 file. No remote D1, cron, deployment, live GitHub or Jev was used.
+
+## Cookie handling Origin boundary (2026-09-23 continuation)
+
+A failing test confirmed the candidate did not accept the local Server's
+SameSite=None Cookie Origin policy as an HTTP input. `handle_http_request`
+now checks trusted Origin/Referer before reading an Item PATCH body when a
+session Cookie is present and SameSite=None. The Worker takes the policy from
+environment bindings; missing allowed origins deny the write. The focused
+HTTP/product suite passed **32 tests**. Fresh local workerd with synthetic
+SameSite=None and one loopback allowed origin passed trusted PATCH, untrusted
+403 and the existing read/webhook path before and after restart in
+`server-http-origin-state`; port 8797 was stopped. Production Cookie settings
+and credentials were unchanged.
+
+A failing mixed-credential test also found a malformed API-key header could
+pass preliminary Cookie resolution but fail only at the final read snapshot.
+The candidate now rejects that combination as `AMBIGUOUS_AUTH` before D1;
+the product-read suite passes **21 tests** after the correction.
+
+The final local current-product/Cloudflare, billing, Creem, GitHub
+authorization and security selection passed **630 tests, 68 subtests**.
+`sync_server_modules.py --check` passed after the local Worker build. This
+selection matches the edited Server CI test command; remote CI has not run
+the edit because nothing was pushed.

@@ -110,6 +110,71 @@ secondary-source invalidation. It is intentionally not routed as
 `/api/v1/sources` yet: request identity and source rows must share the final
 read snapshot to fence concurrent API-key/session revocation.
 
+The local candidate now routes Source list/detail. Its seven-SELECT read batch
+prepends current API-key, sessions and stored-user rows to the four Source
+queries. A preliminary principal identifies the owner for bounded queries;
+the final batch rechecks identity, scope, expiry and stored user before
+returning rows, so a revocation between those steps cannot disclose content.
+The same pure Source filters and API-key restrictions serve SQLite REST and
+the candidate. The batch is read-only; local workerd HTTP passed before and
+after process restart with synthetic D1. This does not cover all account
+writers, GitHub authorization freshness, Item/handling, or remote CF2.
+
+The candidate next routes Item list/detail through a six-SELECT read batch:
+three current identity SELECTs plus current ItemVersion, readable source/context
+and handling SELECTs. Shared SQLite/D1 projection requires a matching source
+version/revision and context version/configuration/authorization revision for
+every ItemVersion dependency. Missing or stale fences hide Item content.
+Local workerd HTTP passed on synthetic D1 before and after process restart;
+handling writes and overview remain unmapped.
+
+The candidate Item handling PATCH now reads an authorized Item and latest
+handling event, then performs one D1 write batch: guarded Item revision update,
+`changes()=1` CHECK, handling event insert and guard cleanup. The UPDATE
+rechecks the exact stored user, Cookie/session or API-key state, ItemVersion,
+all source versions and context/configuration/authorization revisions.
+Failure rolls back revision and event. Local tests revoked an API key before
+the write batch and observed no partial handling; local workerd HTTP passed
+valid and stale If-Match before and after process restart. This does not
+establish remote Cloudflare transaction validation.
+
+Item overview composes three principal, four Source and three Item SELECTs
+in one read-only D1 batch. It validates identity first, projects each saved
+resource with its publication/permission fences, then applies the shared
+resource filters and counts. A separate first read of principal is used only
+to bind the owner; revocation between it and the final batch is denied.
+The synthetic local HTTP driver passed before and after workerd restart in a
+fresh `server-http-overview-state`. Reusing an older local state returned an
+empty Source list after its 300-second authorization lease expired; no lease
+was extended for the probe.
+
+The candidate sync-Job detail GET adds the Job row to the same D1 batch as
+its current API-key/session/user proof. It returns only a Job requested by
+that user with type `sync_repository` or `sync_watch`; analysis Jobs remain
+inaccessible on this route. It performs no write or model work. The synthetic
+local HTTP driver passed before and after restart in `server-http-jobs-state`.
+The subsequent Job read also checks current watch archive/owner state or
+active repository-service owner state in that batch. Archived watch status is
+hidden. Member repository sync remains unmapped and is denied locally until
+current repository authorization can be proven. This passed the synthetic
+`server-http-job-fence-state` restart probe.
+
+Profile, usage and watches now also append their response SELECTs to the
+three current principal SELECTs in one D1 read batch. Usage's bucket, module
+ledger counts and provider attempts no longer straddle separate awaits.
+Tests revoked an API key immediately before each batch and a Cookie session
+before the usage batch; all returned 401. A fresh local workerd HTTP run
+passed before and after restart in `server-http-read-snapshot-state`. Direct
+read-only inspection of that synthetic D1 file found zero provider attempts,
+NULL API-key last-used and only the two expected handling events from the
+HTTP driver's explicit PATCHes.
+
+The candidate Cookie handling boundary now applies the local Server's
+SameSite=None Origin rule before reading a PATCH body. Its local Worker uses
+synthetic allowed origins; untrusted Origin returns 403 and trusted Origin
+continues. `server-http-origin-state` passed the HTTP driver before and after
+restart. No production Cookie/origin configuration was changed.
+
 The finite local mapping now has `account_entitlement_authority` and
 `d1_claim_authority`. A previously accepted synthetic event updates the matching
 user entry and billingEvents entry, increments the owner revision, and marks the

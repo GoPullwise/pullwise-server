@@ -1,7 +1,7 @@
 """Candidate Server Worker entry; no probe endpoints or scheduled trigger."""
 import json
 import time
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs
 
 from workers import Response, WorkerEntrypoint
 
@@ -27,15 +27,24 @@ class Default(WorkerEntrypoint):
             "Authorization": request.headers.get("authorization") or "",
             "X-Pullwise-Api-Key": request.headers.get("x-pullwise-api-key") or "",
             "X-Request-Id": request.headers.get("x-request-id") or "",
+            "If-Match": request.headers.get("if-match") or "",
+            "Origin": request.headers.get("origin") or "",
+            "Referer": request.headers.get("referer") or "",
         }
         status, payload = await handle_http_request(
             method=request.method,
             path=urlsplit(request.url).path,
+            params=parse_qs(urlsplit(request.url).query),
             headers=headers,
             read_body=read_body,
             binding=getattr(self.env, "DB", None),
             creem_secret=getattr(self.env, "PULLWISE_CREEM_WEBHOOK_SECRET", ""),
             configured_products=products,
             now=int(time.time()),
+            cookie_same_site=getattr(self.env, "PULLWISE_COOKIE_SAME_SITE", "Lax"),
+            trusted_origins={value.strip() for value in (
+                getattr(self.env, "PULLWISE_ALLOWED_ORIGINS", "") + "," +
+                getattr(self.env, "PULLWISE_APP_URL", "")).split(",")
+                if value.strip() and value.strip() != "*"},
         )
         return Response.json(payload, status=status)
