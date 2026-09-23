@@ -76,6 +76,15 @@ def test_health_rejects_incomplete_d1_auth_schema(tmp_path):
     assert status == 503 and payload["ok"] is False
 
 
+def test_health_rejects_missing_watch_table_for_routed_reads(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    with fixture.store._immediate() as db:
+        db.execute("CREATE TABLE api_keys(id TEXT PRIMARY KEY,key_hash TEXT)")
+        db.execute("DROP TABLE update_watches")
+    status, payload = _get_health(D1ShapedSQLite(fixture.store))
+    assert status == 503 and payload["ok"] is False
+
+
 def _get_health(binding):
     async def no_body():
         raise AssertionError("health must not read a body")

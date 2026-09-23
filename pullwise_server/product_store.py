@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Iterator, Mapping, Sequence
 
 from .product_domain import context_hash, validate_watch_interests, watch_scope_key
+from .product_dto_rules import watch_dto
 from .update_filter import project_saved_updates
 
 
@@ -3654,22 +3655,7 @@ class ProductStore:
 
     @staticmethod
     def _watch_dto(row: sqlite3.Row) -> dict:
-        return {
-            "id": row["id"],
-            "watchScopeKey": row["watch_scope_key"],
-            "ownerId": row["owner_id"],
-            "targetRepositoryId": row["target_repository_id"],
-            "upstreamRepositoryId": row["upstream_repository_id"],
-            "billingOwnerId": row["billing_owner_id"],
-            "contextVersion": int(row["context_version"]),
-            "contextHash": row["context_hash"],
-            "interests": json.loads(row["interests_json"]),
-            "includePrerelease": bool(row["include_prerelease"]),
-            "priorityOrder": int(row["priority_order"]),
-            "enabled": bool(row["enabled"]),
-            "analysisEnabled": bool(row["analysis_enabled"]),
-            "revision": int(row["revision"]),
-        }
+        return watch_dto(row)
 
     @staticmethod
     def _repository_service_dto(row: sqlite3.Row) -> dict:

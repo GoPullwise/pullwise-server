@@ -18,6 +18,7 @@ MODULES = (
     "creem_event_rules",
     "creem_signature",
     "product_entitlement_rules",
+    "product_dto_rules",
 )
 
 

@@ -12,6 +12,7 @@ from .product_entitlement_rules import (
     entitlements_for_user,
     product_usage_payload_from_usage,
 )
+from .product_dto_rules import watch_dto
 
 SESSION_COOKIE = "pw_session"
 API_KEY_PREFIX = "pwk_"
@@ -68,7 +69,7 @@ async def _user(binding: Any, owner_id: str) -> dict | None:
 
 
 async def _principal(binding: Any, headers: Mapping[str, object],
-                     *, scope: str, now: int) -> dict:
+                     *, scope: str, now: int) -> tuple[dict, dict]:
     bearer = _bearer(headers)
     header_key = _header(headers, "X-Pullwise-Api-Key")
     cookie_sessions = _cookie_sessions(headers)
@@ -102,7 +103,7 @@ async def _principal(binding: Any, headers: Mapping[str, object],
         user = await _user(binding, str(record["user_id"]))
         if user is None:
             raise ProductReadAuthError(401, "UNAUTHENTICATED", "A session or API key is required.")
-        return user
+        return user, restrictions
     if session_ids:
         row = await binding.prepare("SELECT payload FROM app_state WHERE name='sessions'").first()
         sessions = json.loads(row["payload"]) if row else None
@@ -119,7 +120,7 @@ async def _principal(binding: Any, headers: Mapping[str, object],
                 if (user is not None and not (
                         "github" in (user.get("providers") or [])
                         and not user.get("githubAccessToken"))):
-                    return user
+                    return user, {}
     raise ProductReadAuthError(401, "UNAUTHENTICATED", "A session or API key is required.")
 
 
@@ -149,13 +150,31 @@ async def _usage(binding: Any, user: dict, *, now: int) -> dict:
         int(attempts["count"]) if attempts else 0, timestamp=now)
 
 
+async def _watches(binding: Any, user: dict, restrictions: dict,
+                   headers: Mapping[str, object]) -> dict:
+    rows = await binding.prepare("""SELECT * FROM update_watches
+        WHERE billing_owner_id=? AND archived_at IS NULL
+        ORDER BY created_at,id""").bind(user["id"]).all()
+    items = [watch_dto(row) for row in rows.results]
+    if "watchIds" in restrictions:
+        ids = restrictions["watchIds"]
+        allowed = set(ids) if isinstance(ids, list) and all(
+            isinstance(value, str) for value in ids) else set()
+        items = [item for item in items if item["id"] in allowed]
+    elif restrictions:
+        items = []
+    return {"items": items, "nextCursor": None, "hasMore": False,
+            "requestId": _header(headers, "X-Request-Id") or f"req_{uuid.uuid4().hex}"}
+
+
 async def read_product(*, binding: Any, path: str, headers: Mapping[str, object],
                        now: int) -> tuple[int, dict]:
-    if path not in {"/api/v1/me", "/api/v1/usage"}:
+    if path not in {"/api/v1/me", "/api/v1/usage", "/api/v1/watches"}:
         return 404, {"error": {"code": "NOT_FOUND"}}
-    scope = "profile:read" if path.endswith("/me") else "usage:read"
+    scope = ("profile:read" if path.endswith("/me") else "usage:read"
+             if path.endswith("/usage") else "watches:read")
     try:
-        user = await _principal(binding, headers, scope=scope, now=now)
+        user, restrictions = await _principal(binding, headers, scope=scope, now=now)
     except ProductReadAuthError as error:
         return error.status, {"error": {"code": error.code,
             "message": error.message, "retryable": False},
@@ -164,4 +183,6 @@ async def read_product(*, binding: Any, path: str, headers: Mapping[str, object]
         return 200, {"id": user["id"], "name": user.get("name") or "",
                      "email": user.get("email") or "",
                      "modules": ["pr", "ci", "updates"]}
+    if path.endswith("/watches"):
+        return 200, await _watches(binding, user, restrictions, headers)
     return 200, await _usage(binding, user, now=now)

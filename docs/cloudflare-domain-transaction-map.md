@@ -93,6 +93,13 @@ read-only D1 inspection found `last_used_at=NULL`, zero provider attempts and
 unchanged payment revision on replay. This is a narrow read slice: full
 session/API-key lifecycle, resource authorization and remaining product-v1
 REST routes are not migrated.
+It additionally serves owner-scoped `/api/v1/watches` using a shared pure
+watch DTO function now called by both ProductStore and the D1 reader.
+API-key watch restrictions are applied before returning rows; a key scoped
+only to repositories sees no personal watches. A local workerd/D1 HTTP run
+and process restart covered a full Cookie list and a one-watch restricted
+list without a D1 write. Source/Item authorization and publication snapshots
+remain separate CF2 work.
 
 The finite local mapping now has `account_entitlement_authority` and
 `d1_claim_authority`. A previously accepted synthetic event updates the matching

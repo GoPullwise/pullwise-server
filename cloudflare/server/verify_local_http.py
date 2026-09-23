@@ -36,6 +36,12 @@ def main():
         "Authorization": "Bearer pwk_local_http_test"})
     assert status == 200 and usage["service"] == "github_followups"
     assert usage["usage"]["metric"] == "intelligent_processing"
+    status, watches = call("/api/v1/watches", extra_headers={
+        "Cookie": "pw_session=session-local"})
+    assert status == 200 and len(watches["items"]) == 2
+    status, restricted_watches = call("/api/v1/watches", extra_headers={
+        "Authorization": "Bearer pwk_local_http_test"})
+    assert status == 200 and len(restricted_watches["items"]) == 1
     assert call("/api/v1/me", extra_headers={
         "Cookie": "pw_session=session-local",
         "Authorization": "Bearer pwk_local_http_test"})[0] == 400

@@ -110,15 +110,21 @@ revision; pending or incomplete assessment must not silently close an item.
   each product-v1 route; some reads also call `db` directly and authenticate
   through the in-memory users map. Cloudflare REST adaptation must map all
   three seams while preserving the same Cookie/API-key contract and DTOs.
+- `product_dto_rules.watch_dto` is the shared watch projection for SQLite
+  ProductStore and local async D1. The candidate `GET /api/v1/watches` lists
+  only the authenticated billing owner's active watches, applies API-key
+  `watchIds` restrictions and returns an empty list for a key restricted only
+  by repositories. Its GET has no D1 batch write/model side effect. Source and
+  Item reads still require multi-source, permission and publication fences.
 - `cloudflare/server` is a separate **local-only candidate** for the actual
   Server Python Worker HTTP entry. `src/entry.py` routes read-only `/health`,
-  authenticated `GET /api/v1/me` and `/api/v1/usage`, and raw-byte
+  authenticated `GET /api/v1/me`, `/api/v1/usage`, `/api/v1/watches`, and raw-byte
   `POST /webhooks/creem` through Server-owned modules; unported product routes
   return 404. `cloudflare_product_read.py` checks persisted Cookie sessions
   and hashed API keys, rejects mixed/expired/restricted identities, and reads
   saved usage without Jev or a D1 write. The candidate does not update API-key
   last-used metadata on every GET; define a bounded policy before migration.
-  Its read-only health checks presence of the eight D1 tables required by
+  Its read-only health checks presence of the ten D1 tables required by
   currently routed endpoints; it is not a full schema/migration readiness gate.
   Its Wrangler config has no cron/public route, uses a synthetic `remote: false`
   D1 ID, and must not be deployed. Sync exact Server modules into its ignored

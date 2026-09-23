@@ -18,6 +18,8 @@ TABLES = (
     "processing_usage_buckets",
     "processing_usage_ledger",
     "provider_attempts",
+    "watch_controls",
+    "update_watches",
     "d1_command_guard",
     "api_keys",
 )
@@ -33,6 +35,13 @@ def main() -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=os.environ.get("TEMP")) as directory:
         fixture, _, _ = seed(Path(directory) / "synthetic.db")
+        first_watch = fixture.store.create_watch(owner_id="owner",
+            target_repository_id=None, upstream_repository_id="github:101",
+            billing_owner_id="owner", interests=["OAuth"], enabled=True,
+            analysis_enabled=False)
+        fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+            upstream_repository_id="github:102", billing_owner_id="owner",
+            interests=["database"], enabled=True, analysis_enabled=False)
         with fixture.store._immediate() as db:
             db.execute("INSERT INTO app_state(name,payload,updated_at) VALUES('sessions',?,?)",
                 (json.dumps({"session-local": {"userId": "owner",
@@ -46,8 +55,9 @@ def main() -> None:
             db.execute("INSERT INTO api_keys VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                 ("key-local", "owner", "Synthetic", token[:16],
                  hashlib.sha256(token.encode()).hexdigest(),
-                 '["profile:read","usage:read"]', fixture.now + 86400,
-                 "{}", fixture.now, None, None))
+                 '["profile:read","usage:read","watches:read"]', fixture.now + 86400,
+                 json.dumps({"watchIds": [first_watch["id"]]}),
+                 fixture.now, None, None))
         with closing(fixture.store.connect()) as db:
             statements = []
             for table in TABLES:

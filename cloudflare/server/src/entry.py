@@ -26,6 +26,7 @@ class Default(WorkerEntrypoint):
             "Cookie": request.headers.get("cookie") or "",
             "Authorization": request.headers.get("authorization") or "",
             "X-Pullwise-Api-Key": request.headers.get("x-pullwise-api-key") or "",
+            "X-Request-Id": request.headers.get("x-request-id") or "",
         }
         status, payload = await handle_http_request(
             method=request.method,

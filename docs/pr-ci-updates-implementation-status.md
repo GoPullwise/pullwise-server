@@ -1444,3 +1444,28 @@ Selected HTTP, billing, entitlement and D1 regression after the readiness fix:
 **170 passed, 15 subtests**. The candidate source sync check remained green.
 All `tests/test_product_*.py` suites then passed **198 tests, 8 subtests**
 after the shared usage DTO refactor.
+
+## Candidate Updates watch list (2026-09-23 continuation)
+
+`product_dto_rules.watch_dto` now owns the watch DTO shared by SQLite
+ProductStore and the async D1 reader. Authenticated `GET /api/v1/watches`
+reads only active watches for the signed-in billing owner and applies API-key
+`watchIds` restrictions; repository-only restricted keys see an empty watch
+list. It returns the existing list envelope and does not write D1 or invoke
+GitHub/Jev. The first watch-list test failed at 404, then passed with exact
+ProductStore DTO comparison and scope filtering. A separate failing health
+test caught a missing watch table; candidate health now checks ten required
+tables for currently routed paths, still not full schema readiness.
+
+The new synthetic local D1 fixture includes two watches, their controls and
+an API key scoped to one watch. `verify_local_http.py` passed against the
+actual no-cron Python Worker: Cookie saw two watches, API key saw one, and
+webhook replay remained idempotent. After a real process restart it passed
+again. Read-only D1 inspection found two watches, `last_used_at=NULL`, zero
+provider attempts and payment revision 3. Old local state directories remain
+untouched; no remote D1 or deployment was used. Source/Item evidence and
+authorization reads remain open.
+The watch/health and ProductStore focused test set passed **44 tests**;
+the full `tests/test_product_*.py` selection passed **198 tests, 8 subtests**
+after extracting the shared watch DTO. Server CI remains blocked before tests
+by the retired Worker checkout; Web Actions are empty.

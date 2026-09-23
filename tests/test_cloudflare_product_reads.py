@@ -95,3 +95,34 @@ def test_api_key_header_obeys_audit_restriction_without_usage_write(tmp_path):
         {"X-Pullwise-Api-Key": TOKEN}, fixture.now)
     assert status == 403 and payload["error"]["code"] == "INSUFFICIENT_SCOPE"
     assert binding.batch_count == 0
+
+
+def test_watches_list_matches_store_and_filters_api_key_watch_scope(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("watches:read",))
+    first = fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=False)
+    second = fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+        upstream_repository_id="github:102", billing_owner_id="owner",
+        interests=["database"], enabled=True, analysis_enabled=False)
+    binding = D1ShapedSQLite(fixture.store)
+    status, payload = _get(binding, "/api/v1/watches",
+        {"Cookie": "pw_session=session-local"}, fixture.now)
+    assert status == 200
+    assert payload["items"] == fixture.store.list_watches_for_billing_owner("owner")
+    assert [item["id"] for item in payload["items"]] == [first["id"], second["id"]]
+    assert payload["nextCursor"] is None and payload["hasMore"] is False
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE api_keys SET restrictions=? WHERE id='key-local'",
+            (json.dumps({"watchIds": [first["id"]]}),))
+    status, restricted = _get(binding, "/api/v1/watches",
+        {"Authorization": f"Bearer {TOKEN}"}, fixture.now)
+    assert status == 200 and [item["id"] for item in restricted["items"]] == [first["id"]]
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE api_keys SET restrictions=? WHERE id='key-local'",
+            ('{"repositoryIds":["repo-other"]}',))
+    status, restricted = _get(binding, "/api/v1/watches",
+        {"Authorization": f"Bearer {TOKEN}"}, fixture.now)
+    assert status == 200 and restricted["items"] == []
+    assert binding.batch_count == 0

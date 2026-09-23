@@ -31,14 +31,16 @@ async def handle_http_request(*, method: str, path: str,
                 WHERE type='table' AND name IN ('app_state','account_entitlement_authority',
                     'billing_webhook_receipts','processing_usage_buckets',
                     'processing_usage_ledger','provider_attempts','api_keys',
-                    'd1_command_guard')""").first()
-            if row and row.get("table_count") == 8:
+                    'd1_command_guard','watch_controls',
+                    'update_watches')""").first()
+            if row and row.get("table_count") == 10:
                 return 200, {"ok": True, "service": "pullwise-server",
                              "database": {"type": "d1", "configured": True}}
         except Exception:
             pass
         return 503, {"ok": False, "service": "pullwise-server"}
-    if method == "GET" and path in {"/api/v1/me", "/api/v1/usage"}:
+    if method == "GET" and path in {"/api/v1/me", "/api/v1/usage",
+                                       "/api/v1/watches"}:
         try:
             return await read_product(binding=binding, path=path,
                 headers=headers, now=now)
