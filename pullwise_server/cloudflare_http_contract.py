@@ -10,7 +10,7 @@ from .cloudflare_creem_handler import (
     accept_signed_creem_webhook,
 )
 from .creem_signature import verify_creem_signature
-from .cloudflare_product_read import read_product, patch_item, patch_watch, delete_watch, post_manual_sync, _cookie_sessions
+from .cloudflare_product_read import read_product, patch_item, patch_watch, delete_watch, post_manual_sync, put_repository_service_http, _cookie_sessions
 from .cloudflare_api_key_read import list_api_keys
 from .cloudflare_api_key_write import revoke_api_key, create_api_key
 from .cloudflare_billing_read import read_billing
@@ -105,6 +105,34 @@ async def handle_http_request(*, method: str, path: str,
         except Exception:
             return 503, {"error": {"code": "SERVER_UNAVAILABLE"}}
     segments = path.strip("/").split("/")
+    if method == "PUT" and len(segments) == 5 and segments[:3] == ["api", "v1", "repositories"] and segments[4] == "service":
+        repository_id = segments[3]
+        if not repository_id:
+            return 404, {"error": {"code": "NOT_FOUND"}}
+        if cookie_same_site.casefold() == "none" and _cookie_sessions(headers):
+            claimed_origin = _header(headers, "Origin") or _header(headers, "Referer")
+            parsed = urlsplit(claimed_origin)
+            origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else ""
+            if origin not in (trusted_origins or set()):
+                return 403, {"error": {"code": "UNTRUSTED_ORIGIN"}}
+        revision = _header(headers, "If-Match").strip().strip('"')
+        if not revision:
+            return 428, {"error": {"code": "PRECONDITION_REQUIRED"}}
+        if not revision.isdigit():
+            return 400, {"error": {"code": "INVALID_REQUEST"}}
+        length_text = _header(headers, "Content-Length")
+        if not length_text.isdigit() or int(length_text) > 8192:
+            return 400, {"error": {"code": "INVALID_REQUEST"}}
+        try:
+            raw = await read_body()
+            if not isinstance(raw, bytes) or len(raw) != int(length_text):
+                return 400, {"error": {"code": "INVALID_REQUEST"}}
+            body = json.loads(raw)
+        except Exception:
+            return 400, {"error": {"code": "INVALID_REQUEST"}}
+        return await put_repository_service_http(binding=binding,
+            repository_id=repository_id, headers=headers, body=body,
+            expected_revision=int(revision), now=now)
     if method == "POST" and len(segments) == 5 and segments[:2] == ["api", "v1"] and segments[2] in {"watches", "repositories"} and segments[4] == "sync":
         resource_id = segments[3]
         if not resource_id:

@@ -17,6 +17,8 @@ watch configuration/archive, and
 `GET /api/v1/jobs/{id}` for requester-owned manual sync status,
 `POST /api/v1/watches/{id}/sync` for owner public watches and
 `POST /api/v1/repositories/{id}/sync` for managed owner repositories, and
+`PUT /api/v1/repositories/{id}/service` for an existing owner service with a
+current GitHub App account item and repository discovery proof, and
 `GET /api/v1/repositories/{id}/service` for a currently authorized owner
 service with a fresh D1 repository proof, and
 `POST /webhooks/creem`; other routes return 404 until the shared product-v1 REST
@@ -24,6 +26,11 @@ contract has been adapted. It has no probe/reset route,
 no cron, no public route or Workers subdomain, and a synthetic `remote: false`
 D1 binding. Do not deploy it or put real credentials or payment data into its
 local state.
+
+The service PUT takes installation ID only from the saved service, requires
+If-Match and current account/proof/credential checks in the D1 write batch,
+and returns the new revision ETag. HTTP creation and installation switching
+remain closed pending fresh GitHub App authority binding.
 
 The package also contains a trusted, currently unmounted
 `D1RepositoryTransactions.put_service` mapping. It guards owner/capacity and

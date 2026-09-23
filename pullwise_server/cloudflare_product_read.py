@@ -18,6 +18,7 @@ from .cloudflare_item_read import D1ItemReads
 from .cloudflare_item_handling import D1ItemHandling
 from .cloudflare_watch_adapter import D1WatchTransactions
 from .cloudflare_manual_sync import D1ManualSyncTransactions
+from .cloudflare_repository_adapter import D1RepositoryTransactions
 from .product_source_filters import apply_source_restrictions, filter_sources
 from .product_item_filters import apply_item_restrictions, filter_items
 from .product_usage_events import parse_usage_events_query, usage_events_page
@@ -636,6 +637,56 @@ async def post_manual_sync(*, binding: Any, resource_kind: str,
     except Exception:
         return error(409, "RESOURCE_CHANGED", "Manual sync resource changed.")
     return 202, payload
+
+
+async def put_repository_service_http(*, binding: Any, repository_id: str,
+                                      headers: Mapping[str, object], body: object,
+                                      expected_revision: int, now: int) -> tuple[int, dict]:
+    request_id = _header(headers, "X-Request-Id") or f"req_{uuid.uuid4().hex}"
+
+    def error(status: int, code: str) -> tuple[int, dict]:
+        return status, {"error": {"code": code, "retryable": False},
+                        "requestId": request_id}
+
+    required = {"enabled", "modules", "analysisEnabled", "allowMemberSync",
+                "defaultAssigneeId", "priorityOrder"}
+    if not isinstance(body, dict) or set(body) != required:
+        return error(400, "INVALID_REQUEST")
+    try:
+        user, restrictions = await _principal(binding, headers,
+            scope="repositories:manage", now=now)
+        if restrictions and repository_id not in set(restrictions.get("repositoryIds") or ()):
+            return error(404, "NOT_FOUND")
+        proof: dict = {}
+        auth, validate = _resource_auth_snapshot(binding, headers, user,
+            restrictions, now, "repositories:manage", proof)
+        snapshot = await binding.batch([*auth, binding.prepare("""SELECT * FROM repository_services
+            WHERE repository_id=? AND billing_owner_id=?""").bind(repository_id, user["id"])])
+        validate([part.results for part in snapshot[:len(auth)]])
+        service_rows = snapshot[-1].results
+        if len(service_rows) != 1:
+            return error(404, "NOT_FOUND")
+        service = service_rows[0]
+        changed = await D1RepositoryTransactions(binding).put_service(
+            repository_id=repository_id, installation_id=service["installation_id"],
+            owner_id=user["id"], expected_revision=expected_revision,
+            enabled=body["enabled"], modules=body["modules"],
+            analysis_enabled=body["analysisEnabled"],
+            allow_member_sync=body["allowMemberSync"],
+            default_assignee_id=body["defaultAssigneeId"],
+            priority_order=body["priorityOrder"], now=now, proof=proof)
+        return 200, changed
+    except ProductReadAuthError as failure:
+        return error(failure.status, failure.code)
+    except ValueError as failure:
+        code = str(failure)
+        if code == "REVISION_MISMATCH":
+            return error(412, code)
+        if code == "RESOURCE_NOT_AUTHORIZED":
+            return error(404, "NOT_FOUND")
+        return error(400, "INVALID_REQUEST")
+    except Exception:
+        return error(412, "REVISION_MISMATCH")
 
 
 async def patch_watch(*, binding: Any, watch_id: str,

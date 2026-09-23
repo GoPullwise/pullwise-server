@@ -2200,3 +2200,19 @@ The expanded local Server CI target plus shared-watch contracts passes
 **773 tests, 73 subtests**; exact candidate module sync and diff checks pass.
 Web `npm run check` was rerun without Web edits: 49 files/616 tests, lint and
 build passed. Its untracked `output/` screenshots remain untouched.
+
+## Existing RepositoryService owner PUT (2026-09-24 continuation)
+
+Candidate `PUT /api/v1/repositories/{id}/service` now updates an existing
+owner service with exact six-field body and If-Match. The installation ID is
+read from the saved service, then current account GitHub App access,
+accessible unexpired repository proof, owner capacity, revision and
+Cookie/API-key are checked in the D1 write batch. No HTTP service creation or
+installation change is allowed. Three test-first focused cases cover valid
+update, proof revocation before write, restricted key and foreign Origin.
+Synthetic local workerd/D1 returned 200 revision 2, 403 for foreign Origin
+and 412 for old revision. After restart, read-only local D1 showed revision 2
+and unchanged installation; authorized GET returned 404 because the 300-second
+proof had expired, as designed. No model attempt or usage increment occurred.
+The expanded local Server target passes **776 tests, 73 subtests**; the
+candidate package sync and diff checks pass.

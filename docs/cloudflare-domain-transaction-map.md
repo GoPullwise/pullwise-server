@@ -588,6 +588,16 @@ proof, including replay after restart. A later five-minute proof expiry
 returned 404. Local D1 inspection found one repository sync Job, one
 completed response, zero provider attempts and no additional reservation.
 Member/private/shared sync and actual GitHub execution remain unported.
+Candidate `PUT /api/v1/repositories/{id}/service` now maps an existing owner
+service update. The HTTP layer supplies only the persisted installation ID;
+the D1 batch guards current Cookie/key/user, GitHub App account item,
+accessible unexpired repository discovery proof, service revision and owner
+capacity before updating service/configuration and cancelling stale queued
+analysis. A proof revoked just before the batch rolls back revision and
+side effects. Synthetic local workerd/D1 returned 200 revision 2, 403 for
+foreign Origin and 412 for stale If-Match. A later process restart retained
+revision 2 on disk; the five-minute proof had expired, so authorized GET
+correctly returned 404. HTTP creation/installation changes remain unmapped.
 
 - Full ProductStore async reads and consistent authorization-filtered list/count
   snapshots; no use of a Worker/Container local SQLite file as durable storage.

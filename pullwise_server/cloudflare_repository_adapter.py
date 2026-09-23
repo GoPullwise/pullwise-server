@@ -6,6 +6,8 @@ from typing import Any
 
 from .product_dto_rules import repository_service_dto
 from .product_entitlement_rules import entitlements_for_user
+from .product_repository_access import account_can_read_repository_service
+from .cloudflare_watch_adapter import _credential_guard
 
 
 _SOURCE_TYPES = {"pr": ("pr_state", "pr_comment", "pr_review_body", "pr_review_comment"),
@@ -21,7 +23,8 @@ class D1RepositoryTransactions:
                           enabled: bool, modules: dict,
                           analysis_enabled: dict, allow_member_sync: bool,
                           default_assignee_id: str | None,
-                          priority_order: int, now: int) -> dict:
+                          priority_order: int, now: int,
+                          proof: dict | None = None) -> dict:
         if (not all(isinstance(value, str) and value for value in
                     (repository_id, installation_id, owner_id))
                 or type(expected_revision) is not int or expected_revision < 0
@@ -43,7 +46,8 @@ class D1RepositoryTransactions:
             json_each(a.payload) u WHERE a.name='users' AND u.key=?""").bind(owner_id).first()
         if account is None:
             raise ValueError("UNAUTHENTICATED")
-        entitlement = entitlements_for_user(json.loads(account["snapshot"]), timestamp=now)
+        user = json.loads(account["snapshot"])
+        entitlement = entitlements_for_user(user, timestamp=now)
         limit = entitlement["entitlements"]["activeRepositoryLimit"]
         current = await self.binding.prepare("""SELECT * FROM repository_services
             WHERE repository_id=?""").bind(repository_id).first()
@@ -54,11 +58,24 @@ class D1RepositoryTransactions:
                 raise ValueError("REPOSITORY_ALREADY_MANAGED")
             if int(current["revision"]) != expected_revision:
                 raise ValueError("REVISION_MISMATCH")
+        if proof is not None and (current is None
+                or current["installation_id"] != installation_id
+                or not account_can_read_repository_service(user, current)):
+            raise ValueError("RESOURCE_NOT_AUTHORIZED")
         modules_json = json.dumps(modules, separators=(",", ":"), sort_keys=True)
         analysis_json = json.dumps(analysis_enabled, separators=(",", ":"), sort_keys=True)
         predicates = ["""EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u
             WHERE a.name='users' AND u.key=? AND u.value=?)"""]
         params: list = [owner_id, account["snapshot"]]
+        if proof is not None:
+            credential_sql, credential_params = _credential_guard(owner_id, proof)
+            predicates.extend([credential_sql, """EXISTS(SELECT 1 FROM discovery_targets d
+                WHERE d.resource_kind='repository' AND d.resource_id=?
+                  AND d.repository_id=? AND d.billing_owner_id=?
+                  AND d.module IN ('pr','ci') AND d.installation_id=?
+                  AND d.accessible=1 AND d.valid_until>=?)"""])
+            params.extend((*credential_params, repository_id, repository_id,
+                           owner_id, installation_id, now))
         if current is None:
             predicates.append("NOT EXISTS(SELECT 1 FROM repository_services WHERE repository_id=?)")
             params.append(repository_id)

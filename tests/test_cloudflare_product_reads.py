@@ -1015,3 +1015,111 @@ def test_manual_sync_http_body_read_failure_is_invalid_request(tmp_path):
         binding=D1ShapedSQLite(fixture.store), creem_secret="",
         configured_products={}, now=fixture.now))
     assert status == 400 and payload["error"]["code"] == "INVALID_REQUEST"
+
+
+def test_existing_repository_service_put_requires_revision_and_current_proof(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("repositories:manage",))
+    initial = fixture.store.put_repository_service(repository_id="repo",
+        installation_id="inst-1", billing_owner_id="owner", expected_revision=0,
+        enabled=True, modules={"pr": True, "ci": False},
+        analysis_enabled={"pr": False, "ci": False}, allow_member_sync=False,
+        default_assignee_id=None, priority_order=0)
+    fixture.store.set_discovery_authorization(resource_kind="repository",
+        resource_id="repo", module="pr", github_repository_id="101",
+        installation_id="inst-1", app_id="app", authorization_revision=1,
+        accessible=True, valid_until=fixture.now + 300, observed_at=fixture.now)
+    _grant_repository_access(fixture)
+    body = json.dumps({"enabled": True, "modules": {"pr": True, "ci": False},
+        "analysisEnabled": {"pr": True, "ci": False},
+        "allowMemberSync": False, "defaultAssigneeId": None,
+        "priorityOrder": 0}).encode()
+    binding = D1ShapedSQLite(fixture.store)
+    async def read_body():
+        return body
+    async def put(revision):
+        return await handle_http_request(method="PUT",
+            path="/api/v1/repositories/repo/service",
+            headers={"Cookie": "pw_session=session-local", "If-Match": revision,
+                "Content-Length": str(len(body))}, read_body=read_body,
+            binding=binding, creem_secret="", configured_products={}, now=fixture.now)
+    assert asyncio.run(put(""))[0] == 428
+    status, changed = asyncio.run(put(str(initial["revision"])))
+    assert status == 200 and changed["revision"] == 2
+    assert changed["installationId"] == "inst-1" and changed["analysisEnabled"]["pr"] is True
+    assert asyncio.run(put(str(initial["revision"])))[0] == 412
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT COUNT(*) FROM provider_attempts").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM background_jobs WHERE job_type='analyze_source'").fetchone()[0] == 1
+
+
+def test_repository_service_put_rolls_back_if_proof_revoked_before_write(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("repositories:manage",))
+    fixture.store.put_repository_service(repository_id="repo", installation_id="inst-1",
+        billing_owner_id="owner", expected_revision=0, enabled=True,
+        modules={"pr": True, "ci": False}, analysis_enabled={"pr": False, "ci": False},
+        allow_member_sync=False, default_assignee_id=None, priority_order=0)
+    fixture.store.set_discovery_authorization(resource_kind="repository",
+        resource_id="repo", module="pr", github_repository_id="101",
+        installation_id="inst-1", app_id="app", authorization_revision=1,
+        accessible=True, valid_until=fixture.now + 300, observed_at=fixture.now)
+    _grant_repository_access(fixture)
+    binding = D1ShapedSQLite(fixture.store)
+    batches = 0
+    def revoke_before_write():
+        nonlocal batches
+        batches += 1
+        if batches == 2:
+            with fixture.store._immediate() as db:
+                db.execute("UPDATE discovery_targets SET accessible=0 WHERE resource_kind='repository'")
+    binding.before_batch = revoke_before_write
+    body = json.dumps({"enabled": True, "modules": {"pr": True, "ci": False},
+        "analysisEnabled": {"pr": True, "ci": False},
+        "allowMemberSync": False, "defaultAssigneeId": None,
+        "priorityOrder": 0}).encode()
+    async def read_body():
+        return body
+    status, _ = asyncio.run(handle_http_request(method="PUT",
+        path="/api/v1/repositories/repo/service",
+        headers={"Cookie": "pw_session=session-local", "If-Match": "1",
+            "Content-Length": str(len(body))}, read_body=read_body,
+        binding=binding, creem_secret="", configured_products={}, now=fixture.now))
+    assert status == 412
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT revision FROM repository_services WHERE repository_id='repo'").fetchone()[0] == 1
+        assert db.execute("SELECT analysis_enabled FROM source_contexts WHERE source_id='1'").fetchone()[0] == 1
+
+
+def test_repository_service_put_rejects_out_of_scope_key_and_origin(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("repositories:manage",),
+        restrictions='{"repositoryIds":["other"]}')
+    fixture.store.put_repository_service(repository_id="repo", installation_id="inst-1",
+        billing_owner_id="owner", expected_revision=0, enabled=True,
+        modules={"pr": True, "ci": False}, analysis_enabled={"pr": False, "ci": False},
+        allow_member_sync=False, default_assignee_id=None, priority_order=0)
+    fixture.store.set_discovery_authorization(resource_kind="repository",
+        resource_id="repo", module="pr", github_repository_id="101",
+        installation_id="inst-1", app_id="app", authorization_revision=1,
+        accessible=True, valid_until=fixture.now + 300, observed_at=fixture.now)
+    _grant_repository_access(fixture)
+    binding = D1ShapedSQLite(fixture.store)
+    body = json.dumps({"enabled": True, "modules": {"pr": True, "ci": False},
+        "analysisEnabled": {"pr": True, "ci": False},
+        "allowMemberSync": False, "defaultAssigneeId": None,
+        "priorityOrder": 0}).encode()
+    async def read_body():
+        return body
+    async def put(headers):
+        return await handle_http_request(method="PUT",
+            path="/api/v1/repositories/repo/service", headers=headers,
+            read_body=read_body, binding=binding, creem_secret="",
+            configured_products={}, now=fixture.now, cookie_same_site="None",
+            trusted_origins={"https://app.pullwise.dev"})
+    base = {"If-Match": "1", "Content-Length": str(len(body))}
+    assert asyncio.run(put({**base, "Authorization": f"Bearer {TOKEN}"}))[0] == 404
+    assert asyncio.run(put({**base, "Cookie": "pw_session=session-local",
+                            "Origin": "https://evil.example"}))[0] == 403
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT revision FROM repository_services WHERE repository_id='repo'").fetchone()[0] == 1

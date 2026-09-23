@@ -239,6 +239,13 @@ revision; pending or incomplete assessment must not silently close an item.
   analysis or spends intelligent-processing units. Owner public watches and
   managed owner repositories are the routed scope; member/private/shared
   sync remains closed.
+  Candidate `PUT /api/v1/repositories/{id}/service` is limited to an existing
+  owner service. It derives installation ID from that saved row, requires
+  If-Match, a matching current account GitHub App item and unexpired D1
+  discovery proof, and rechecks the exact Cookie/key/user and proof in the
+  write batch. It cannot create a service or switch installations through
+  HTTP; those require a separate verified GitHub App authorization path.
+  Configuration changes do not enqueue model work or increase usage.
   `GET /api/v1/watches/{id}` is now shared by local REST and the candidate;
   resolve only an unarchived owner watch, apply API-key watchIds restrictions,
   and keep the candidate's identity and watch row in one D1 read snapshot.
