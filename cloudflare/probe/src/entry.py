@@ -114,6 +114,12 @@ class Default(WorkerEntrypoint):
                 (SELECT state FROM background_jobs WHERE id='job-repository-probe') AS state,
                 (SELECT COUNT(*) FROM provider_attempts) AS attempts,
                 (SELECT reserved FROM processing_usage_buckets LIMIT 1) AS reserved''').first())
+        if request.method == 'GET' and name == 'manual-sync-idempotent-state':
+            return Response.json(await self.env.DB.prepare('''SELECT
+                (SELECT COUNT(*) FROM background_jobs WHERE job_type='sync_watch') AS jobs,
+                (SELECT COUNT(*) FROM request_idempotency WHERE state='completed') AS receipts,
+                (SELECT COUNT(*) FROM provider_attempts) AS attempts,
+                (SELECT reserved FROM processing_usage_buckets LIMIT 1) AS reserved''').first())
         if request.method == 'GET' and name == 'source-read':
             try:
                 items = await D1SourceReads(self.env.DB).list_sources_for_billing_owner(
@@ -212,6 +218,21 @@ class Default(WorkerEntrypoint):
                 return Response.json(result)
             except Exception:
                 return Response.json({'error': 'manual sync rejected'}, status=409)
+        if name in {'manual-sync-idempotent', 'manual-sync-idempotent-second-key'}:
+            watch = await self.env.DB.prepare("""SELECT id FROM update_watches
+                WHERE upstream_repository_id='github:101' AND archived_at IS NULL
+                LIMIT 1""").first()
+            if watch is None:
+                return Response.json({'error': 'watch missing'}, status=409)
+            try:
+                result = await D1ManualSyncTransactions(self.env.DB).request_idempotent(
+                    resource_kind='watch', resource_id=watch['id'],
+                    owner_id='owner', job_id='job-idem-probe', now=DATA['claim']['now'],
+                    idempotency_key='second' if name.endswith('second-key') else 'first',
+                    request_id='req-second' if name.endswith('second-key') else 'req-first')
+                return Response.json(result)
+            except Exception:
+                return Response.json({'error': 'idempotent sync rejected'}, status=409)
         if name == 'repository-seed-manual-proof':
             user_row = await self.env.DB.prepare("SELECT payload FROM app_state WHERE name='users'").first()
             if user_row is None:

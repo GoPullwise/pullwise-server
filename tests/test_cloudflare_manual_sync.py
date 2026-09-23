@@ -297,3 +297,67 @@ def test_manual_sync_rejects_expired_cookie_proof(tmp_path):
         asyncio.run(D1ManualSyncTransactions(D1ShapedSQLite(fixture.store)).request(
             resource_kind="watch", resource_id=watch["id"], owner_id="owner",
             job_id="job-expired-session", now=fixture.now, proof=proof))
+
+
+def test_idempotent_manual_sync_commits_job_and_response_together(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    watch = fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=False)
+    adapter = D1ManualSyncTransactions(D1ShapedSQLite(fixture.store))
+    args = dict(resource_kind="watch", resource_id=watch["id"], owner_id="owner",
+        idempotency_key="sync-one", request_id="req-one", now=fixture.now)
+    first = asyncio.run(adapter.request_idempotent(**args, job_id="job-sync-one"))
+    replay = asyncio.run(adapter.request_idempotent(**{**args, "request_id": "req-retry"},
+        job_id="job-sync-other"))
+    assert first == replay
+    assert first["id"] == "job-sync-one" and first["operation"] == "sync_watch"
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT COUNT(*) FROM background_jobs WHERE job_type='sync_watch'").fetchone()[0] == 1
+        row = db.execute("SELECT state,status_code,response_json FROM request_idempotency").fetchone()
+        assert row["state"] == "completed" and row["status_code"] == 202
+        assert json.loads(row["response_json"]) == first
+
+
+def test_different_idempotency_keys_reuse_one_active_manual_job(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    watch = fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=False)
+    adapter = D1ManualSyncTransactions(D1ShapedSQLite(fixture.store))
+    first = asyncio.run(adapter.request_idempotent(resource_kind="watch",
+        resource_id=watch["id"], owner_id="owner", job_id="job-one", now=fixture.now,
+        idempotency_key="key-one", request_id="req-one"))
+    second = asyncio.run(adapter.request_idempotent(resource_kind="watch",
+        resource_id=watch["id"], owner_id="owner", job_id="job-two", now=fixture.now,
+        idempotency_key="key-two", request_id="req-two"))
+    assert first["id"] == second["id"] == "job-one"
+    assert first["requestId"] == "req-one" and second["requestId"] == "req-two"
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT COUNT(*) FROM background_jobs WHERE job_type='sync_watch'").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM request_idempotency WHERE state='completed'").fetchone()[0] == 2
+
+
+def test_idempotent_manual_sync_rolls_back_job_and_receipt_on_archive_race(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    watch = fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=False)
+    binding = D1ShapedSQLite(fixture.store)
+    batches = 0
+
+    def archive_before_write():
+        nonlocal batches
+        batches += 1
+        if batches == 3:
+            fixture.store.archive_watch(watch["id"], expected_revision=watch["revision"])
+
+    binding.before_batch = archive_before_write
+    with pytest.raises(sqlite3.IntegrityError):
+        asyncio.run(D1ManualSyncTransactions(binding).request_idempotent(
+            resource_kind="watch", resource_id=watch["id"], owner_id="owner",
+            job_id="job-raced", now=fixture.now, idempotency_key="key-raced",
+            request_id="req-raced"))
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT COUNT(*) FROM background_jobs WHERE id='job-raced'").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM request_idempotency").fetchone()[0] == 0

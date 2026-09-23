@@ -22,7 +22,7 @@ def main():
                  "source_records", "source_versions", "source_contexts", "assessments",
                  "source_assessment_publications", "items", "item_versions", "provider_attempts",
                  "processing_usage_buckets", "processing_usage_ledger", "background_jobs",
-                 "analysis_claim_owners", "app_state", "account_entitlement_authority",
+                 "analysis_claim_owners", "request_idempotency", "app_state", "account_entitlement_authority",
                  "d1_claim_authority", "billing_webhook_receipts", "d1_enqueue_decision"]
         schemas, inserts = [], []
         with closing(f.store.connect()) as db:
@@ -51,6 +51,7 @@ def main():
                      "cloudflare_repository_adapter",
                      "cloudflare_manual_sync",
                      "product_repository_access",
+                     "product_job_filters",
                      "cloudflare_session_adapter",
                      "cloudflare_oauth_state_adapter",
                      "cloudflare_billing_catalog_write", "product_public_catalog_rules",

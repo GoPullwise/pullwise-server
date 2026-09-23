@@ -227,6 +227,11 @@ revision; pending or incomplete assessment must not silently close an item.
   then rechecks the exact key/session/user in the D1 enqueue batch. The
   authenticated read helper records the concrete session ID for that proof.
   These checks prepare HTTP composition but do not themselves mount POST sync.
+  `request_idempotent` now commits a manual Job and completed
+  `request_idempotency` response in one guarded D1 batch. Same-key replay
+  returns the saved response; a second key can reuse one active Job and save
+  its own response. Archive/authority races roll back both rows. HTTP body,
+  Origin and endpoint wiring remain open.
   `GET /api/v1/watches/{id}` is now shared by local REST and the candidate;
   resolve only an unarchived owner watch, apply API-key watchIds restrictions,
   and keep the candidate's identity and watch row in one D1 read snapshot.

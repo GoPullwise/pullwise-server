@@ -52,6 +52,10 @@ The route is probe-only and does not invoke GitHub or Jev.
 synthetic account/proof, then creates one owner repository fact-sync Job and
 checks replay and restart with zero provider attempts and no added processing
 reservation. These finite routes are not product HTTP sync endpoints.
+`verify_manual_sync_idempotency.py` uses fresh
+`.wrangler/server-map-manual-idempotency-state` and checks atomic Job plus
+completed response publication: one Job, two keys, saved same-key response,
+and identical rows after a real workerd restart. No model/provider work ran.
 Run `verify_repository_mapping.py` with the fresh
 `.wrangler/server-map-repository-parent-state` and again with
 `--after-restart` after restarting workerd. It creates a synthetic linked

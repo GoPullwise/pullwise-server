@@ -43,6 +43,10 @@ The trusted enqueue accepts a validated Cookie/API-key proof and rechecks the
 exact session/key and account in the D1 write batch. It rejects expired proofs
 and keys without read plus `sync:write` scope or the resource restriction;
 product POST routing and idempotency are still unmounted.
+The trusted `request_idempotent` command now commits the fact-only Job and
+completed response row atomically. Same-key replay returns the saved response;
+another key reuses the active Job. The command remains unmounted from product
+HTTP while body, Origin and route composition are completed.
 
 `src/entry.py` calls Server-owned `cloudflare_http_contract.py`. The latter
 requires raw request bytes, checks the 64 KiB bound and signature before D1,

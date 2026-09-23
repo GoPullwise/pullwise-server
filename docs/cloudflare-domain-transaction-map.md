@@ -570,6 +570,15 @@ CASes the exact stored account and current key or session payload so a
 revocation after the read snapshot rolls back enqueue. Focused tests revoked
 both credential types before the batch and observed no Job. This is not yet
 HTTP authentication, request idempotency or a public POST route.
+The trusted `request_idempotent` variant now records a completed
+`request_idempotency` response in the same D1 batch as a newly enqueued Job,
+or records a new key against a still-active same-requester Job. It rechecks
+credential/account/resource and competing Job/receipt state in the batch;
+same-key replay returns the saved response. A watch archive racing before
+commit rolls back both Job and receipt. Local workerd/D1 persisted one Job,
+two completed keys and the original response through process restart without
+model attempts or added reservation. Public POST body/Origin handling and
+route composition remain unported.
 
 - Full ProductStore async reads and consistent authorization-filtered list/count
   snapshots; no use of a Worker/Container local SQLite file as durable storage.

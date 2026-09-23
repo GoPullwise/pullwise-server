@@ -2164,3 +2164,16 @@ product-read suite passes **53 tests**. The product POST routes and
 idempotency transaction remain unported; no model or provider request ran.
 The expanded local Server target passes **765 tests, 73 subtests** after this
 seam. Remote Server CI remains old run `35848982912` on `7a1ade3`.
+
+## Atomic manual-sync idempotency (2026-09-24 continuation)
+
+`D1ManualSyncTransactions.request_idempotent` now writes the fact-only Job
+and completed response record in one D1 batch. Same-key replay returns the
+original response; a second key reuses the active Job and saves its own
+response. Red tests preceded the mapping; focused tests cover archive-race
+rollback of both rows. Synthetic local workerd/D1 in fresh
+`server-map-manual-idempotency-state` persisted one Job and two completed
+responses through a real restart with zero model attempts and no added
+reservation. Product HTTP POST remains closed pending body/Origin routing.
+The expanded local Server target passes **768 tests, 73 subtests**; the
+candidate package sync check passes.

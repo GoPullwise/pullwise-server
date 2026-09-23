@@ -31,6 +31,7 @@ TABLES = (
     "item_versions",
     "item_handling_events",
     "background_jobs",
+    "request_idempotency",
     "repository_services",
     "processing_controls",
     "discovery_targets",
