@@ -296,7 +296,13 @@ class ProductDiscoveryContractsTest(unittest.TestCase):
         self.assertCountEqual(results, [{"status": "unavailable"}, {"status": "renewed"}])
         self.assertEqual(self.store.discovery_target(key)["valid_until"], self.now + 300)
 
-    def authorize(self, *, accessible=True, revision=1):
+    def authorize(self, *, accessible=True, revision=None):
+        if revision is None:
+            with closing(self.store.connect()) as connection:
+                previous = connection.execute("""SELECT resource_id,authorization_revision
+                    FROM discovery_targets WHERE control_key=?""", (self.target,)).fetchone() if hasattr(self, "target") else None
+            revision = (1 if previous is None else int(previous["authorization_revision"])
+                + (previous["resource_id"] != self.watch["id"]))
         return self.store.set_discovery_authorization(resource_kind="watch", resource_id=self.watch["id"],
             module="updates", github_repository_id="123", installation_id="11", app_id="7",
             authorization_revision=revision, accessible=accessible, valid_until=self.now + 300,

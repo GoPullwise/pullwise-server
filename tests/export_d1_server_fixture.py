@@ -12,7 +12,8 @@ def main():
         publish = publication_args(f, job, frozen)
         claim = claim_args(f, job, frozen)
         f.source("3", "Queued source")
-        names = ["watch_controls", "update_watches",
+        names = ["watch_controls", "update_watches", "processing_controls",
+                 "discovery_targets",
                  "source_records", "source_versions", "source_contexts", "assessments",
                  "source_assessment_publications", "items", "item_versions", "provider_attempts",
                  "processing_usage_buckets", "processing_usage_ledger", "background_jobs",
@@ -41,6 +42,7 @@ def main():
                      "cloudflare_d1_mapping", "cloudflare_account_adapter", "cloudflare_analysis_adapter",
                      "creem_signature", "creem_event_rules", "cloudflare_webhook_receipts",
                      "cloudflare_creem_handler", "cloudflare_source_read",
+                     "cloudflare_watch_adapter",
                      "product_dto_rules", "update_filter", "product_domain"):
             source = Path(__file__).parents[1] / "pullwise_server" / f"{name}.py"
             (package / f"{name}.py").write_text(source.read_text(encoding="utf-8"), encoding="utf-8")

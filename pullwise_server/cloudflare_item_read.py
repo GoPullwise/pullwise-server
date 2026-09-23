@@ -19,7 +19,10 @@ class D1ItemReads:
                   ON iv.item_id=i.id AND iv.item_version=i.current_item_version
                 WHERE EXISTS (SELECT 1 FROM source_contexts sc
                     WHERE sc.context_id=i.context_id AND sc.billing_owner_id=?
-                      AND sc.accessible=1 AND sc.authorization_valid_until>=?)
+                      AND sc.accessible=1 AND sc.authorization_valid_until>=?
+                      AND (sc.watch_id IS NULL OR EXISTS(
+                          SELECT 1 FROM update_watches w
+                          WHERE w.id=sc.watch_id AND w.archived_at IS NULL)))
                   AND (? IS NULL OR i.id=?)
                 ORDER BY i.updated_at DESC,i.id""").bind(owner_id, now, item_id, item_id),
             self.binding.prepare("""SELECT sc.source_id,sc.context_id,sc.billing_owner_id,
@@ -27,8 +30,10 @@ class D1ItemReads:
                 sc.context_version,sc.configuration_revision,sc.authorization_revision,
                 sr.latest_version,sr.source_revision,sr.last_synced_at
                 FROM source_contexts sc JOIN source_records sr ON sr.source_id=sc.source_id
+                LEFT JOIN update_watches w ON w.id=sc.watch_id
                 WHERE sc.billing_owner_id=? AND sc.accessible=1
-                  AND sc.authorization_valid_until>=?""").bind(owner_id, now),
+                  AND sc.authorization_valid_until>=?
+                  AND (sc.watch_id IS NULL OR (w.id IS NOT NULL AND w.archived_at IS NULL))""").bind(owner_id, now),
             (self.binding.prepare("""SELECT * FROM item_handling_events
                 WHERE (? IS NULL OR item_id=?) ORDER BY rowid""").bind(item_id, item_id)
              if include_history else self.binding.prepare("""SELECT h.* FROM item_handling_events h

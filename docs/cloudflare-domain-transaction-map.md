@@ -123,8 +123,10 @@ writers, GitHub authorization freshness, Item/handling, or remote CF2.
 The candidate next routes Item list/detail through a six-SELECT read batch:
 three current identity SELECTs plus current ItemVersion, readable source/context
 and handling SELECTs. Shared SQLite/D1 projection requires a matching source
-version/revision and context version/configuration/authorization revision for
-every ItemVersion dependency. Missing or stale fences hide Item content.
+version/revision and context/authorization revision for every ItemVersion
+dependency. A config-only analysis-off change retains the saved historical
+judgment as required by design 02; publication writes still CAS config revision.
+Missing or stale source/permission fences hide Item content.
 Local workerd HTTP passed on synthetic D1 before and after process restart;
 handling writes and overview remain unmapped.
 
@@ -132,7 +134,9 @@ The candidate Item handling PATCH now reads an authorized Item and latest
 handling event, then performs one D1 write batch: guarded Item revision update,
 `changes()=1` CHECK, handling event insert and guard cleanup. The UPDATE
 rechecks the exact stored user, Cookie/session or API-key state, ItemVersion,
-all source versions and context/configuration/authorization revisions.
+all source versions and context/authorization revisions. A config-only
+analysis-off change does not block handling a saved Item; model publication
+still CASes configuration revision.
 Failure rolls back revision and event. Local tests revoked an API key before
 the write batch and observed no partial handling; local workerd HTTP passed
 valid and stale If-Match before and after process restart. This does not
@@ -168,6 +172,50 @@ passed before and after restart in `server-http-read-snapshot-state`. Direct
 read-only inspection of that synthetic D1 file found zero provider attempts,
 NULL API-key last-used and only the two expected handling events from the
 HTTP driver's explicit PATCHes.
+
+Watch detail GET uses the same batch-local principal and watch list snapshot
+as the owner watch list, then selects the requested ID after API-key watchIds
+restriction. Local REST now exposes the matching path. The synthetic workerd
+HTTP driver passed before and after restart in `server-http-watch-detail-state`.
+
+The next local watch write mapping adds a trusted resolved-public-upstream
+create command. It reads the storage-form account and reuses
+`entitlements_for_user` for the active-watch limit. One D1 batch checks the
+exact user snapshot, live active count, unique scope and prior watch control,
+then advances/inserts watch_controls, preserves processing_controls and
+inserts update_watches. SQLite tests covered A→B→A monotonic versions,
+duplicate active scope, concurrent last-slot and account-change rollback.
+The isolated `/server-map/watch-create` local workerd probe passed create,
+duplicate rejection and restart persistence in fresh
+`server-map-watch-state`. This command does not verify GitHub public/private
+status and is not mounted at product `POST /watches`.
+
+Read-side archival fencing was tightened in both ProductStore and D1 readers.
+An archived watch hides its Source and Item rows even before auth lease expiry;
+a publication with an archived secondary watch dependency loses its saved
+assessment. The write-side D1 archive transaction must still cancel queued
+jobs and release reservations atomically before `DELETE /watches` is routed.
+The trusted local `D1WatchTransactions.archive_watch` now performs that batch:
+it guards owner/revision and reservation-bucket consistency, archives the
+watch, decrements reserved buckets, releases ledger rows, cancels active
+analysis/manual-watch Jobs, revokes contexts/targets and clears the guard.
+An inconsistent bucket rolls back archival and all preceding writes; a running
+Job's late result stays fenced and its provider attempt remains spent. The
+product DELETE route remains unmounted while request/account authorization
+composition is incomplete.
+The SQLite reference archive path now mirrors the domain cascade within one
+`BEGIN IMMEDIATE` transaction. Recreating the stable watch scope requires a
+new authorization revision after archive; the discovery fixture renews proof
+monotonically. D1 and SQLite still need target-runtime request-auth composition
+before the product DELETE route can be exposed.
+The isolated local workerd probe also published a synthetic primary assessment
+depending on a secondary watch context; archiving that watch withdrew the
+assessment in the same D1 state. It passed after a real restart in
+`server-map-watch-fence-state` without exercising write-side cancellation.
+The next fresh `server-map-watch-archive-state` workerd run exercised the
+actual D1 archive adapter on a queued reserved Job, then separately confirmed
+secondary-watch assessment withdrawal. It passed duplicate/restart probes;
+port 8796 was stopped. No cron or remote schedule was configured.
 
 The candidate Cookie handling boundary now applies the local Server's
 SameSite=None Origin rule before reading a PATCH body. Its local Worker uses

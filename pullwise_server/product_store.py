@@ -1134,6 +1134,7 @@ class ProductStore:
         return self._watch_dto(row) if row is not None else None
 
     def archive_watch(self, watch_id: str, *, expected_revision: int) -> None:
+        now = _now()
         with self._immediate() as connection:
             cursor = connection.execute(
                 """
@@ -1142,11 +1143,50 @@ class ProductStore:
                     revision = revision + 1, updated_at = ?
                 WHERE id = ? AND revision = ? AND archived_at IS NULL
                 """,
-                (_now(), _now(), _identifier(watch_id, "watch_id"), expected_revision),
+                (now, now, _identifier(watch_id, "watch_id"), expected_revision),
             )
             if cursor.rowcount != 1:
                 raise ValueError("REVISION_MISMATCH")
             self._invalidate_discovery_configuration(connection, resource_kind="watch", resource_id=watch_id)
+            active_jobs = connection.execute(
+                """SELECT j.* FROM background_jobs j
+                   WHERE j.state IN ('queued','running','retry_wait')
+                     AND ((j.job_type='sync_watch' AND j.logical_key=?)
+                       OR (j.job_type='analyze_source' AND EXISTS (
+                           SELECT 1 FROM source_contexts sc
+                           WHERE sc.watch_id=? AND sc.source_id=j.source_id
+                             AND sc.context_id=j.context_id)))""",
+                (f"sync_watch:{watch_id}", watch_id),
+            ).fetchall()
+            for job in active_jobs:
+                if job["reservation_id"]:
+                    reservation = connection.execute(
+                        "SELECT * FROM processing_usage_ledger WHERE reservation_id=?",
+                        (job["reservation_id"],),
+                    ).fetchone()
+                    if reservation is not None:
+                        self._release_processing_reservation(connection, reservation, now=now)
+                connection.execute(
+                    """UPDATE background_jobs
+                       SET state='cancelled',claim_token=NULL,claimed_until=NULL,updated_at=?
+                       WHERE id=? AND state IN ('queued','running','retry_wait')""",
+                    (now, job["id"]),
+                )
+            connection.execute(
+                """UPDATE source_contexts SET accessible=0,
+                       authorization_revision=authorization_revision+1,
+                       authorization_valid_until=?,analysis_enabled=0,
+                       context_stale=1,processing_status='analysis_disabled',updated_at=?
+                   WHERE watch_id=?""",
+                (now, now, watch_id),
+            )
+            connection.execute(
+                """UPDATE discovery_targets SET accessible=0,
+                       authorization_revision=authorization_revision+1,
+                       valid_until=?
+                   WHERE resource_kind='watch' AND resource_id=?""",
+                (now, watch_id),
+            )
 
     def note_context_configuration(self, control_key: str, *, changed_at: int) -> None:
         control_key = _identifier(control_key, "control_key")
@@ -1719,6 +1759,7 @@ class ProductStore:
                 JOIN source_contexts sc ON sc.source_id = sr.source_id
                 LEFT JOIN update_watches uw ON uw.id = sc.watch_id
                 WHERE sc.billing_owner_id = ? AND sc.accessible = 1
+                  AND (sc.watch_id IS NULL OR (uw.id IS NOT NULL AND uw.archived_at IS NULL))
                   AND (? IS NULL OR sr.source_id = ?)
                   AND sc.authorization_valid_until >= ?
                 ORDER BY sr.updated_at DESC, sr.source_id, sc.context_id
@@ -1757,14 +1798,19 @@ class ProductStore:
                             current = False
                     for fence in fences:
                         stored = connection.execute(
-                            "SELECT * FROM source_contexts WHERE source_id=? AND context_id=?",
+                            """SELECT sc.*,CASE WHEN sc.watch_id IS NULL THEN 1
+                                 WHEN w.id IS NOT NULL AND w.archived_at IS NULL THEN 1
+                                 ELSE 0 END AS watch_active
+                               FROM source_contexts sc
+                               LEFT JOIN update_watches w ON w.id=sc.watch_id
+                               WHERE sc.source_id=? AND sc.context_id=?""",
                             (fence["sourceId"], fence["contextId"]),
                         ).fetchone()
                         if (stored is None or not stored["accessible"] or stored["context_stale"]
+                                or not stored["watch_active"]
                                 or stored["authorization_valid_until"] < timestamp
                                 or stored["billing_owner_id"] != owner_id
                                 or stored["context_version"] != fence["contextVersion"]
-                                or stored["configuration_revision"] != fence["configurationRevision"]
                                 or stored["authorization_revision"] != fence["authorizationRevision"]):
                             current = False
                 public_assessment = json.loads(publication["assessment_json"]) if current else None
@@ -1803,6 +1849,9 @@ class ProductStore:
                     SELECT 1 FROM source_contexts sc
                     WHERE sc.context_id = i.context_id AND sc.billing_owner_id = ?
                       AND sc.accessible = 1 AND sc.authorization_valid_until >= ?
+                      AND (sc.watch_id IS NULL OR EXISTS (
+                          SELECT 1 FROM update_watches w
+                          WHERE w.id=sc.watch_id AND w.archived_at IS NULL))
                 )
                 AND (? IS NULL OR i.id = ?)
                 ORDER BY i.updated_at DESC, i.id
@@ -1817,8 +1866,10 @@ class ProductStore:
                            sc.configuration_revision, sc.authorization_revision,
                            sr.latest_version, sr.source_revision, sr.last_synced_at
                     FROM source_contexts sc JOIN source_records sr ON sr.source_id=sc.source_id
+                    LEFT JOIN update_watches w ON w.id=sc.watch_id
                     WHERE sc.billing_owner_id = ? AND sc.accessible = 1
                       AND sc.authorization_valid_until >= ?
+                      AND (sc.watch_id IS NULL OR (w.id IS NOT NULL AND w.archived_at IS NULL))
                     """,
                     (owner_id, timestamp),
                 ).fetchall()

@@ -51,9 +51,20 @@ class Default(WorkerEntrypoint):
         from pullwise_server.cloudflare_webhook_receipts import D1WebhookReceipts
         from pullwise_server.cloudflare_creem_handler import accept_signed_creem_webhook
         from pullwise_server.cloudflare_source_read import D1SourceReads
+        from pullwise_server.cloudflare_watch_adapter import D1WatchTransactions
         from pullwise_server import creem_event_rules
         import server_mapping as mapping
         name = url.path.removeprefix('/server-map/')
+        if request.method == 'GET' and name == 'watch-state':
+            row = await self.env.DB.prepare('''SELECT
+                (SELECT COUNT(*) FROM update_watches WHERE archived_at IS NULL) AS active,
+                (SELECT MAX(context_version) FROM watch_controls) AS contextVersion,
+                (SELECT COUNT(*) FROM provider_attempts) AS attempts,
+                (SELECT reserved FROM processing_usage_buckets LIMIT 1) AS reserved,
+                (SELECT state FROM processing_usage_ledger WHERE charge_key='charge') AS chargeState,
+                (SELECT state FROM background_jobs LIMIT 1) AS jobState,
+                (SELECT accessible FROM source_contexts WHERE source_id='1') AS firstAccessible''').first()
+            return Response.json(row)
         if request.method == 'GET' and name == 'source-read':
             try:
                 items = await D1SourceReads(self.env.DB).list_sources_for_billing_owner(
@@ -99,6 +110,44 @@ class Default(WorkerEntrypoint):
                     WHERE name='billingEvents') AS originalPaymentFactPreserved''').first())
         if request.method != 'POST':
             return Response('Not found', status=404)
+        if name == 'watch-create':
+            try:
+                watch = await D1WatchTransactions(self.env.DB).create_public_watch(
+                    owner_id='owner', resolved_public_repository_id='github:101',
+                    interests=['OAuth'], enabled=True, analysis_enabled=False,
+                    now=DATA['claim']['now'])
+                return Response.json(watch)
+            except Exception:
+                return Response.json({'error': 'watch create rejected'}, status=409)
+        if name == 'archive-secondary-watch':
+            row = await self.env.DB.prepare("""SELECT id FROM update_watches
+                WHERE upstream_repository_id='github:101' AND archived_at IS NULL""").first()
+            if not row:
+                return Response.json({'error': 'watch missing'}, status=409)
+            await self.env.DB.prepare("UPDATE source_contexts SET watch_id=? WHERE source_id='2'").bind(row['id']).run()
+            try:
+                await D1WatchTransactions(self.env.DB).archive_watch(owner_id='owner',
+                    watch_id=row['id'], expected_revision=1, now=DATA['claim']['now'])
+            except Exception:
+                return Response.json({'error': 'watch archive rejected'}, status=409)
+            return Response.json({'archived': True})
+        if name == 'disable-analysis-secondary':
+            await self.env.DB.prepare("""UPDATE source_contexts
+                SET analysis_enabled=0,configuration_revision=configuration_revision+1
+                WHERE source_id='2'""").run()
+            return Response.json({'disabled': True})
+        if name == 'watch-archive-queued':
+            row = await self.env.DB.prepare("""SELECT id FROM update_watches
+                WHERE upstream_repository_id='github:101' AND archived_at IS NULL""").first()
+            if not row:
+                return Response.json({'error': 'watch missing'}, status=409)
+            await self.env.DB.prepare("UPDATE source_contexts SET watch_id=? WHERE source_id='1'").bind(row['id']).run()
+            try:
+                await D1WatchTransactions(self.env.DB).archive_watch(owner_id='owner',
+                    watch_id=row['id'], expected_revision=1, now=DATA['claim']['now'])
+            except Exception:
+                return Response.json({'error': 'watch archive rejected'}, status=409)
+            return Response.json({'archived': True})
         if name == 'reset':
             await self.env.DB.batch([self.env.DB.prepare(sql) for sql in DATA['schemas']]
                 + [self.env.DB.prepare(sql) for sql, _ in mapping.schema()])

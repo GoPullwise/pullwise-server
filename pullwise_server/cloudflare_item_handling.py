@@ -70,12 +70,10 @@ class D1ItemHandling:
                   AND sc.accessible=1 AND sc.context_stale=0
                   AND sc.authorization_valid_until>=?
                   AND sr.latest_version=? AND sr.source_revision=?
-                  AND sc.context_version=? AND sc.configuration_revision=?
-                  AND sc.authorization_revision=?)""")
+                  AND sc.context_version=? AND sc.authorization_revision=?)""")
             params.extend((source["sourceId"], fence["contextId"], owner_id, now,
                            source["sourceVersion"], source["sourceRevision"],
-                           fence["contextVersion"], fence["configurationRevision"],
-                           fence["authorizationRevision"]))
+                           fence["contextVersion"], fence["authorizationRevision"]))
         event_id = f"handling_{uuid.uuid4().hex}"
         update = self.binding.prepare("""UPDATE items SET revision=revision+1,updated_at=?
             WHERE id=? AND revision=? AND current_item_version=? AND context_id=? AND """

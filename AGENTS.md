@@ -126,19 +126,27 @@ revision; pending or incomplete assessment must not silently close an item.
   context and API-key resource filters. An unclassified Release without an
   Item stays visible; stale secondary dependencies hide assessments. The
   local HTTP candidate and tests verify this narrow slice, not full CF2.
-  For Source publication, compare saved `configurationRevision` as well as
-  context and authorization revisions for every dependency; otherwise a
-  secondary watch/repository config change can leave an old assessment visible.
+  Publication writes CAS every dependency's `configurationRevision`.
+  Read-side config revision alone must not hide an already successful saved
+  judgment when analysis is switched off; design 02 keeps historical judgment
+  readable. Source/context semantic version, permission, source revision and
+  active-watch fences still govern current read visibility.
   Require one matching saved context fence per publication dependency,
   including the primary Source/context; an empty or mismatched fence set must
   hide the assessment even if its rows still exist.
+  `product_source_filters.filter_sources` also handles `releaseId` against
+  saved Release `sourceFacts` on both local REST and Worker; do not filter
+  release lists by Item presence or reconstruct source facts in Web.
 - Candidate `/api/v1/items` list/detail uses one D1 read batch for current
   ItemVersions, accessible source contexts and handling events, prepended by
   the same-snapshot Cookie/API-key/user proof. `product_dto_rules.py` shares
   Item and handling DTOs with SQLite; `product_item_filters.py` shares view
   and API-key restrictions. Both readers must check every ItemVersion source
-  and context fence before returning it, including secondary source version,
-  configuration and authorization revisions. Empty or stale fences do not
+  and context fence before returning it, including secondary source version
+  and authorization revisions. Config-only analysis-off keeps historical
+  judgment readable; a new model publication still CASes config, while
+  handling writes CAS Item revision, source/context semantics and permission.
+  Empty or stale source/permission fences do not
   authorize private Item content. Candidate Item PATCH checks `itemVersion`
   and `If-Match`, then atomically guards the same persisted identity and every
   dependency fence while incrementing Item revision and inserting a handling
@@ -153,6 +161,34 @@ revision; pending or incomplete assessment must not silently close an item.
   or the repository service to remain active under that owner, in the same
   read snapshot. Member sync resource authorization remains unmapped and must
   fail closed. Job GET is read-only and does not schedule, renew or charge.
+  `GET /api/v1/watches/{id}` is now shared by local REST and the candidate;
+  resolve only an unarchived owner watch, apply API-key watchIds restrictions,
+  and keep the candidate's identity and watch row in one D1 read snapshot.
+  The candidate HTTP entry emits an `ETag` from the saved revision on successful
+  Item/watch detail or handling responses, matching local REST's If-Match
+  contract. Keep ETag off list/overview payloads.
+  `cloudflare_watch_adapter.D1WatchTransactions.create_public_watch` is a
+  trusted local-only D1 command; it does not prove public upstream identity
+  or expose `POST /watches`. A future caller must provide a resolved public
+  GitHub repository. The command derives the active-watch limit from the
+  persisted storage-form user, then guards account snapshot, owner active
+  count, unique watchScopeKey and watch_controls revision in one D1 batch.
+  Recreated A→B→A interests advance contextVersion 1→2→3; duplicate active
+  creation and a raced last slot roll back.
+  Source and Item reads must also fence current watch archival: archived
+  watch contexts do not appear in lists/details even while their old GitHub
+  authorization lease is still valid, and a saved assessment depending on
+  any archived secondary watch context is stale. Keep the SQLite and D1
+  readers aligned. `D1WatchTransactions.archive_watch` maps a trusted local
+  batch for archival, context/target revocation, active Job cancellation and
+  reserved-usage release. It checks bucket consistency and leaves provider
+  attempts spent; a late result cannot publish. Product `DELETE /watches`
+  remains unmounted until request/account authorization is composed.
+  SQLite `ProductStore.archive_watch` now performs the same context/target
+  revocation, active Job cancellation and reservation release inside its
+  immediate transaction. A recreated stable watch scope must renew GitHub
+  proof with an authorization revision above the archive revision; stale
+  pre-archive proof must not restore access.
   Candidate Cookie Item PATCH must enforce a trusted Origin or Referer when
   `PULLWISE_COOKIE_SAME_SITE=None`, before reading the body or touching D1.
   The Worker reads `PULLWISE_ALLOWED_ORIGINS`/`PULLWISE_APP_URL`; absent trust
@@ -160,6 +196,11 @@ revision; pending or incomplete assessment must not silently close an item.
   A non-empty malformed `X-Pullwise-Api-Key` header combined with Cookie or
   bearer session is ambiguous authentication (400); never let preliminary
   Cookie resolution silently fall through to a different batch identity.
+  `product_item_filters.filter_items` is shared by local REST and Worker for
+  actionType, lifecycle, handling disposition, PR pullNumber and CI runId.
+  Pull/run identity filters require matching module plus repositoryId and
+  return 422 `INVALID_CONFIGURATION` when malformed; do not silently treat
+  them as a global search or borrow facts across Items.
 - `cloudflare/server` is a separate **local-only candidate** for the actual
   Server Python Worker HTTP entry. `src/entry.py` routes read-only `/health`,
   authenticated product GETs for profile, usage, watches, Sources, Items,

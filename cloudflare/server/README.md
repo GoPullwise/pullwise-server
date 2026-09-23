@@ -2,6 +2,7 @@
 
 This is the first real Server HTTP entry candidate. It exposes `/health`,
 authenticated `GET /api/v1/me`, `GET /api/v1/usage`, `GET /api/v1/watches`,
+`GET /api/v1/watches/{id}`,
 `GET /api/v1/sources` and `GET /api/v1/sources/{id}`, and
 `GET /api/v1/items`, `GET /api/v1/items/{id}`, `GET /api/v1/items/overview` and
 `PATCH /api/v1/items/{id}` for handling, and
@@ -41,6 +42,8 @@ revision together while rechecking identity and all dependencies. Overview
 combines principal, Source and Item SELECTs in one D1 snapshot before counting.
 Job GET rechecks identity and current watch/repository-service ownership with
 the row and excludes `analyze_source`.
+Successful Item/watch detail and handling responses include revision `ETag`
+for the shared If-Match contract.
 When `PULLWISE_COOKIE_SAME_SITE=None`, Cookie Item PATCH requires an Origin or
 Referer matching `PULLWISE_ALLOWED_ORIGINS` or `PULLWISE_APP_URL` before the
 request body is read. The local probe used synthetic loopback values.
@@ -64,13 +67,13 @@ if (-not (Test-Path cloudflare/server/python_modules)) {
 $env:TEMP='F:/Pullwise/.test-tmp/discovery'
 $env:TMP=$env:TEMP
 D:/Python313/python.exe cloudflare/server/export_local_fixture.py
-node cloudflare/probe/node_modules/wrangler/wrangler-dist/cli.js d1 execute pullwise-cf1-local-only --config cloudflare/server/wrangler.jsonc --local --persist-to cloudflare/server/.wrangler/server-http-read-snapshot-state --file cloudflare/server/.wrangler/local-seed.sql
+node cloudflare/probe/node_modules/wrangler/wrangler-dist/cli.js d1 execute pullwise-cf1-local-only --config cloudflare/server/wrangler.jsonc --local --persist-to cloudflare/server/.wrangler/server-http-etag-state --file cloudflare/server/.wrangler/local-seed.sql
 ```
 
 Start the Worker with **synthetic** test values and run its local HTTP driver:
 
 ```powershell
-node cloudflare/probe/node_modules/wrangler/wrangler-dist/cli.js dev --config cloudflare/server/wrangler.jsonc --local --ip 127.0.0.1 --port 8797 --persist-to cloudflare/server/.wrangler/server-http-read-snapshot-state --var='PULLWISE_CREEM_WEBHOOK_SECRET:synthetic-secret' --var='PULLWISE_CREEM_PRODUCT_IDS_JSON:{}'
+node cloudflare/probe/node_modules/wrangler/wrangler-dist/cli.js dev --config cloudflare/server/wrangler.jsonc --local --ip 127.0.0.1 --port 8797 --persist-to cloudflare/server/.wrangler/server-http-etag-state --var='PULLWISE_CREEM_WEBHOOK_SECRET:synthetic-secret' --var='PULLWISE_CREEM_PRODUCT_IDS_JSON:{}'
 D:/Python313/python.exe cloudflare/server/verify_local_http.py
 ```
 

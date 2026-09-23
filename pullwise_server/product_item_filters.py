@@ -49,9 +49,19 @@ def filter_items(items: list[dict], params: Mapping[str, object], user_id: str,
     repository_id = _query_value(params, "repositoryId")
     watch_id = _query_value(params, "watchId")
     attention_state = _query_value(params, "attentionState")
+    action_type = _query_value(params, "actionType")
+    lifecycle = _query_value(params, "lifecycle")
+    disposition = _query_value(params, "disposition")
+    pull_number = _query_value(params, "pullNumber")
+    run_id = _query_value(params, "runId")
     view = _query_value(params, "view") or "all"
     if view not in {"mine", "unassigned", "waiting", "all"}:
         raise ValueError("INVALID_VIEW")
+    if (pull_number and (module != "pr" or not repository_id or not pull_number.isdigit()
+                         or int(pull_number) < 1)
+            or run_id and (module != "ci" or not repository_id or not run_id.isdigit()
+                           or int(run_id) < 1)):
+        raise ValueError("INVALID_CONFIGURATION")
     result = []
     for item in items:
         if module and item.get("module") != module:
@@ -61,6 +71,17 @@ def filter_items(items: list[dict], params: Mapping[str, object], user_id: str,
         if watch_id and item.get("watchId") != watch_id:
             continue
         if attention_state and item.get("attentionState") != attention_state:
+            continue
+        if action_type and action_type not in (item.get("actionTypes") or []):
+            continue
+        if lifecycle and item.get("lifecycle") != lifecycle:
+            continue
+        if disposition and (item.get("handling") or {}).get("disposition") != disposition:
+            continue
+        facts = item.get("sourceFacts") or {}
+        if pull_number and str(facts.get("pullNumber") or "") != pull_number:
+            continue
+        if run_id and str(facts.get("runId") or "") != run_id:
             continue
         if include_view and not item_in_view(item, view, user_id):
             continue

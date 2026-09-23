@@ -26,12 +26,15 @@ class Handler:
 
 
 class KeyHandler(Handler):
+    def __init__(self, watch_id):
+        self.watch_id = watch_id
+
     def current_session(self):
         return None
 
     def current_api_key_context(self):
         return {"user": {"id": "owner"}, "apiKey": {"id": "synthetic-key"}, "scopes": ["items:read"],
-                "restrictions": {"watchIds": ["watch1"]}}
+                "restrictions": {"watchIds": [self.watch_id]}}
 
 
 def export_contract():
@@ -53,7 +56,7 @@ def export_contract():
                 handler = Handler()
                 assert product_api.handle_get(handler, segments, {"module": "updates"}, {"owner": {"id": "owner"}})
                 responses[name] = handler.payload
-                key = KeyHandler()
+                key = KeyHandler(context["watch_id"])
                 assert product_api.handle_get(key, segments, {"module": "updates"}, {})
                 assert key.payload == handler.payload
         assert before == store.processing_usage(billing_owner_id="owner", period="period")

@@ -13,7 +13,8 @@ RAW = (b'{"id":"evt-http-worker","eventType":"subscription.canceled",'
        b'"object":{"id":"sub_fixture","metadata":{"userId":"owner"}}}')
 
 
-def call(path, *, raw=None, signature=None, extra_headers=None, method=None):
+def call(path, *, raw=None, signature=None, extra_headers=None, method=None,
+         return_headers=False):
     headers = dict(extra_headers or {})
     if raw is not None:
         headers.update({"Content-Length": str(len(raw)),
@@ -23,9 +24,11 @@ def call(path, *, raw=None, signature=None, extra_headers=None, method=None):
                                      method=method or ("POST" if raw is not None else "GET"))
     try:
         with OPENER.open(request, timeout=30) as response:
-            return response.status, json.load(response)
+            payload = json.load(response)
+            return (response.status, payload, dict(response.headers)) if return_headers else (response.status, payload)
     except urllib.error.HTTPError as response:
-        return response.code, json.load(response)
+        payload = json.load(response)
+        return (response.code, payload, dict(response.headers)) if return_headers else (response.code, payload)
 
 
 def main():
@@ -41,9 +44,15 @@ def main():
     status, watches = call("/api/v1/watches", extra_headers={
         "Cookie": "pw_session=session-local"})
     assert status == 200 and len(watches["items"]) == 2
+    status, watch_detail, watch_headers = call("/api/v1/watches/" + watches["items"][0]["id"],
+        extra_headers={"Cookie": "pw_session=session-local"}, return_headers=True)
+    assert status == 200 and watch_detail["id"] == watches["items"][0]["id"]
+    assert next((value for key, value in watch_headers.items() if key.lower() == "etag"), None) == f'"{watch_detail["revision"]}"'
     status, restricted_watches = call("/api/v1/watches", extra_headers={
         "Authorization": "Bearer pwk_local_http_test"})
     assert status == 200 and len(restricted_watches["items"]) == 1
+    assert call("/api/v1/watches/" + restricted_watches["items"][0]["id"],
+        extra_headers={"Authorization": "Bearer pwk_local_http_test"})[0] == 200
     status, sources = call("/api/v1/sources?module=pr", extra_headers={
         "Cookie": "pw_session=session-local"})
     assert status == 200 and len(sources["items"]) == 2
@@ -62,9 +71,10 @@ def main():
         "Cookie": "pw_session=session-local"})
     assert status == 200 and overview["totalCount"] == 1
     assert overview["sourceCoverage"]["total"] == 2
-    status, item = call("/api/v1/items/" + items["items"][0]["id"], extra_headers={
-        "Cookie": "pw_session=session-local"})
+    status, item, item_headers = call("/api/v1/items/" + items["items"][0]["id"], extra_headers={
+        "Cookie": "pw_session=session-local"}, return_headers=True)
     assert status == 200 and item["id"] == items["items"][0]["id"]
+    assert next((value for key, value in item_headers.items() if key.lower() == "etag"), None) == f'"{item["revision"]}"'
     assert isinstance(item["handlingHistory"], list)
     patch_body = json.dumps({"itemVersion": item["itemVersion"],
                              "disposition": "done"}).encode()

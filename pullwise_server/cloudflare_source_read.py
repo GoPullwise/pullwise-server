@@ -25,6 +25,7 @@ class D1SourceReads:
                 JOIN source_contexts sc ON sc.source_id=sr.source_id
                 LEFT JOIN update_watches uw ON uw.id=sc.watch_id
                 WHERE sc.billing_owner_id=? AND sc.accessible=1
+                AND (sc.watch_id IS NULL OR (uw.id IS NOT NULL AND uw.archived_at IS NULL))
                 AND (? IS NULL OR sr.source_id=?)
                 AND sc.authorization_valid_until>=?
                 ORDER BY sr.updated_at DESC,sr.source_id,sc.context_id""").bind(
@@ -38,11 +39,15 @@ class D1SourceReads:
                 source.source_revision FROM source_records source
                 JOIN source_contexts context ON context.source_id=source.source_id
                 WHERE context.billing_owner_id=?""").bind(owner_id),
-            self.binding.prepare("""SELECT source_id,context_id,accessible,context_stale,
-                authorization_valid_until,billing_owner_id,context_version,
-                configuration_revision,
-                authorization_revision FROM source_contexts
-                WHERE billing_owner_id=?""").bind(owner_id),
+            self.binding.prepare("""SELECT sc.source_id,sc.context_id,sc.accessible,
+                sc.context_stale,sc.authorization_valid_until,sc.billing_owner_id,
+                sc.context_version,sc.configuration_revision,
+                sc.authorization_revision,
+                CASE WHEN sc.watch_id IS NULL THEN 1
+                     WHEN w.id IS NOT NULL AND w.archived_at IS NULL THEN 1
+                     ELSE 0 END AS watch_active
+                FROM source_contexts sc LEFT JOIN update_watches w ON w.id=sc.watch_id
+                WHERE sc.billing_owner_id=?""").bind(owner_id),
         ]
         return statements
 
@@ -99,10 +104,10 @@ class D1SourceReads:
                 for fence in fences:
                     stored = context_by_key.get((fence["sourceId"], fence["contextId"]))
                     if (stored is None or not stored["accessible"] or stored["context_stale"]
+                            or not stored["watch_active"]
                             or stored["authorization_valid_until"] < now
                             or stored["billing_owner_id"] != owner_id
                             or stored["context_version"] != fence["contextVersion"]
-                            or stored["configuration_revision"] != fence["configurationRevision"]
                             or stored["authorization_revision"] != fence["authorizationRevision"]):
                         current = False
             public_assessment = json.loads(publication["assessment_json"]) if current else None

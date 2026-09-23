@@ -24,6 +24,7 @@ def filter_sources(sources: list[dict], params: Mapping[str, object]) -> list[di
     module = _query_value(params, "module")
     repository_id = _query_value(params, "repositoryId")
     watch_id = _query_value(params, "watchId")
+    release_id = _query_value(params, "releaseId")
     relevance = _query_value(params, "relevance")
     signal = _query_value(params, "updateSignal")
     processing = _query_value(params, "processingStatus")
@@ -36,6 +37,9 @@ def filter_sources(sources: list[dict], params: Mapping[str, object]) -> list[di
         if module and _source_module(source) != module:
             continue
         if repository_id and source.get("repositoryId") != repository_id:
+            continue
+        if release_id and (source.get("type") != "release"
+                           or str((source.get("sourceFacts") or {}).get("releaseId") or "") != release_id):
             continue
         contexts = [context for context in source.get("contexts") or []
                     if (not watch_id or context.get("watchId") == watch_id)

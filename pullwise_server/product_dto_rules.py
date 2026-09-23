@@ -129,7 +129,6 @@ def item_dependencies_current(sources: list[dict], fences: list[dict],
                 or row["latest_version"] != source.get("sourceVersion")
                 or row["source_revision"] != source.get("sourceRevision")
                 or row["context_version"] != fence.get("contextVersion")
-                or row["configuration_revision"] != fence.get("configurationRevision")
                 or row["authorization_revision"] != fence.get("authorizationRevision")):
             return False
     return True

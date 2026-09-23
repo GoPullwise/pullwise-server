@@ -177,6 +177,28 @@ def test_watches_list_matches_store_and_filters_api_key_watch_scope(tmp_path):
     assert binding.batch_count == 3
 
 
+def test_watch_detail_matches_store_and_hides_out_of_scope_watch(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("watches:read",))
+    first = fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=False)
+    second = fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+        upstream_repository_id="github:102", billing_owner_id="owner",
+        interests=["database"], enabled=True, analysis_enabled=False)
+    binding = D1ShapedSQLite(fixture.store)
+    status, detail = _get(binding, f"/api/v1/watches/{first['id']}",
+        {"Cookie": "pw_session=session-local"}, fixture.now)
+    assert status == 200 and detail == fixture.store.get_watch(first["id"])
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE api_keys SET restrictions=? WHERE id='key-local'",
+            (json.dumps({"watchIds": [first["id"]]}),))
+    assert _get(binding, f"/api/v1/watches/{first['id']}",
+        {"Authorization": f"Bearer {TOKEN}"}, fixture.now)[0] == 200
+    assert _get(binding, f"/api/v1/watches/{second['id']}",
+        {"Authorization": f"Bearer {TOKEN}"}, fixture.now)[0] == 404
+
+
 def test_source_read_rechecks_api_key_in_the_source_snapshot(tmp_path):
     fixture, _, _ = seed(tmp_path / "domain.db")
     _seed_auth(fixture, scopes=("items:read",))
@@ -276,6 +298,12 @@ def test_item_list_detail_uses_saved_snapshot_and_resource_scope(tmp_path):
     status, listed = _get(binding, "/api/v1/items", cookie, fixture.now)
     assert status == 200
     assert listed["items"] == fixture.store.list_items_for_billing_owner("owner")
+    status, filtered = _get(binding, "/api/v1/items", cookie, fixture.now,
+        params={"actionType": ["change_requested"], "lifecycle": ["active"]})
+    assert status == 200 and [entry["id"] for entry in filtered["items"]] == [item_id]
+    status, invalid = _get(binding, "/api/v1/items", cookie, fixture.now,
+        params={"pullNumber": ["12"]})
+    assert status == 422 and invalid["error"]["code"] == "INVALID_CONFIGURATION"
     status, detail = _get(binding, f"/api/v1/items/{item_id}", cookie, fixture.now)
     assert status == 200
     assert detail == fixture.store.list_items_for_billing_owner("owner",
@@ -370,6 +398,32 @@ def test_item_handling_patch_rolls_back_when_key_revoked_before_write_batch(tmp_
     with closing(fixture.store.connect()) as db:
         assert db.execute("SELECT COUNT(*) FROM item_handling_events").fetchone()[0] == 0
         assert db.execute("SELECT revision FROM items WHERE id=?", (item_id,)).fetchone()[0] == item["revision"]
+
+
+def test_handling_saved_item_remains_available_after_analysis_is_disabled(tmp_path):
+    fixture, job, frozen = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("items:read", "items:write"))
+    publication = publication_args(fixture, job, frozen)
+    execute(fixture.store, mapping().claim(**claim_args(fixture, job, frozen)))
+    execute(fixture.store, mapping().publication(**publication))
+    with fixture.store._immediate() as db:
+        db.execute("""UPDATE source_contexts SET analysis_enabled=0,
+            configuration_revision=configuration_revision+1
+            WHERE source_id='2'""")
+    item_id = publication["item"]["id"]
+    item = fixture.store.list_items_for_billing_owner("owner", item_id=item_id)[0]
+    body = json.dumps({"itemVersion": item["itemVersion"], "disposition": "done"}).encode()
+
+    async def read_body():
+        return body
+
+    status, updated = asyncio.run(handle_http_request(method="PATCH",
+        path=f"/api/v1/items/{item_id}",
+        headers={"Cookie": "pw_session=session-local", "If-Match": str(item["revision"]),
+                 "Content-Length": str(len(body))}, read_body=read_body,
+        binding=D1ShapedSQLite(fixture.store), creem_secret="",
+        configured_products={}, now=fixture.now))
+    assert status == 200 and updated["handling"]["disposition"] == "done"
 
 
 def test_item_overview_counts_items_and_source_contexts(tmp_path):

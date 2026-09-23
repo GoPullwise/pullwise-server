@@ -1,0 +1,190 @@
+"""Finite D1 creation command for a trusted, resolved public upstream watch."""
+from __future__ import annotations
+
+import json
+import uuid
+from typing import Any
+
+from .product_domain import context_hash, validate_watch_interests, watch_scope_key
+from .product_dto_rules import watch_dto
+from .product_entitlement_rules import entitlements_for_user
+
+
+class D1WatchTransactions:
+    def __init__(self, binding: Any) -> None:
+        self.binding = binding
+
+    async def create_public_watch(self, *, owner_id: str,
+                                  resolved_public_repository_id: str,
+                                  interests: list[str], enabled: bool,
+                                  analysis_enabled: bool, now: int,
+                                  include_prerelease: bool = False,
+                                  priority_order: int = 0) -> dict:
+        if (not isinstance(owner_id, str) or not owner_id
+                or not isinstance(resolved_public_repository_id, str)
+                or not resolved_public_repository_id or type(now) is not int
+                or type(enabled) is not bool or type(analysis_enabled) is not bool
+                or type(include_prerelease) is not bool
+                or type(priority_order) is not int or priority_order < 0):
+            raise ValueError("invalid watch command")
+        normalized = validate_watch_interests(interests)
+        semantic_hash = context_hash(normalized)
+        scope_key = watch_scope_key(owner_id=owner_id,
+            target_repository_id=None,
+            upstream_repository_id=resolved_public_repository_id)
+        account = await self.binding.prepare("""SELECT u.value AS snapshot FROM app_state a,
+            json_each(a.payload) u WHERE a.name='users' AND u.key=?""").bind(owner_id).first()
+        if not account:
+            raise ValueError("UNAUTHENTICATED")
+        user = json.loads(account["snapshot"])
+        entitlement = entitlements_for_user(user, timestamp=now)
+        limit = entitlement["entitlements"]["activeWatchLimit"]
+        existing = await self.binding.prepare("""SELECT id FROM update_watches
+            WHERE watch_scope_key=? AND archived_at IS NULL""").bind(scope_key).first()
+        if existing:
+            raise ValueError("WATCH_ALREADY_EXISTS")
+        control = await self.binding.prepare("""SELECT context_version,context_hash
+            FROM watch_controls WHERE watch_scope_key=?""").bind(scope_key).first()
+        version = (int(control["context_version"]) if control else 1)
+        if control and control["context_hash"] != semantic_hash:
+            version += 1
+        guard_conditions = ["""EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u
+            WHERE a.name='users' AND u.key=? AND u.value=?)""",
+            "NOT EXISTS(SELECT 1 FROM update_watches WHERE watch_scope_key=? AND archived_at IS NULL)"]
+        guard_values: list = [owner_id, account["snapshot"], scope_key]
+        if enabled:
+            guard_conditions.append("""(SELECT COUNT(*) FROM update_watches
+                WHERE billing_owner_id=? AND enabled=1 AND archived_at IS NULL)<?""")
+            guard_values.extend((owner_id, limit))
+        if control is None:
+            guard_conditions.append("NOT EXISTS(SELECT 1 FROM watch_controls WHERE watch_scope_key=?)")
+            guard_values.append(scope_key)
+        else:
+            guard_conditions.append("""EXISTS(SELECT 1 FROM watch_controls
+                WHERE watch_scope_key=? AND context_version=? AND context_hash=?)""")
+            guard_values.extend((scope_key, control["context_version"], control["context_hash"]))
+        statements = [self.binding.prepare("""INSERT INTO d1_command_guard(ok)
+            VALUES(CASE WHEN """ + " AND ".join(guard_conditions)
+            + " THEN 1 ELSE 0 END)").bind(*guard_values)]
+        interests_json = json.dumps(normalized, separators=(",", ":"), ensure_ascii=False)
+        if control is None:
+            statements.append(self.binding.prepare("""INSERT INTO watch_controls(
+                watch_scope_key,owner_id,target_repository_id,upstream_repository_id,
+                context_version,context_hash,interests_json,created_at,updated_at)
+                VALUES(?,?,NULL,?,?,?,?,?,?)""").bind(
+                    scope_key, owner_id, resolved_public_repository_id,
+                    version, semantic_hash, interests_json, now, now))
+        elif control["context_hash"] != semantic_hash:
+            statements.append(self.binding.prepare("""UPDATE watch_controls SET
+                context_version=?,context_hash=?,interests_json=?,updated_at=?
+                WHERE watch_scope_key=? AND context_version=? AND context_hash=?""").bind(
+                    version, semantic_hash, interests_json, now, scope_key,
+                    control["context_version"], control["context_hash"]))
+            statements.append(self.binding.prepare("""INSERT INTO d1_command_guard(ok)
+                VALUES(CASE WHEN changes()=1 THEN 1 ELSE 0 END)"""))
+        statements.append(self.binding.prepare("""INSERT OR IGNORE INTO processing_controls(
+            control_key,initial_backfill_state,updated_at)
+            VALUES(?,'not_started',?)""").bind(scope_key, now))
+        watch_id = f"watch_{uuid.uuid4().hex}"
+        statements.append(self.binding.prepare("""INSERT INTO update_watches(
+            id,watch_scope_key,owner_id,target_repository_id,upstream_repository_id,
+            billing_owner_id,context_version,context_hash,interests_json,
+            include_prerelease,priority_order,enabled,analysis_enabled,revision,
+            created_at,updated_at)
+            VALUES(?,?,?,NULL,?,?,?,?,?,?,?,?,?,1,?,?)""").bind(
+                watch_id, scope_key, owner_id, resolved_public_repository_id,
+                owner_id, version, semantic_hash, interests_json,
+                int(include_prerelease), priority_order, int(enabled),
+                int(analysis_enabled), now, now))
+        statements.append(self.binding.prepare("DELETE FROM d1_command_guard"))
+        await self.binding.batch(statements)
+        row = await self.binding.prepare("SELECT * FROM update_watches WHERE id=?").bind(watch_id).first()
+        if row is None:
+            raise RuntimeError("committed watch missing")
+        return watch_dto(row)
+
+    async def archive_watch(self, *, owner_id: str, watch_id: str,
+                            expected_revision: int, now: int) -> None:
+        if (not isinstance(owner_id, str) or not owner_id
+                or not isinstance(watch_id, str) or not watch_id
+                or type(expected_revision) is not int or expected_revision < 1
+                or type(now) is not int):
+            raise ValueError("invalid watch archive command")
+        current = await self.binding.prepare("""SELECT id FROM update_watches
+            WHERE id=? AND billing_owner_id=? AND revision=? AND archived_at IS NULL""").bind(
+                watch_id, owner_id, expected_revision).first()
+        if current is None:
+            raise ValueError("REVISION_MISMATCH")
+        job_condition = """j.job_type='analyze_source'
+            AND j.state IN ('queued','running','retry_wait')
+            AND EXISTS(SELECT 1 FROM source_contexts sc WHERE sc.watch_id=?
+                AND sc.source_id=j.source_id AND sc.context_id=j.context_id)"""
+        watch_guard = self.binding.prepare("""INSERT INTO d1_command_guard(ok)
+            VALUES(CASE WHEN EXISTS(SELECT 1 FROM update_watches w
+                WHERE w.id=? AND w.billing_owner_id=? AND w.revision=?
+                  AND w.archived_at IS NULL)
+              AND EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u
+                WHERE a.name='users' AND u.key=?)
+              THEN 1 ELSE 0 END)""").bind(watch_id, owner_id, expected_revision, owner_id)
+        reservation_guard = self.binding.prepare("""INSERT INTO d1_command_guard(ok)
+            VALUES(CASE WHEN NOT EXISTS(SELECT 1 FROM background_jobs j
+                LEFT JOIN processing_usage_ledger l ON l.reservation_id=j.reservation_id
+                WHERE """ + job_condition + """ AND j.reservation_id IS NOT NULL
+                  AND (l.reservation_id IS NULL OR l.state!='reserved'))
+              AND NOT EXISTS(SELECT 1 FROM (
+                SELECT l.billing_owner_id AS owner_id,l.period AS period,
+                       COUNT(*) AS needed
+                FROM processing_usage_ledger l JOIN background_jobs j
+                  ON j.reservation_id=l.reservation_id
+                WHERE l.state='reserved' AND """ + job_condition + """
+                GROUP BY l.billing_owner_id,l.period) needed
+                LEFT JOIN processing_usage_buckets b
+                  ON b.billing_owner_id=needed.owner_id AND b.period=needed.period
+                  AND b.metric='intelligent_processing'
+                WHERE b.billing_owner_id IS NULL OR b.reserved<needed.needed)
+              THEN 1 ELSE 0 END)""").bind(watch_id, watch_id)
+        archive = self.binding.prepare("""UPDATE update_watches
+            SET archived_at=?,enabled=0,analysis_enabled=0,
+                revision=revision+1,updated_at=?
+            WHERE id=? AND billing_owner_id=? AND revision=?
+              AND archived_at IS NULL""").bind(
+                now, now, watch_id, owner_id, expected_revision)
+        changed_guard = self.binding.prepare("""INSERT INTO d1_command_guard(ok)
+            VALUES(CASE WHEN changes()=1 THEN 1 ELSE 0 END)""")
+        release_buckets = self.binding.prepare("""UPDATE processing_usage_buckets AS b
+            SET reserved=reserved-(SELECT COUNT(*) FROM processing_usage_ledger l
+                JOIN background_jobs j ON j.reservation_id=l.reservation_id
+                WHERE l.billing_owner_id=b.billing_owner_id AND l.period=b.period
+                  AND l.state='reserved' AND """ + job_condition + """),updated_at=?
+            WHERE b.metric='intelligent_processing' AND EXISTS(
+                SELECT 1 FROM processing_usage_ledger l JOIN background_jobs j
+                  ON j.reservation_id=l.reservation_id
+                WHERE l.billing_owner_id=b.billing_owner_id AND l.period=b.period
+                  AND l.state='reserved' AND """ + job_condition + ")").bind(
+                      watch_id, now, watch_id)
+        release_ledger = self.binding.prepare("""UPDATE processing_usage_ledger
+            SET state='released',finished_at=? WHERE state='reserved'
+              AND reservation_id IN (SELECT j.reservation_id FROM background_jobs j
+                  WHERE """ + job_condition + ")").bind(now, watch_id)
+        cancel_jobs = self.binding.prepare("""UPDATE background_jobs AS j
+            SET state='cancelled',claim_token=NULL,claimed_until=NULL,updated_at=?
+            WHERE (""" + job_condition + """ OR
+                (j.job_type='sync_watch' AND j.logical_key=?
+                 AND j.state IN ('queued','running','retry_wait')))""").bind(
+                     now, watch_id, f"sync_watch:{watch_id}")
+        revoke_contexts = self.binding.prepare("""UPDATE source_contexts
+            SET accessible=0,authorization_revision=authorization_revision+1,
+                authorization_valid_until=?,analysis_enabled=0,context_stale=1,
+                processing_status='analysis_disabled',updated_at=?
+            WHERE watch_id=? AND billing_owner_id=?""").bind(
+                now, now, watch_id, owner_id)
+        revoke_target = self.binding.prepare("""UPDATE discovery_targets
+            SET accessible=0,authorization_revision=authorization_revision+1,
+                valid_until=?,configuration_epoch=configuration_epoch+1,
+                configuration_stamp=NULL
+            WHERE resource_kind='watch' AND resource_id=?
+              AND billing_owner_id=?""").bind(now, watch_id, owner_id)
+        clear_guard = self.binding.prepare("DELETE FROM d1_command_guard")
+        await self.binding.batch([watch_guard, reservation_guard, archive,
+            changed_guard, release_buckets, release_ledger, cancel_jobs,
+            revoke_contexts, revoke_target, clear_guard])

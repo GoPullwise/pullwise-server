@@ -303,8 +303,9 @@ async def read_product(*, binding: Any, path: str, headers: Mapping[str, object]
                        now: int, params: Mapping[str, object] | None = None) -> tuple[int, dict]:
     source_path = path == "/api/v1/sources" or path.startswith("/api/v1/sources/")
     item_path = path == "/api/v1/items" or path.startswith("/api/v1/items/")
+    watch_path = path.startswith("/api/v1/watches/")
     job_path = path.startswith("/api/v1/jobs/")
-    if path not in {"/api/v1/me", "/api/v1/usage", "/api/v1/watches"} and not source_path and not item_path and not job_path:
+    if path not in {"/api/v1/me", "/api/v1/usage", "/api/v1/watches"} and not source_path and not item_path and not job_path and not watch_path:
         return 404, {"error": {"code": "NOT_FOUND"}}
     scope = ("profile:read" if path.endswith("/me") else "usage:read"
              if path.endswith("/usage") else "items:read" if source_path or item_path or job_path else "watches:read")
@@ -334,6 +335,18 @@ async def read_product(*, binding: Any, path: str, headers: Mapping[str, object]
             return error.status, {"error": {"code": error.code,
                 "message": error.message, "retryable": False},
                 "requestId": f"req_{uuid.uuid4().hex}"}
+    if watch_path:
+        watch_id = path[len("/api/v1/watches/"):]
+        if not watch_id or "/" in watch_id:
+            return 404, {"error": {"code": "NOT_FOUND"}}
+        try:
+            watches = await _watches(binding, user, restrictions, headers, now)
+        except ProductReadAuthError as error:
+            return error.status, {"error": {"code": error.code,
+                "message": error.message, "retryable": False},
+                "requestId": f"req_{uuid.uuid4().hex}"}
+        watch = next((entry for entry in watches["items"] if entry["id"] == watch_id), None)
+        return (200, watch) if watch else (404, {"error": {"code": "NOT_FOUND"}})
     if job_path:
         job_id = path[len("/api/v1/jobs/"):]
         if not job_id or "/" in job_id:
@@ -421,9 +434,10 @@ async def read_product(*, binding: Any, path: str, headers: Mapping[str, object]
         try:
             items = filter_items(apply_item_restrictions(items, restrictions),
                 params or {}, str(user.get("githubId") or ""), include_view=item_id is None)
-        except ValueError:
-            return 422, {"error": {"code": "INVALID_VIEW",
-                "message": "Invalid item view.", "retryable": False},
+        except ValueError as error:
+            code = str(error) if str(error) in {"INVALID_VIEW", "INVALID_CONFIGURATION"} else "INVALID_CONFIGURATION"
+            return 422, {"error": {"code": code,
+                "message": "Invalid Item filters.", "retryable": False},
                 "requestId": f"req_{uuid.uuid4().hex}"}
         if item_id is not None:
             return (200, items[0]) if items else (404, {"error": {"code": "NOT_FOUND"}})

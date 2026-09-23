@@ -48,6 +48,7 @@ jobs:
             tests/test_creem_*.py \
             tests/test_github_authorization_contracts.py \
             tests/test_source_context_filters.py \
+            tests/test_source_assessment_persistence.py \
             tests/test_security_contracts.py \
             tests/test_api_security_extensions.py \
             tests/test_github_auth_contracts.py

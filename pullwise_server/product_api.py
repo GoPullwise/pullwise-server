@@ -131,6 +131,7 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
     recognized = (
         segments == ["me"]
         or segments == ["watches"]
+        or (len(segments) == 2 and segments[0] == "watches")
         or segments == ["repositories"]
         or segments == ["sources"]
         or segments == ["items"]
@@ -146,7 +147,7 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
         "profile:read"
         if segments == ["me"]
         else "watches:read"
-        if segments == ["watches"]
+        if segments == ["watches"] or (len(segments) == 2 and segments[0] == "watches")
         else "repositories:read"
         if segments == ["repositories"]
         else "usage:read"
@@ -264,6 +265,17 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
             }
         )
         return True
+    if len(segments) == 2 and segments[0] == "watches":
+        watch = store.get_watch(segments[1])
+        restrictions = principal.get("restrictions") or {}
+        allowed_ids = restrictions.get("watchIds") if isinstance(restrictions, dict) else None
+        if (watch is None or watch["billingOwnerId"] != user_id
+                or (restrictions and (not isinstance(allowed_ids, list)
+                    or watch["id"] not in allowed_ids))):
+            _error(handler, HTTPStatus.NOT_FOUND, "NOT_FOUND", "Watch was not found.")
+        else:
+            handler.json(watch, headers={"ETag": f'"{watch["revision"]}"'})
+        return True
     restrictions = principal.get("restrictions") or {}
     try:
         sources = filter_sources(
@@ -298,7 +310,14 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
         item_id=segments[1] if len(segments) == 2 and segments[0] == "items" and segments[1] != "overview" else None
     ), restrictions)
     github_user_id = str(principal["user"].get("githubId") or "")
-    resource_items = filter_items(all_items, params, github_user_id, include_view=False)
+    try:
+        resource_items = filter_items(all_items, params, github_user_id, include_view=False)
+    except ValueError as error:
+        code = str(error)
+        _error(handler, HTTPStatus.UNPROCESSABLE_ENTITY,
+               code if code in {"INVALID_VIEW", "INVALID_CONFIGURATION"} else "INVALID_CONFIGURATION",
+               "Invalid Item filters.")
+        return True
     if segments == ["items", "overview"]:
         selected = filter_items(all_items, params, github_user_id, include_view=True)
         counts = {

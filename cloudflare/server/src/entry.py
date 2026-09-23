@@ -31,9 +31,10 @@ class Default(WorkerEntrypoint):
             "Origin": request.headers.get("origin") or "",
             "Referer": request.headers.get("referer") or "",
         }
+        path = urlsplit(request.url).path
         status, payload = await handle_http_request(
             method=request.method,
-            path=urlsplit(request.url).path,
+            path=path,
             params=parse_qs(urlsplit(request.url).query),
             headers=headers,
             read_body=read_body,
@@ -47,4 +48,10 @@ class Default(WorkerEntrypoint):
                 getattr(self.env, "PULLWISE_APP_URL", "")).split(",")
                 if value.strip() and value.strip() != "*"},
         )
-        return Response.json(payload, status=status)
+        response_headers = None
+        if (status == 200 and isinstance(payload, dict)
+                and type(payload.get("revision")) is int
+                and (path.startswith("/api/v1/items/")
+                     or path.startswith("/api/v1/watches/"))):
+            response_headers = {"ETag": f'"{payload["revision"]}"'}
+        return Response.json(payload, status=status, headers=response_headers)

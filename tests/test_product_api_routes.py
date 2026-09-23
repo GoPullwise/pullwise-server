@@ -152,6 +152,25 @@ class ProductApiRoutesTest(unittest.TestCase):
         self.assertEqual(api_key.payload["items"], session.payload["items"])
         self.assertEqual(session.payload["items"][0]["watchScopeKey"], self.watch["watchScopeKey"])
 
+    def test_watch_detail_reuses_owner_and_key_restrictions(self) -> None:
+        cookie = RouteHarness(f"/api/v1/watches/{self.watch['id']}",
+            cookie=f"{app.SESSION_COOKIE}=ses_1")
+        app.PullwiseHandler.route(cookie, "GET")
+        self.assertEqual(cookie.status, HTTPStatus.OK)
+        self.assertEqual(cookie.payload, self.store.get_watch(self.watch["id"]))
+        token = self.api_key(["watches:read"], restrictions={"watchIds": ["other"]})
+        restricted = RouteHarness(f"/api/v1/watches/{self.watch['id']}",
+            headers={"Authorization": f"Bearer {token}"})
+        app.PullwiseHandler.route(restricted, "GET")
+        self.assertEqual(restricted.status, HTTPStatus.NOT_FOUND)
+
+    def test_item_identity_filters_require_module_and_repository(self) -> None:
+        request = RouteHarness("/api/v1/items?pullNumber=12",
+            cookie=f"{app.SESSION_COOKIE}=ses_1")
+        app.PullwiseHandler.route(request, "GET")
+        self.assertEqual(request.status, HTTPStatus.UNPROCESSABLE_ENTITY)
+        self.assertEqual(request.payload["error"]["code"], "INVALID_CONFIGURATION")
+
     def test_manual_sync_from_session_and_key_never_creates_analysis_job(self) -> None:
         session = RouteHarness(
             f"/api/v1/watches/{self.watch['id']}/sync",

@@ -23,10 +23,13 @@ def publication():
             source_facts={"releaseId": "1"}, source_url="https://github.com/a/b/releases/1",
             processing_mode="model", completeness="complete", lifecycle="active", observed_at=now,
         )
+        watch = store.create_watch(owner_id="owner", target_repository_id=None,
+            upstream_repository_id="github:101", billing_owner_id="owner",
+            interests=["documentation"], enabled=True, analysis_enabled=True)
         context = dict(source_id="release", context_id="watch:1", context_version=1,
                        configuration_revision=1, authorization_revision=1,
                        authorization_valid_until=now + 300, accessible=True,
-                       billing_owner_id="owner", watch_id="watch1", analysis_enabled=True)
+                       billing_owner_id="owner", watch_id=watch["id"], analysis_enabled=True)
         store.set_source_context(**context)
         reservation = store.reserve_processing_unit(
             charge_key="release:1", billing_owner_id="owner", period="period", module="updates", limit=10)

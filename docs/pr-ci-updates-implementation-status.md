@@ -1582,10 +1582,23 @@ port 8797 was stopped. Reusing an earlier synthetic state yielded empty
 Source rows because its 300-second source permission lease had expired; this
 was treated as correct authorization behavior, and no old lease was extended.
 
-A later failing regression found Source publication still visible after a
-secondary context's configuration revision changed. Both SQLite ProductStore
-and D1SourceReads now compare `configurationRevision` in every saved fence;
-the focused Source/ProductStore run passes **36 tests** after the fix.
+A read-side configuration-revision check was tried after a failing synthetic
+regression, then reverted when the broader Source persistence test showed it
+hid a successful saved judgment merely because analysis was disabled. Design
+02 explicitly keeps that historical judgment readable. Publication writes
+still CAS configuration revisions; read-side semantic/context, source,
+authorization and active-watch fences remain in force. The Source/Item/
+persistence/ProductStore regression passes **53 tests** after this correction.
+The same distinction applies to Item handling: a failing candidate PATCH test
+returned 412 after analysis was switched off, while the saved Item remained
+readable. Its D1 handling guard now checks source/context semantic and auth
+fences without treating config-only disable as a stale Item. The focused
+Source/Item/handling/persistence run passes **44 tests** after the repair.
+The isolated local workerd watch driver then confirmed the same sequence:
+successful saved assessment remains readable after analysis-off configuration
+revision, and disappears after secondary watch archive. The probe passed
+before and after process restart in fresh `server-map-watch-history-state`;
+port 8796 was stopped. `sync_server_modules.py --check` passed afterward.
 Another failing test found a saved Source publication with an empty fence set
 still returned its assessment. Both readers now require a matching fence for
 every dependency, including the primary Source/context. Source/ProductStore
@@ -1650,8 +1663,107 @@ pass preliminary Cookie resolution but fail only at the final read snapshot.
 The candidate now rejects that combination as `AMBIGUOUS_AUTH` before D1;
 the product-read suite passes **21 tests** after the correction.
 
-The final local current-product/Cloudflare, billing, Creem, GitHub
-authorization and security selection passed **630 tests, 68 subtests**.
+## Watch detail read (2026-09-23 continuation)
+
+Local REST and the candidate now serve `GET /api/v1/watches/{id}` with the
+same watch DTO, owner/archive check and API-key watchIds restriction. Missing
+routes failed first; the focused local REST and Cloudflare product read suites
+then passed **45 tests**. The fresh local workerd HTTP driver passed watch
+detail for Cookie and a restricted API key before and after restart in
+`server-http-watch-detail-state`; port 8797 was stopped. Watch mutations,
+shared watch membership and complete account lifecycle remain open.
+
+The local HTTP driver then failed because the candidate omitted local REST's
+Item/watch detail `ETag`. `src/entry.py` now emits the saved revision as ETag
+for successful Item/watch details and handling responses. The real local
+workerd driver passed after this change and after a process restart in fresh
+`server-http-etag-state`; port 8797 was stopped. No remote response contract
+was exercised.
+
+Shared Item filtering now covers actionType, lifecycle, handling disposition,
+PR pullNumber and CI runId from saved Item facts. A failing pure-filter test
+showed the fields were ignored; a second failing route test showed an invalid
+pullNumber scope returned 400. Both local REST and the candidate now return
+422 `INVALID_CONFIGURATION` for missing/mismatched module or repository scope.
+The focused filter/local REST/Worker suite passes **48 tests**. CI stage and
+symptom pairing, classificationState, text query and other 03 filters remain
+P5b/P5a contract work; no labels are inferred here.
+
+`releaseId` is now a shared Source list filter over saved Release sourceFacts.
+The missing-filter test first returned both releases, then the pure
+Source filter suite passed **7 tests**. This code path is shared by local
+REST and the candidate Worker; it does not require an Item or model call.
+
+Web cross-project verification after these Server REST changes used
+`PULLWISE_CONTRACT_PYTHON=D:/Python313/python.exe` and the existing Web
+`npm run check`: lint passed, **49 files / 615 tests passed**, and Vite build
+passed. Web `output/` remains untracked and untouched; Web Actions list is
+empty. This is local proxy/fixture evidence, not Cloudflare CF3.
+
+The latest local current-product/Cloudflare, billing, Creem, GitHub
+authorization and security selection passed **636 tests, 68 subtests**.
 `sync_server_modules.py --check` passed after the local Worker build. This
 selection matches the edited Server CI test command; remote CI has not run
 the edit because nothing was pushed.
+
+## Public watch create transaction groundwork (2026-09-23 continuation)
+
+`D1WatchTransactions.create_public_watch` is an unmounted trusted command for
+a repository already resolved as public by a future GitHub adapter. It derives
+activeWatchLimit from the persisted storage-form user and uses one D1 batch
+for account/limit/scope/control guards plus watch and processing-control
+writes. A missing-module test failed first. Four SQLite tests passed after
+implementation, including scope A→B→A version 1→2→3, duplicate active
+watch, raced last active slot and account-snapshot rollback. The isolated
+local workerd `/server-map/watch-create` passed create/replay and real process
+restart under fresh `server-map-watch-state`; port 8796 was stopped. No
+product create route, live GitHub, cron, Jev or remote D1 was enabled.
+
+Archiving a watch exposed a read fence gap: its Source and Item remained
+visible while the old authorization lease was valid, and a primary assessment
+could still depend on an archived secondary watch context. Failing tests
+preceded fixes in both SQLite and D1 readers. Source/Item list rows now require
+an unarchived watch, and every publication dependency fence checks watch
+activity. The focused Source/Item/ProductStore set passes **41 tests**. This
+is read-side protection; D1 watch archive and queued-job/reservation cleanup
+are not yet mapped.
+
+The isolated workerd probe then added a saved assessment with a secondary
+watch dependency, archived that watch, and confirmed the primary assessment
+was withdrawn. It passed before and after process restart in fresh
+`server-map-watch-fence-state`; port 8796 was stopped. This tests read-side
+fencing only, not a production D1 archive/cancellation command.
+
+## Watch archive D1 transaction groundwork (2026-09-23 continuation)
+
+`D1WatchTransactions.archive_watch` now maps a trusted local-only batch for
+watch archive, associated Source/context and discovery-target revocation,
+queued/running analysis Job cancellation and atomic reserved-usage release.
+It checks bucket consistency before changes; provider attempt spend remains
+after a running Job is cancelled and its late publication is rejected. The
+missing-method tests failed first; the watch mapping suite then passed **7
+tests**, including rollback on an inconsistent bucket. The isolated local
+workerd/D1 driver passed queued-reservation release, secondary-watch saved
+assessment withdrawal and process restart in fresh
+`server-map-watch-archive-state`; port 8796 was stopped. Product
+`DELETE /watches`, upstream authorization, full account write coverage and
+remote Cloudflare CF2 remain open.
+
+The local SQLite reference then failed a parity test: archiving a watch with
+no discovery target left its queued Job and reservation live. Its
+`ProductStore.archive_watch` now cascades context/target revocation, active
+analysis/manual sync cancellation and reservation release in one immediate
+transaction. Discovery tests for stable-scope recreation were updated to
+renew proof with a monotonic authorization revision after archival, rather
+than replaying revision 1. Focused watch/ProductStore/discovery verification
+passes **92 tests, 5 subtests**. The D1 trusted archive command remains
+unmounted at product DELETE.
+
+The current Server CI selection after the watch create/archive mappings and
+read-side archival fences passes **645 tests, 68 subtests** locally. This is
+still local Python 3.13 evidence; the edited remote CI workflow has not run.
+
+The expanded selection now includes `test_source_assessment_persistence.py`
+to protect design 02's saved historical judgment behavior and passes **659
+tests, 68 subtests** after the SQLite archive cascade. This remains local
+Python 3.13 evidence only.

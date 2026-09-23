@@ -1,5 +1,16 @@
 # CF1 isolated local probe — 2026-09-23
 
+The Server mapping has a separate synthetic `verify_watch_mapping.py` driver.
+After regenerating `src/server_fixture.py` with `PYTHONPATH` set to the Server
+root, run local workerd on port 8796 with a fresh
+`.wrangler/server-map-watch-history-state`, then run the driver. Stop and restart
+workerd with the same state and run `verify_watch_mapping.py --after-restart`.
+It exercises trusted public-watch D1 creation, archive cancellation and
+reserved-usage release, plus retention of a saved judgment after a config-only
+analysis-off change and withdrawal after archiving its secondary watch. It
+never calls GitHub or Jev. The
+probe config has no cron trigger.
+
 This is a **local experiment, not the Server deployment or a production adapter**.
 The user approved the isolated validation dependencies in this session. No real
 GitHub/Jev credentials, model requests, remote D1 resources, deployments, DNS

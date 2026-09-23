@@ -39,3 +39,18 @@ def test_item_read_withdraws_stale_secondary_source_and_authorization_fence(tmp_
     assert asyncio.run(reader.list_items_for_billing_owner(owner_id="owner",
         now=fixture.now)) == []
     assert fixture.store.list_items_for_billing_owner("owner") == []
+
+
+def test_analysis_switch_keeps_saved_item_readable_without_new_publication(tmp_path):
+    fixture, job, frozen = seed(tmp_path / "domain.db")
+    publication = publication_args(fixture, job, frozen)
+    execute(fixture.store, mapping().claim(**claim_args(fixture, job, frozen)))
+    execute(fixture.store, mapping().publication(**publication))
+    with fixture.store._immediate() as db:
+        db.execute("""UPDATE source_contexts SET analysis_enabled=0,
+            configuration_revision=configuration_revision+1
+            WHERE source_id='2'""")
+    reader = D1ItemReads(D1ShapedSQLite(fixture.store))
+    assert fixture.store.list_items_for_billing_owner("owner")
+    assert asyncio.run(reader.list_items_for_billing_owner(owner_id="owner",
+        now=fixture.now)) == fixture.store.list_items_for_billing_owner("owner")

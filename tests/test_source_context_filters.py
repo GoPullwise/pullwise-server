@@ -34,6 +34,13 @@ def test_watch_filter_does_not_borrow_another_context_signal():
     assert [context["id"] for context in result[0]["contexts"]] == ["a"]
 
 
+def test_release_id_filter_uses_source_fact_without_borrowing_other_releases():
+    first = {**source(), "sourceFacts": {"releaseId": "101"}}
+    second = {**source(), "id": "other", "sourceFacts": {"releaseId": "102"}}
+    result = _filter_sources([first, second], {"module": "updates", "releaseId": "102"})
+    assert [entry["id"] for entry in result] == ["other"]
+
+
 @pytest.mark.parametrize("params", [{"module": "ci", "relevance": "relevant"},
                                      {"module": "updates", "relevance": "safe"},
                                      {"module": "updates", "updateSignal": "safe"}])
