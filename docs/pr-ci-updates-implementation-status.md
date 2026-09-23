@@ -2119,3 +2119,19 @@ No repository list/write, live GitHub verification, remote D1 or model call
 was enabled.
 The Server CI target plus shared-watch contracts passes **750 tests,
 73 subtests** locally; the candidate package sync check passes.
+
+## Trusted public-watch manual sync D1 queue (2026-09-24 continuation)
+
+`D1ManualSyncTransactions.request` now maps a fact-only `sync_watch` command
+for a saved owner public watch. Its D1 read snapshot checks the current
+account/watch/active Job, and its write batch guards the same resource plus
+absence of a competing active Job before inserting the next generation.
+Replay returns only the same requester's active Job. Red tests preceded the
+module and the cross-requester fence; five focused SQLite tests pass. A
+synthetic local workerd/D1 run in fresh `server-map-manual-sync-state` passed
+create/replay and real restart with one Job, zero provider attempts and no
+additional processing reservation. Port 8796 was stopped. This command is
+not on HTTP and does not contact GitHub or Jev; request idempotency, private/
+shared watches and repository sync remain open.
+The Server CI target plus shared-watch contracts passes **755 tests,
+73 subtests** locally; the candidate module sync check passes.

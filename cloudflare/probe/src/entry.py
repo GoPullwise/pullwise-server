@@ -53,6 +53,7 @@ class Default(WorkerEntrypoint):
         from pullwise_server.cloudflare_source_read import D1SourceReads
         from pullwise_server.cloudflare_watch_adapter import D1WatchTransactions
         from pullwise_server.cloudflare_repository_adapter import D1RepositoryTransactions
+        from pullwise_server.cloudflare_manual_sync import D1ManualSyncTransactions
         from pullwise_server.cloudflare_session_adapter import D1SessionTransactions
         from pullwise_server.cloudflare_oauth_state_adapter import D1OAuthStates
         from pullwise_server.cloudflare_billing_catalog_write import D1BillingCatalogTransactions
@@ -99,6 +100,13 @@ class Default(WorkerEntrypoint):
                 (SELECT accessible FROM discovery_targets WHERE resource_kind='watch' LIMIT 1) AS watchProof,
                 (SELECT COUNT(*) FROM provider_attempts) AS attempts''').first()
             return Response.json(row)
+        if request.method == 'GET' and name == 'manual-sync-state':
+            return Response.json(await self.env.DB.prepare('''SELECT
+                (SELECT COUNT(*) FROM background_jobs WHERE job_type='sync_watch') AS jobs,
+                (SELECT generation FROM background_jobs WHERE id='job-manual-probe') AS generation,
+                (SELECT state FROM background_jobs WHERE id='job-manual-probe') AS state,
+                (SELECT COUNT(*) FROM provider_attempts) AS attempts,
+                (SELECT reserved FROM processing_usage_buckets LIMIT 1) AS reserved''').first())
         if request.method == 'GET' and name == 'source-read':
             try:
                 items = await D1SourceReads(self.env.DB).list_sources_for_billing_owner(
@@ -184,6 +192,19 @@ class Default(WorkerEntrypoint):
                 return Response.json({'watchId': watch['id']})
             except Exception:
                 return Response.json({'error': 'shared watch fixture rejected'}, status=409)
+        if name == 'manual-sync':
+            watch = await self.env.DB.prepare("""SELECT id FROM update_watches
+                WHERE upstream_repository_id='github:101' AND archived_at IS NULL
+                LIMIT 1""").first()
+            if watch is None:
+                return Response.json({'error': 'watch missing'}, status=409)
+            try:
+                result = await D1ManualSyncTransactions(self.env.DB).request(
+                    resource_kind='watch', resource_id=watch['id'],
+                    owner_id='owner', job_id='job-manual-probe', now=DATA['claim']['now'])
+                return Response.json(result)
+            except Exception:
+                return Response.json({'error': 'manual sync rejected'}, status=409)
         if name == 'watch-create':
             try:
                 watch = await D1WatchTransactions(self.env.DB).create_public_watch(

@@ -213,6 +213,13 @@ revision; pending or incomplete assessment must not silently close an item.
   in one D1 batch; changing the account before that batch fails closed.
   This detail route does not imply the repository list or write routes are
   mapped, and GET performs no provider/model work or D1 write.
+  `cloudflare_manual_sync.D1ManualSyncTransactions` is a trusted, unmounted
+  owner-only command for a saved public watch. Its D1 guard rechecks account,
+  active watch and absence of an active logical Job before enqueue; an active
+  Job is reused only for the same requester. It creates `sync_watch` with
+  `manual_sync` trigger and no model reservation/attempt. Private/shared
+  watches, repository sync, request idempotency and HTTP authentication remain
+  unmapped for this command.
   `GET /api/v1/watches/{id}` is now shared by local REST and the candidate;
   resolve only an unarchived owner watch, apply API-key watchIds restrictions,
   and keep the candidate's identity and watch row in one D1 read snapshot.

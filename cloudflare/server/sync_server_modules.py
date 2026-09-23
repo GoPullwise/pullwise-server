@@ -23,6 +23,7 @@ MODULES = (
     "cloudflare_item_handling",
     "cloudflare_watch_adapter",
     "cloudflare_repository_adapter",
+    "cloudflare_manual_sync",
     "cloudflare_source_read",
     "cloudflare_webhook_receipts",
     "creem_event_rules",

@@ -33,6 +33,10 @@ The detail GET also requires the persisted account's GitHub App repository
 item bound to the service installation and any API-key repositoryIds scope.
 It reads account, service and discovery proof in one D1 snapshot and emits
 the saved revision ETag. No repository list or write route is exposed.
+The package also carries unmounted `D1ManualSyncTransactions` for an owner
+public watch: it checks the current account/watch and active logical Job,
+then enqueues a fact-only `sync_watch` without a model attempt or processing
+reservation. This does not expose POST sync or support private/shared watches.
 
 `src/entry.py` calls Server-owned `cloudflare_http_contract.py`. The latter
 requires raw request bytes, checks the 64 KiB bound and signature before D1,

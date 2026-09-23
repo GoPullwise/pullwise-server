@@ -39,6 +39,23 @@ def repository_service_dto(row: Mapping[str, object]) -> dict:
         "revision": int(row["revision"])}
 
 
+def job_dto(row: Mapping[str, object], *, reused: bool) -> dict:
+    result = {"id": row["id"], "jobType": row["job_type"],
+        "logicalKey": row["logical_key"], "generation": int(row["generation"]),
+        "trustedTrigger": row["trusted_trigger"], "requesterId": row["requester_id"],
+        "status": row["state"], "attempt": int(row["attempt"]), "reused": reused}
+    for column, field in (("reservation_id", "reservationId"),
+                          ("billing_owner_id", "billingOwnerId"),
+                          ("source_version_id", "sourceVersionId"),
+                          ("next_attempt_at", "nextAttemptAt")):
+        if row[column] is not None:
+            result[field] = int(row[column]) if column == "next_attempt_at" else row[column]
+    if row["claim_token"] is not None:
+        result["claimToken"] = row["claim_token"]
+        result["claimedUntil"] = int(row["claimed_until"])
+    return result
+
+
 def iso_timestamp(value: int) -> str:
     return datetime.fromtimestamp(value, tz=timezone.utc).isoformat().replace("+00:00", "Z")
 

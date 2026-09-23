@@ -15,6 +15,7 @@ from .product_dto_rules import (
     source_context_dto, source_record_dto, watch_dto,
     handling_event_dto, item_read_dto, item_dependencies_current,
     repository_service_dto,
+    job_dto,
 )
 from .update_filter import project_saved_updates
 from .product_usage_events import parse_usage_events_query, usage_events_page
@@ -3863,26 +3864,4 @@ class ProductStore:
 
     @staticmethod
     def _job_dto(row: sqlite3.Row, *, reused: bool) -> dict:
-        result = {
-            "id": row["id"],
-            "jobType": row["job_type"],
-            "logicalKey": row["logical_key"],
-            "generation": int(row["generation"]),
-            "trustedTrigger": row["trusted_trigger"],
-            "requesterId": row["requester_id"],
-            "status": row["state"],
-            "attempt": int(row["attempt"]),
-            "reused": reused,
-        }
-        if row["reservation_id"] is not None:
-            result["reservationId"] = row["reservation_id"]
-        if row["billing_owner_id"] is not None:
-            result["billingOwnerId"] = row["billing_owner_id"]
-        if row["source_version_id"] is not None:
-            result["sourceVersionId"] = row["source_version_id"]
-        if row["next_attempt_at"] is not None:
-            result["nextAttemptAt"] = int(row["next_attempt_at"])
-        if row["claim_token"] is not None:
-            result["claimToken"] = row["claim_token"]
-            result["claimedUntil"] = int(row["claimed_until"])
-        return result
+        return job_dto(row, reused=reused)

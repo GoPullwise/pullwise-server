@@ -545,6 +545,18 @@ Worker returned DTO/ETag for a synthetic Cookie and scoped key, rejected
 anonymous access, and retained the result across process restart. The
 repository list, write authority and real GitHub refresh remain unmapped.
 
+The trusted `D1ManualSyncTransactions.request` mapping now enqueues a saved
+owner public-watch fact sync. It checks current account/watch and active Job
+in a D1 read batch; creation then guards account, watch and absence of an
+active logical Job in one write batch, deriving the next generation there.
+Same-requester active replay returns the existing Job; another requester is
+denied. It never creates an `analyze_source` Job, provider attempt or
+processing reservation. Five SQLite tests cover replay, archive/concurrency
+rollback, generation and requester fencing. A synthetic local workerd/D1
+probe confirmed one Job and unchanged attempts/reservation after restart.
+HTTP request authentication/idempotency, shared/private watches and repository
+sync remain unported.
+
 - Full ProductStore async reads and consistent authorization-filtered list/count
   snapshots; no use of a Worker/Container local SQLite file as durable storage.
 - Source-only and cached publication, thread membership CAS for projections

@@ -42,6 +42,11 @@ real GitHub installation or repository write HTTP endpoint is enabled.
 a repository, confirms the Source is readable, pauses the parent without
 revoking the old watch proof/Source lease, then confirms the Source is hidden
 before and after a real workerd restart. No model or provider request occurs.
+`verify_manual_sync_mapping.py` uses fresh
+`.wrangler/server-map-manual-sync-state`, creates a synthetic public watch,
+enqueues one trusted `sync_watch`, replays it before and after workerd restart,
+and checks that provider attempts and processing reservations did not grow.
+The route is probe-only and does not invoke GitHub or Jev.
 Run `verify_repository_mapping.py` with the fresh
 `.wrangler/server-map-repository-parent-state` and again with
 `--after-restart` after restarting workerd. It creates a synthetic linked
