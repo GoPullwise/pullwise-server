@@ -1967,3 +1967,22 @@ Playwright CLI was unavailable in installed dependencies and the connected
 browser inventory failed, so Chrome DevTools Protocol provided the real
 browser check without installing a package. Candidate Cloudflare `/billing`,
 public plan and payment-provider mutations remain CF2 work.
+
+## Candidate Billing account read (2026-09-23 continuation)
+
+Extracted `product_billing_projection` for account/payment-history DTOs and
+made local Billing delegate to it after reading product usage. The missing
+module test failed first; local billing/pure projection tests passed after
+the extraction. Candidate Cookie-only `GET /billing` now reads current
+session/user, usage bucket, module ledger counts, owner provider attempts and
+the newest 20 consumed events in one read-only D1 batch. Two missing-route
+tests failed first; focused candidate/local projection tests passed **32
+tests**. Synthetic local workerd/D1 returned Pro entitlements and historical
+processing records before and after restart in `server-http-usage-cursor-state`;
+API-key billing read returned 401. A 30-second cold-start request timed out
+on the first restart call; the ready Worker passed on retry. Public
+`/billing/plan`, checkout, subscription mutations and full CF2 remain open.
+The current Server CI target selection including pure Billing projection and
+candidate `/billing` passes **706 tests, 68 subtests** locally. Web's latest
+`npm run check` remains **616 tests** plus lint/build, with the 390px browser
+check described above. The remote Server CI has not run these unpushed edits.

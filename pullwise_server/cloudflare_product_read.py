@@ -137,12 +137,9 @@ async def _principal(binding: Any, headers: Mapping[str, object],
     raise ProductReadAuthError(401, "UNAUTHENTICATED", "A session or API key is required.")
 
 
-async def _usage(binding: Any, user: dict, restrictions: dict,
-                 headers: Mapping[str, object], *, now: int) -> dict:
+def _usage_statements(binding: Any, user: dict, now: int):
     entitlement = entitlements_for_user(user, timestamp=now)
     owner_id, period = user["id"], entitlement["period"]
-    auth, validate = _resource_auth_snapshot(binding, headers, user,
-        restrictions, now, "usage:read")
     statements = [binding.prepare("""SELECT used,reserved,limit_value
         FROM processing_usage_buckets WHERE billing_owner_id=? AND period=?
         AND metric='intelligent_processing'""").bind(owner_id, period),
@@ -153,9 +150,11 @@ async def _usage(binding: Any, user: dict, restrictions: dict,
         WHERE billing_owner_id=? AND occurred_at>=? AND occurred_at<?""").bind(
             owner_id, period_start_for_key(period, entitlement["resetAt"]),
             entitlement["resetAt"])]
-    result = await binding.batch([*auth, *statements])
-    validate([part.results for part in result[:len(auth)]])
-    bucket_rows, counts, attempt_rows = (part.results for part in result[len(auth):])
+    return period, statements
+
+
+def _usage_from_results(user: dict, period: str, parts: list, now: int) -> dict:
+    bucket_rows, counts, attempt_rows = (part.results for part in parts)
     bucket = bucket_rows[0] if bucket_rows else None
     by_module = {"pr": 0, "ci": 0, "updates": 0}
     for row in counts:
@@ -169,6 +168,16 @@ async def _usage(binding: Any, user: dict, restrictions: dict,
         "byModule": by_module}
     return product_usage_payload_from_usage(user, usage,
         int(attempts["count"]) if attempts else 0, timestamp=now)
+
+
+async def _usage(binding: Any, user: dict, restrictions: dict,
+                 headers: Mapping[str, object], *, now: int) -> dict:
+    auth, validate = _resource_auth_snapshot(binding, headers, user,
+        restrictions, now, "usage:read")
+    period, statements = _usage_statements(binding, user, now)
+    result = await binding.batch([*auth, *statements])
+    validate([part.results for part in result[:len(auth)]])
+    return _usage_from_results(user, period, result[len(auth):], now)
 
 
 async def _watches(binding: Any, user: dict, restrictions: dict,

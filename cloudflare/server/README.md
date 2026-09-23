@@ -6,6 +6,7 @@ authenticated `GET /api/v1/me`, `GET /api/v1/usage`, `GET /api/v1/watches`,
 session-only `GET /api-keys` for redacted owner API-key metadata,
 session-only `DELETE /api-keys/{id}` for guarded revocation,
 session-only `POST /api-keys` for one-time token issuance,
+session-only `GET /billing` for product usage and saved payment history,
 `GET /api/v1/watches/{id}`,
 `GET /api/v1/sources` and `GET /api/v1/sources/{id}`, and
 `GET /api/v1/items`, `GET /api/v1/items/{id}`, `GET /api/v1/items/overview` and
@@ -45,6 +46,11 @@ through its JS FFI; local CPython tests use `secrets.token_bytes`.
 The existing local Server updates API-key `last_used_at` on access;
 this candidate deliberately leaves it untouched on GET to avoid write charges.
 A bounded operational last-used policy is still needed before migration.
+Billing GET rechecks Cookie/user with usage bucket, consumed module counts,
+owner-cycle attempts and the newest 20 successful processing events in one
+read-only D1 batch. It shares the pure account/payment DTO with local Server,
+preserves subscription history, sends no-store and rejects API keys. Public
+`/billing/plan` and payment-provider mutations remain unported.
 The watch list uses the same Server-owned DTO projection as ProductStore,
 filters to the current billing owner, and applies API-key `watchIds` scope.
 Source list/detail rechecks the API key or Cookie session and stored user in

@@ -9,6 +9,11 @@ from .api_key_dto_rules import requested_api_key_scopes as _pure_requested_api_k
 from .api_key_dto_rules import parse_api_key_restrictions as _pure_parse_api_key_restrictions
 from .product_store import ProductStore as _ProductStore
 from .entitlements import product_usage_payload as _product_usage_payload
+from .product_billing_projection import (
+    billing_account_dto as _pure_billing_account_dto,
+    subscription_event_dto as _pure_subscription_event_dto,
+    subscription_events_dto as _pure_subscription_events_dto,
+)
 
 _import_compat_globals(vars(_previous_app_part), globals())
 del _import_compat_globals, _previous_app_part
@@ -112,38 +117,11 @@ def consume_review_quota(user: dict) -> tuple[bool, dict]:
 
 
 def billing_subscription_event_payload(record: dict) -> dict:
-    return {
-        "provider": public_billing_text(record.get("provider")),
-        "customerId": public_billing_text(record.get("customerId")),
-        "customerEmail": public_billing_text(record.get("customerEmail")),
-        "subscriptionId": public_billing_text(record.get("subscriptionId")),
-        "subscriptionItemId": public_billing_text(record.get("subscriptionItemId")),
-        "status": public_billing_status(record.get("status")),
-        "plan": public_billing_text(record.get("plan")) if public_billing_text(record.get("plan")) in set(billing.PLAN_IDS) else None,
-        "interval": billing.normalize_interval(record.get("interval")),
-        "currentPeriodStart": pull_request_timestamp(record.get("currentPeriodStart")),
-        "currentPeriodEnd": pull_request_timestamp(record.get("currentPeriodEnd")),
-        "cancelAtPeriodEnd": record.get("cancelAtPeriodEnd") if isinstance(record.get("cancelAtPeriodEnd"), bool) else None,
-        "canceledAt": pull_request_timestamp(record.get("canceledAt")),
-        "eventType": public_billing_text(record.get("eventType")),
-        "eventId": public_billing_text(record.get("eventId")),
-        "eventCreated": pull_request_timestamp(record.get("eventCreated")),
-        "processedAt": pull_request_timestamp(record.get("processedAt")),
-        "stale": record.get("stale") if isinstance(record.get("stale"), bool) else False,
-    }
+    return _pure_subscription_event_dto(record)
 
 
 def billing_subscription_events_payload(user: dict) -> list[dict]:
-    records = user.get("billingSubscriptionEvents") if isinstance(user.get("billingSubscriptionEvents"), list) else []
-    payloads = []
-    for record in records:
-        if not isinstance(record, dict):
-            continue
-        payload = billing_subscription_event_payload(record)
-        if payload["eventId"] and (payload["subscriptionId"] or payload["customerId"]):
-            payloads.append(payload)
-    payloads.sort(key=lambda item: (item.get("eventCreated") or 0, item.get("processedAt") or 0), reverse=True)
-    return payloads[:50]
+    return _pure_subscription_events_dto(user)
 
 
 BILLING_QUOTA_ACTIVITY_LIMIT = 100
@@ -324,34 +302,11 @@ def billing_quota_activity_payload(user: dict) -> list[dict]:
 
 
 def billing_account_payload(user: dict) -> dict:
-    current = user_billing_state(user)
-    entitlement = billing_entitlement_for_user(user)
     store = _ProductStore(db.database_path())
     store.initialize()
     product = _product_usage_payload(store, user)
-    return {
-        "provider": public_billing_text(current.get("provider")),
-        "status": public_billing_status(current.get("status")),
-        "plan": product["plan"],
-        "interval": billing.normalize_interval(entitlement["interval"]),
-        "customerId": public_billing_text(current.get("customerId")),
-        "subscriptionId": public_billing_text(current.get("subscriptionId")),
-        "subscriptionItemId": public_billing_text(current.get("subscriptionItemId")),
-        "customerEmail": public_billing_text(current.get("customerEmail")),
-        "currentPeriodStart": pull_request_timestamp(current.get("currentPeriodStart")),
-        "currentPeriodEnd": pull_request_timestamp(current.get("currentPeriodEnd")),
-        "cancelAtPeriodEnd": current.get("cancelAtPeriodEnd") if isinstance(current.get("cancelAtPeriodEnd"), bool) else None,
-        "canceledAt": pull_request_timestamp(current.get("canceledAt")),
-        "lastEventId": public_billing_text(current.get("lastEventId")),
-        "lastEventType": public_billing_text(current.get("lastEventType")),
-        "lastEventCreated": pull_request_timestamp(current.get("lastEventCreated")),
-        "updatedAt": pull_request_timestamp(current.get("updatedAt")),
-        "entitlements": product["entitlements"],
-        "usage": product["usage"],
-        "runtimeUsage": product["runtimeUsage"],
-        "processingActivity": store.list_processing_usage_events(user["id"], limit=20)["items"],
-        "subscriptionEvents": billing_subscription_events_payload(user),
-    }
+    activity = store.list_processing_usage_events(user["id"], limit=20)["items"]
+    return _pure_billing_account_dto(user, product, activity)
 
 
 def clean_api_key_scopes(value: object) -> list[str]:

@@ -274,6 +274,16 @@ does not expose `/billing` or `/billing/plan`; equivalent account DTO reads
 must join the same persisted entitlement/usage authority without a D1 write.
 Checkout, subscription changes and all real payment writers remain separate
 CF2 transaction work, not covered by the local Billing page tests.
+The independent local Server Worker now routes Cookie-only `GET /billing`.
+It batches current session/user, entitlement-cycle usage bucket, consumed
+module counts, provider attempts and the latest 20 consumed events in one
+D1 snapshot. The pure `product_billing_projection` keeps account/payment
+fields and subscription history identical to local Server; no API key can
+read Billing. Synthetic local workerd/D1 returned the expected Pro limits,
+reserved usage and two historical processing events before and after a real
+restart in `server-http-usage-cursor-state`. One cold-start request timed out
+at 30 seconds, then the ready Worker returned the same result. Public plan,
+checkout and production account writers are still unported.
 Trusted session issuance/revocation has a separate `D1SessionTransactions`
 mapping. It reads the storage-form user and sessions map, then performs an
 exact-snapshot CAS with a `changes()=1` guard so a concurrent session cannot

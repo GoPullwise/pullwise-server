@@ -96,6 +96,16 @@ def main():
         print("Local Server Worker API-key revocation and Origin guard passed")
         return
     if "--watch-only" in sys.argv:
+        status, billing, billing_headers = call("/billing", extra_headers={
+            "Cookie": "pw_session=session-local"}, return_headers=True)
+        assert status == 200 and billing["account"]["plan"] == "pro"
+        assert billing["account"]["entitlements"]["monthlyProcessingLimit"] == 5000
+        assert len(billing["account"]["processingActivity"]) == 2
+        assert "reviewLimit" not in billing["account"] and "quotaActivity" not in billing["account"]
+        assert next((value for key, value in billing_headers.items()
+            if key.lower() == "cache-control"), None) == "no-store"
+        assert call("/billing", extra_headers={
+            "Authorization": "Bearer pwk_local_http_test"})[0] == 401
         status, keys, key_headers = call("/api-keys", extra_headers={
             "Cookie": "pw_session=session-local"}, return_headers=True)
         assert status == 200 and len(keys["items"]) == 1

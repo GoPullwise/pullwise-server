@@ -123,8 +123,12 @@ revision; pending or incomplete assessment must not silently close an item.
   `billing_account_payload` initializes ProductStore and exposes product
   entitlements, intelligent-processing usage/runtime attempts and consumed
   `processingActivity`. Never label legacy scan quota ledger as new usage.
-  Candidate Cloudflare `/billing` and provider checkout/account writes still
-  require full CF2 adaptation.
+  `product_billing_projection.billing_account_dto` now owns the pure account/
+  subscription-history shape for local and candidate. Candidate Cookie-only
+  `/billing` batches current principal, product usage and recent consumed
+  history in one D1 read snapshot, sends no-store, and rejects API keys.
+  Public `/billing/plan` and provider checkout/account writes still require
+  full CF2 adaptation.
 - `product_dto_rules.source_context_dto` and `source_record_dto` own the
   exact SQLite/D1 Source projection. Candidate `/api/v1/sources` list/detail
   prepends API-key, session and user SELECTs to the four Source/publication/
