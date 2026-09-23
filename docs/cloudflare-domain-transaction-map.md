@@ -598,6 +598,10 @@ side effects. Synthetic local workerd/D1 returned 200 revision 2, 403 for
 foreign Origin and 412 for stale If-Match. A later process restart retained
 revision 2 on disk; the five-minute proof had expired, so authorized GET
 correctly returned 404. HTTP creation/installation changes remain unmapped.
+The Worker HTTP entry now marks every candidate `/api/v1/*` response
+`Cache-Control: no-store`, with identity Vary and Pragma headers, while
+preserving ETag on successful revisioned detail and handling responses.
+A real local workerd header check failed before the change and passed after.
 
 - Full ProductStore async reads and consistent authorization-filtered list/count
   snapshots; no use of a Worker/Container local SQLite file as durable storage.

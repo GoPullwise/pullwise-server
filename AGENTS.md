@@ -246,6 +246,9 @@ revision; pending or incomplete assessment must not silently close an item.
   write batch. It cannot create a service or switch installations through
   HTTP; those require a separate verified GitHub App authorization path.
   Configuration changes do not enqueue model work or increase usage.
+  Candidate `/api/v1/*` responses use `Cache-Control: no-store` with private
+  identity Vary headers; successful versioned detail/handling responses keep
+  their ETag. The local workerd response-header driver verifies both.
   `GET /api/v1/watches/{id}` is now shared by local REST and the candidate;
   resolve only an unarchived owner watch, apply API-key watchIds restrictions,
   and keep the candidate's identity and watch row in one D1 read snapshot.

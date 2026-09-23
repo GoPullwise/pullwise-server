@@ -41,6 +41,26 @@ def call(path, *, raw=None, signature=None, extra_headers=None, method=None,
 
 def main():
     same_site_none = "--same-site-none" in sys.argv
+    if "--private-headers-only" in sys.argv:
+        status, _, headers = call("/api/v1/me",
+            extra_headers={"Cookie": "pw_session=session-local"},
+            return_headers=True)
+        assert status == 200
+        assert next((value for key, value in headers.items()
+            if key.lower() == "cache-control"), None) == "no-store"
+        status, listing = call("/api/v1/watches",
+            extra_headers={"Cookie": "pw_session=session-local"})
+        assert status == 200 and listing["items"]
+        status, _, headers = call("/api/v1/watches/" + listing["items"][0]["id"],
+            extra_headers={"Cookie": "pw_session=session-local"},
+            return_headers=True)
+        assert status == 200
+        assert next((value for key, value in headers.items()
+            if key.lower() == "cache-control"), None) == "no-store"
+        assert next((value for key, value in headers.items()
+            if key.lower() == "etag"), None)
+        print("Private product responses are no-store and detail keeps ETag")
+        return
     if "--catalog-only" in sys.argv:
         status, public = call("/billing/plan")
         assert status == 200 and public["enabled"] is False

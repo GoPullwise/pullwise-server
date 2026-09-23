@@ -2216,3 +2216,13 @@ and unchanged installation; authorized GET returned 404 because the 300-second
 proof had expired, as designed. No model attempt or usage increment occurred.
 The expanded local Server target passes **776 tests, 73 subtests**; the
 candidate package sync and diff checks pass.
+
+## Private product HTTP cache headers (2026-09-24 continuation)
+
+The local Worker initially omitted `Cache-Control` on authenticated
+`/api/v1` GETs. A failing real workerd header check preceded the fix.
+Candidate product responses now send `no-store`, `Pragma: no-cache` and
+identity Vary headers, while successful versioned detail retains ETag.
+The local `--private-headers-only` driver passed for profile and watch detail.
+The older synthetic Item had expired Source authority and was correctly empty;
+the header check used a still-visible watch. Port 8797 was stopped.

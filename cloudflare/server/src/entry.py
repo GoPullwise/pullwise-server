@@ -54,12 +54,14 @@ class Default(WorkerEntrypoint):
         response_headers = ({"Cache-Control": "no-store", "Pragma": "no-cache",
             "Vary": "Cookie, Authorization, X-Pullwise-Api-Key"}
             if path in {"/billing", "/billing/plan", "/api-keys"}
-               or path.startswith("/api-keys/") else None)
+               or path.startswith("/api-keys/")
+               or path.startswith("/api/v1/") else None)
         if (status == 200 and isinstance(payload, dict)
                 and type(payload.get("revision")) is int
                 and (path.startswith("/api/v1/items/")
                      or path.startswith("/api/v1/watches/")
                      or (path.startswith("/api/v1/repositories/")
                          and path.endswith("/service")))):
-            response_headers = {"ETag": f'"{payload["revision"]}"'}
+            response_headers = dict(response_headers or {})
+            response_headers["ETag"] = f'"{payload["revision"]}"'
         return Response.json(payload, status=status, headers=response_headers)

@@ -31,6 +31,10 @@ The service PUT takes installation ID only from the saved service, requires
 If-Match and current account/proof/credential checks in the D1 write batch,
 and returns the new revision ETag. HTTP creation and installation switching
 remain closed pending fresh GitHub App authority binding.
+All candidate `/api/v1/*` responses send `Cache-Control: no-store` and private
+identity Vary headers. Versioned detail and handling responses retain their
+ETag. Run `verify_local_http.py --private-headers-only` against synthetic
+local workerd state to check the headers.
 
 The package also contains a trusted, currently unmounted
 `D1RepositoryTransactions.put_service` mapping. It guards owner/capacity and
