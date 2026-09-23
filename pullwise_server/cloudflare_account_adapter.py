@@ -87,6 +87,33 @@ class D1AccountTransactions:
             next_pending_json=next_pending_json, now=now)
         return await execute_d1_batch(self.binding, commands)
 
+    async def park_webhook_receipt(self, *, receipt_event_id: str, now: int) -> dict:
+        receipt = await self.binding.prepare("""SELECT update_json FROM billing_webhook_receipts
+            WHERE event_id=? AND state='pending'""").bind(receipt_event_id).first()
+        if not receipt:
+            raise ValueError("pending webhook receipt is missing")
+        update = json.loads(receipt["update_json"])
+        pending_json = await self._state_snapshot("billingPendingUpdates")
+        pending = json.loads(pending_json)
+        if (not isinstance(update, dict) or update.get("eventId") != receipt_event_id
+                or not isinstance(pending, list)):
+            raise ValueError("invalid pending webhook receipt")
+        existing = [item for item in pending
+                    if isinstance(item, dict) and item.get("eventId") == receipt_event_id]
+        if existing:
+            if len(existing) != 1 or existing[0] != update:
+                raise ValueError("pending receipt conflicts with saved update")
+            return {"parked": False}
+        next_pending_json = json.dumps([*pending, update], ensure_ascii=False,
+            allow_nan=False, separators=(",", ":"))
+        commands = mapping.park_webhook_receipt(
+            receipt_event_id=receipt_event_id,
+            expected_update_json=receipt["update_json"],
+            expected_pending_json=pending_json,
+            next_pending_json=next_pending_json, now=now)
+        await execute_d1_batch(self.binding, commands)
+        return {"parked": True}
+
     async def settle_webhook_receipt(self, *, receipt_event_id: str,
                                      owner_id: str, now: int) -> dict:
         receipt = await self.binding.prepare("""SELECT update_json FROM billing_webhook_receipts
@@ -108,6 +135,12 @@ class D1AccountTransactions:
             raise ValueError("receipt is not eligible for account settlement")
         if not billing_account_rules.billing_update_matches_user(update, stored_user):
             raise ValueError("receipt owner does not match persisted account")
+        matching_pending = [item for item in pending if isinstance(item, dict)
+                            and item.get("eventId") == receipt_event_id]
+        if any(item != update for item in matching_pending):
+            raise ValueError("pending receipt conflicts with saved update")
+        next_pending = [item for item in pending if not (isinstance(item, dict)
+            and item.get("eventId") == receipt_event_id)]
         decision = billing_account_rules.reduce_billing_update(stored_user, update,
             processed_at=now)
         if decision["eventRecord"] is None:
@@ -120,10 +153,32 @@ class D1AccountTransactions:
                 allow_nan=False, separators=(",", ":")),
             next_events_json=json.dumps(next_events, ensure_ascii=False,
                 allow_nan=False, separators=(",", ":")),
-            next_pending_json=json.dumps(pending, ensure_ascii=False,
+            next_pending_json=json.dumps(next_pending, ensure_ascii=False,
                 allow_nan=False, separators=(",", ":")), now=now)
         return {"applied": decision["applied"], "ownerId": owner_id,
                 "eventId": receipt_event_id}
+
+    async def reconcile_pending_for_owner(self, *, owner_id: str, now: int,
+                                          limit: int = 16) -> dict:
+        if type(limit) is not int or not 1 <= limit <= 16:
+            raise ValueError("pending reconciliation limit must be 1..16")
+        account = json.loads(await self._snapshot(owner_id))
+        pending = json.loads(await self._state_snapshot("billingPendingUpdates"))
+        if not isinstance(pending, list):
+            raise ValueError("persisted pending billing state is invalid")
+        matching = [update for update in pending
+            if isinstance(update, dict) and billing_account_rules.billing_update_matches_user(
+                update, account)]
+        matching.sort(key=lambda update: billing_account_rules.billing_event_created(update) or 0)
+        event_ids = [billing_account_rules.billing_event_id(update) for update in matching]
+        if not all(event_ids) or len(set(event_ids)) != len(event_ids):
+            raise ValueError("matching pending receipt identities are invalid")
+        settled = []
+        for event_id in event_ids[:limit]:
+            await self.settle_webhook_receipt(receipt_event_id=event_id,
+                owner_id=owner_id, now=now)
+            settled.append(event_id)
+        return {"settled": settled, "remaining": len(event_ids) - len(settled)}
 
     async def refresh_account_entitlement(self, *, owner_id: str,
                                           expected_revision: int, now: int) -> Any:

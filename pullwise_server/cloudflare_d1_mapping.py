@@ -143,6 +143,33 @@ def stage_pending_billing_updates(*, expected_pending_json, next_pending_json, n
     ]
 
 
+def park_webhook_receipt(*, receipt_event_id, expected_update_json,
+                         expected_pending_json, next_pending_json, now):
+    """Append one verified unmatched receipt to pending state atomically."""
+    from pullwise_server.billing_account_rules import MAX_BILLING_PENDING_UPDATES
+
+    update = json.loads(expected_update_json)
+    before = json.loads(expected_pending_json)
+    after = json.loads(next_pending_json)
+    if (not isinstance(update, dict) or update.get("eventId") != receipt_event_id
+            or not isinstance(before, list) or not isinstance(after, list)
+            or any(isinstance(item, dict) and item.get("eventId") == receipt_event_id
+                   for item in before)
+            or after != [*before, update] or len(after) > MAX_BILLING_PENDING_UPDATES):
+        raise ValueError("invalid pending receipt transition")
+    pending_commands = stage_pending_billing_updates(
+        expected_pending_json=expected_pending_json,
+        next_pending_json=next_pending_json, now=now)
+    return [
+        _check("""EXISTS(SELECT 1 FROM billing_webhook_receipts
+            WHERE event_id=? AND update_json=? AND state='pending')""",
+            (receipt_event_id, expected_update_json)),
+        _check("""EXISTS(SELECT 1 FROM app_state WHERE name='billingEvents'
+            AND json_type(payload,?) IS NULL)""", (_json_path(receipt_event_id),)),
+        *pending_commands,
+    ]
+
+
 def stage_billing_reconciliation(*, owner_id, expected_revision, account_snapshot,
                                  next_account_json, expected_events_json,
                                  next_events_json, expected_pending_json,

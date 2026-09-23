@@ -171,9 +171,8 @@ class Default(WorkerEntrypoint):
                 return Response.json({'committed': False}, status=409)
         elif name == 'pending-event':
             try:
-                await D1AccountTransactions(self.env.DB).stage_pending_billing_updates(
-                    next_pending_json='[{"eventId":"later","customerId":"customer"}]',
-                    now=DATA['claim']['now'])
+                await D1AccountTransactions(self.env.DB).park_webhook_receipt(
+                    receipt_event_id='later', now=DATA['claim']['now'])
                 return Response.json({'committed': True})
             except Exception:
                 return Response.json({'committed': False}, status=409)
@@ -182,17 +181,18 @@ class Default(WorkerEntrypoint):
             changed = json.dumps(dict(account, billing=dict(account['billing'], customerId='customer')),
                 separators=(',', ':'))
             try:
-                await D1AccountTransactions(self.env.DB).stage_billing_reconciliation(
-                    owner_id='owner', expected_revision=1, next_account_json=changed,
-                    next_events_json='{"event_fixture":{"status":"processed"},"later":{"applied":true}}',
-                    next_pending_json='[]', now=DATA['claim']['now'])
+                account = D1AccountTransactions(self.env.DB)
+                await account.stage_account_write(owner_id='owner', expected_revision=1,
+                    next_account_json=changed, now=DATA['claim']['now'])
+                await account.reconcile_pending_for_owner(owner_id='owner',
+                    now=DATA['claim']['now'] + 1)
                 return Response.json({'committed': True})
             except Exception:
                 return Response.json({'committed': False}, status=409)
         elif name == 'refresh-reconciled':
             try:
                 await D1AccountTransactions(self.env.DB).refresh_account_entitlement(
-                    owner_id='owner', expected_revision=2, now=DATA['claim']['now'])
+                    owner_id='owner', expected_revision=3, now=DATA['claim']['now'])
                 return Response.json({'committed': True})
             except Exception:
                 return Response.json({'committed': False}, status=409)

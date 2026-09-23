@@ -87,8 +87,12 @@ revision; pending or incomplete assessment must not silently close an item.
   `D1AccountTransactions.settle_webhook_receipt` calculates from the stored
   encrypted account JSON without decrypting untouched token fields, checks
   receipt ID/owner/revision/content, and atomically stores account/event/receipt.
-  Pending-event association, the real key/HTTP handler and every other account
-  writer still need D1 composition.
+  `park_webhook_receipt` appends an unmatched signed update under receipt and
+  pending-list CAS without dropping a full list; duplicate parking does no
+  write. `reconcile_pending_for_owner` processes at most 16 matching receipts
+  in event-created order, one atomic settlement at a time. Account association
+  must invoke/retry this trusted path; there is no cron or user route. The real
+  key/HTTP handler and every other account writer still need D1 composition.
   ACK must follow durable receipt persistence, unlike the current HTTP
   response-before-finally flush order.
 - On D1 entitlement refresh, update an existing current-period processing

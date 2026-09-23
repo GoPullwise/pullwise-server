@@ -1323,3 +1323,28 @@ configured, no remote D1 was written, and the owned process was stopped.
 The selected billing, entitlement and D1 regression passed **150 tests,
 15 subtests**. Server remote CI remains at the retired Worker checkout
 failure before tests; this continuation was not pushed or deployed.
+
+## Pending signed receipt association (2026-09-23 continuation)
+
+The local D1 account adapter can now park one unmatched signed receipt into
+`billingPendingUpdates` under exact receipt-content and whole-list CAS.
+Duplicate parking returns without another D1 write. At the 1,000-entry cap it
+rejects rather than silently deleting an older signed payment fact. A trusted
+account association can invoke `reconcile_pending_for_owner` with a 1–16
+event bound; it selects matching pending receipts by event-created order and
+settles each through the existing account/event/receipt batch. A failed or
+interrupted run leaves the remaining entries durable for explicit retry;
+there is no cron or user-facing reprocess route.
+
+The early-event test failed before the adapter existed, then passed after
+implementation. Tests cover replay without duplicate pending entries,
+customer association, ordered one-at-a-time resume, and rollback on a
+concurrent pending-list write. The no-cron local workerd/D1 driver now sends
+a second synthetic signed event before the account has its customer binding,
+parks it, links the account and reconciles it. `verify_server_mapping.py`
+passed. Selected billing/entitlement/D1 regression: **154 passed, 15
+subtests**. Server CI remains at run 35824307016, failing before tests at
+the retired Worker checkout; Web Actions remain empty. Real Creem HTTP,
+secret binding, every account writer, and automatic
+trusted invocation after account association remain unconnected. No remote
+D1, cron, GitHub or Jev behavior was enabled.

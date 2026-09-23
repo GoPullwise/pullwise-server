@@ -53,6 +53,14 @@ opening the key. It reads the receipt update, account revision and event/pending
 snapshots, then fences receipt content, owner account snapshot, revision and
 whole-map CAS in one D1 batch. A mismatched owner or changed receipt cannot
 settle. This is local Worker evidence, not the real HTTP/Creem runtime.
+An unmatched signed receipt can now be parked into the persisted pending list
+with a receipt-content fence and whole-list CAS. A full list rejects rather
+than dropping a signed payment update. A later trusted account association can
+select at most 16 matching pending receipts by event-created order and settle
+them one by one; each settlement removes its pending entry in the same batch
+as account/event/receipt changes. Replays and concurrent pending writes are
+tested. This is resumable event-driven mapping, not an enabled scheduler or a
+complete account/Creem handler.
 
 The finite local mapping now has `account_entitlement_authority` and
 `d1_claim_authority`. A previously accepted synthetic event updates the matching

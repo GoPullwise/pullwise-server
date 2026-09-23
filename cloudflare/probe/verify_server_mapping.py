@@ -11,6 +11,8 @@ from concurrent.futures import ThreadPoolExecutor
 WEBHOOK_SECRET = b"synthetic-webhook-secret"
 WEBHOOK_RAW = (b'{"id":"evt-local","eventType":"subscription.canceled",'
                b'"object":{"id":"synthetic-sub","metadata":{"userId":"owner"}}}')
+LATER_WEBHOOK_RAW = (b'{"id":"later","eventType":"subscription.canceled",'
+                     b'"object":{"id":"later-sub","customer":{"id":"customer"}}}')
 
 
 def call(path, method="POST", *, raw_body=None, headers=None):
@@ -150,6 +152,7 @@ def main():
     assert call("claim-current")[0] == 200
     assert call("publish-current")[0] == 200
     assert call("reset")[0] == 200
+    assert webhook(raw=LATER_WEBHOOK_RAW)[0] == 200
     assert call("pending-event")[0] == 200
     state = call("state", "GET")[1]
     assert state["pendingCount"] == 1 and state["laterEvent"] == 0, state
@@ -157,7 +160,7 @@ def main():
     assert call("claim")[0] == 409
     state = call("state", "GET")[1]
     assert state["pendingCount"] == 0 and state["laterEvent"] == 1, state
-    assert state["accountRevision"] == 2 and state["accountDirty"] == 1, state
+    assert state["accountRevision"] == 3 and state["accountDirty"] == 1, state
     assert call("refresh-reconciled")[0] == 200
     assert call("claim-reconciled")[0] == 200
     assert call("publish-reconciled")[0] == 200

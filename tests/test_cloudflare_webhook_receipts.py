@@ -163,6 +163,133 @@ def test_receipt_settlement_rejects_unrelated_billing_owner(tmp_path):
         assert db.execute("SELECT revision FROM account_entitlement_authority").fetchone()[0] == 1
 
 
+def test_pending_receipt_is_parked_then_settled_after_account_association(tmp_path):
+    fixture, _, frozen = seed(tmp_path / "domain.db")
+    binding = D1ShapedSQLite(fixture.store)
+    adapter = D1AccountTransactions(binding)
+    raw = b'{"id":"evt-early","eventType":"subscription.canceled"}'
+    signature = hmac.new(b"synthetic-secret", raw, hashlib.sha256).hexdigest()
+    update = {"eventId": "evt-early", "eventType": "subscription.canceled",
+        "customerId": "future-customer", "subscriptionId": "future-sub",
+        "status": "canceled", "eventCreated": fixture.now}
+    asyncio.run(D1WebhookReceipts(binding).record_signed_update(raw_body=raw,
+        signature=signature, secret="synthetic-secret", normalized_update=update,
+        now=fixture.now))
+    assert asyncio.run(adapter.park_webhook_receipt(receipt_event_id="evt-early",
+        now=fixture.now)) == {"parked": True}
+    assert asyncio.run(adapter.park_webhook_receipt(receipt_event_id="evt-early",
+        now=fixture.now)) == {"parked": False}
+    with closing(fixture.store.connect()) as db:
+        pending = json.loads(db.execute("SELECT payload FROM app_state "
+            "WHERE name='billingPendingUpdates'").fetchone()[0])
+        assert pending == [update]
+        assert db.execute("SELECT state FROM billing_webhook_receipts WHERE event_id='evt-early'").fetchone()[0] == "pending"
+
+    linked = json.dumps({**json.loads(frozen), "billing": {
+        **json.loads(frozen)["billing"], "customerId": "future-customer"}},
+        separators=(",", ":"))
+    asyncio.run(adapter.stage_account_write(owner_id="owner", expected_revision=1,
+        next_account_json=linked, now=fixture.now))
+    asyncio.run(adapter.settle_webhook_receipt(receipt_event_id="evt-early",
+        owner_id="owner", now=fixture.now + 1))
+    with closing(fixture.store.connect()) as db:
+        assert json.loads(db.execute("SELECT payload FROM app_state "
+            "WHERE name='billingPendingUpdates'").fetchone()[0]) == []
+        events = json.loads(db.execute("SELECT payload FROM app_state "
+            "WHERE name='billingEvents'").fetchone()[0])
+        assert events["evt-early"]["applied"] is True
+        assert events["event_fixture"] == {"status": "processed"}
+        assert db.execute("SELECT state FROM billing_webhook_receipts WHERE event_id='evt-early'").fetchone()[0] == "applied"
+        assert tuple(db.execute("SELECT revision,dirty FROM account_entitlement_authority").fetchone()) == (3, 1)
+
+
+def test_pending_reconciliation_processes_matching_receipts_in_event_order(tmp_path):
+    fixture, _, frozen = seed(tmp_path / "domain.db")
+    binding = D1ShapedSQLite(fixture.store)
+    adapter = D1AccountTransactions(binding)
+    for event_id, created, status in (("evt-newer", 200, "active"),
+                                      ("evt-older", 100, "canceled")):
+        raw = json.dumps({"id": event_id, "eventType": "subscription.update"}).encode()
+        signature = hmac.new(b"synthetic-secret", raw, hashlib.sha256).hexdigest()
+        asyncio.run(D1WebhookReceipts(binding).record_signed_update(
+            raw_body=raw, signature=signature, secret="synthetic-secret",
+            normalized_update={"eventId": event_id, "eventType": "subscription.update",
+                "customerId": "future-customer", "subscriptionId": "future-sub",
+                "status": status, "eventCreated": created}, now=fixture.now))
+        asyncio.run(adapter.park_webhook_receipt(receipt_event_id=event_id,
+            now=fixture.now))
+    linked = json.dumps({**json.loads(frozen), "billing": {
+        **json.loads(frozen)["billing"], "customerId": "future-customer"}},
+        separators=(",", ":"))
+    asyncio.run(adapter.stage_account_write(owner_id="owner", expected_revision=1,
+        next_account_json=linked, now=fixture.now))
+    first = asyncio.run(adapter.reconcile_pending_for_owner(owner_id="owner",
+        now=fixture.now + 1, limit=1))
+    assert first == {"settled": ["evt-older"], "remaining": 1}
+    result = asyncio.run(adapter.reconcile_pending_for_owner(owner_id="owner",
+        now=fixture.now + 2, limit=1))
+    assert result == {"settled": ["evt-newer"], "remaining": 0}
+    with closing(fixture.store.connect()) as db:
+        stored = json.loads(db.execute("SELECT value FROM app_state,json_each(payload) "
+            "WHERE name='users' AND key='owner'").fetchone()[0])
+        assert stored["billing"]["status"] == "active"
+        assert stored["billing"]["lastEventId"] == "evt-newer"
+        assert json.loads(db.execute("SELECT payload FROM app_state "
+            "WHERE name='billingPendingUpdates'").fetchone()[0]) == []
+        assert db.execute("SELECT COUNT(*) FROM billing_webhook_receipts "
+            "WHERE state='applied'").fetchone()[0] == 2
+
+
+def test_park_receipt_cannot_overwrite_concurrent_pending_update(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    binding = D1ShapedSQLite(fixture.store)
+    raw = b'{"id":"evt-park-race","eventType":"subscription.canceled"}'
+    signature = hmac.new(b"synthetic-secret", raw, hashlib.sha256).hexdigest()
+    asyncio.run(D1WebhookReceipts(binding).record_signed_update(
+        raw_body=raw, signature=signature, secret="synthetic-secret",
+        normalized_update={"eventId": "evt-park-race", "customerId": "future"},
+        now=fixture.now))
+
+    def write_other_pending():
+        binding.before_batch = None
+        with fixture.store._immediate() as db:
+            db.execute("UPDATE app_state SET payload=? WHERE name='billingPendingUpdates'",
+                ('[{"eventId":"other"}]',))
+
+    binding.before_batch = write_other_pending
+    with pytest.raises(sqlite3.IntegrityError):
+        asyncio.run(D1AccountTransactions(binding).park_webhook_receipt(
+            receipt_event_id="evt-park-race", now=fixture.now))
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT payload FROM app_state "
+            "WHERE name='billingPendingUpdates'").fetchone()[0] == '[{"eventId":"other"}]'
+        assert db.execute("SELECT state FROM billing_webhook_receipts "
+            "WHERE event_id='evt-park-race'").fetchone()[0] == "pending"
+
+
+def test_full_pending_list_preserves_signed_receipt_for_later_retry(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    binding = D1ShapedSQLite(fixture.store)
+    raw = b'{"id":"evt-full","eventType":"subscription.canceled"}'
+    signature = hmac.new(b"synthetic-secret", raw, hashlib.sha256).hexdigest()
+    asyncio.run(D1WebhookReceipts(binding).record_signed_update(
+        raw_body=raw, signature=signature, secret="synthetic-secret",
+        normalized_update={"eventId": "evt-full", "customerId": "future"},
+        now=fixture.now))
+    full = json.dumps([{"eventId": f"other-{index}"} for index in range(1000)],
+        separators=(",", ":"))
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE app_state SET payload=? WHERE name='billingPendingUpdates'", (full,))
+    with pytest.raises(ValueError, match="pending receipt transition"):
+        asyncio.run(D1AccountTransactions(binding).park_webhook_receipt(
+            receipt_event_id="evt-full", now=fixture.now))
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT payload FROM app_state "
+            "WHERE name='billingPendingUpdates'").fetchone()[0] == full
+        assert db.execute("SELECT state FROM billing_webhook_receipts "
+            "WHERE event_id='evt-full'").fetchone()[0] == "pending"
+
+
 def test_applying_receipt_and_account_projection_dirtiness_is_atomic(tmp_path):
     fixture, _, frozen = seed(tmp_path / "domain.db")
     secret = "synthetic-secret"

@@ -9,6 +9,7 @@ from .creem_event_rules import PLAN_IDS
 MAX_BILLING_SUBSCRIPTION_RECORDS = 25
 MAX_BILLING_SUBSCRIPTION_EVENTS = 100
 MAX_BILLING_EVENT_RECORDS = 5000
+MAX_BILLING_PENDING_UPDATES = 1000
 
 
 def billing_update_text(value: object) -> str:

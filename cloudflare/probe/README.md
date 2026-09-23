@@ -150,6 +150,9 @@ through `record_signed_creem_event`, verifies a 64 KiB
 Content-Length bound, and proves the
 receipt/apply and first-generation queue-admission batches on local D1.
 Do not treat this route as a production Creem endpoint or Server scheduler.
+The synthetic early-event path sends signed bytes through that same route,
+parks the unmatched receipt, links its account, then invokes bounded pending
+reconciliation. It leaves no cron configured and does not use a real secret.
 After `/server-map/schedule-enable`, the local Wrangler scheduled test URL
 invokes the Server async due-job selector once, then disables that probe flag.
 `wrangler.jsonc` declares no cron; the test URL invokes the handler manually
