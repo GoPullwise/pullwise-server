@@ -1,9 +1,11 @@
 """Trusted D1 enqueue for fact-only manual sync, currently unmounted."""
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from .product_dto_rules import job_dto
+from .product_repository_access import account_can_read_repository_service
 
 
 class D1ManualSyncTransactions:
@@ -12,23 +14,42 @@ class D1ManualSyncTransactions:
 
     async def request(self, *, resource_kind: str, resource_id: str,
                       owner_id: str, job_id: str, now: int) -> dict:
-        if (resource_kind != "watch" or any(not isinstance(value, str) or not value
+        if (resource_kind not in {"watch", "repository"} or any(not isinstance(value, str) or not value
                 for value in (resource_id, owner_id, job_id))
                 or type(now) is not int or now < 0):
             raise ValueError("invalid trusted manual sync request")
-        job_type = "sync_watch"
+        job_type = "sync_watch" if resource_kind == "watch" else "sync_repository"
         logical_key = f"{job_type}:{resource_id}"
-        resource_guard = """EXISTS(SELECT 1 FROM update_watches w
-            WHERE w.id=? AND w.owner_id=? AND w.billing_owner_id=?
-              AND w.archived_at IS NULL AND w.enabled=1
-              AND w.target_repository_id IS NULL)"""
+        if resource_kind == "watch":
+            resource_query = """SELECT * FROM update_watches w
+                WHERE w.id=? AND w.owner_id=? AND w.billing_owner_id=?
+                  AND w.archived_at IS NULL AND w.enabled=1
+                  AND w.target_repository_id IS NULL"""
+            resource_params = (resource_id, owner_id, owner_id)
+            resource_guard = "EXISTS(" + resource_query + ")"
+        else:
+            resource_query = """SELECT s.* FROM repository_services s
+                WHERE s.repository_id=? AND s.billing_owner_id=?
+                  AND s.enabled=1 AND s.status='active'
+                  AND EXISTS(SELECT 1 FROM discovery_targets d
+                    WHERE d.resource_kind='repository' AND d.resource_id=s.repository_id
+                      AND d.repository_id=s.repository_id AND d.billing_owner_id=s.billing_owner_id
+                      AND d.module IN ('pr','ci') AND d.installation_id=s.installation_id
+                      AND d.accessible=1 AND d.valid_until>=?)"""
+            resource_params = (resource_id, owner_id, now)
+            resource_guard = "EXISTS(" + resource_query + ")"
         existing = await self.binding.batch([
-            self.binding.prepare("SELECT 1 FROM app_state a,json_each(a.payload) u WHERE a.name='users' AND u.key=?").bind(owner_id),
-            self.binding.prepare("SELECT 1 FROM update_watches w WHERE w.id=? AND w.owner_id=? AND w.billing_owner_id=? AND w.archived_at IS NULL AND w.enabled=1 AND w.target_repository_id IS NULL").bind(
-                resource_id, owner_id, owner_id),
+            self.binding.prepare("SELECT u.value AS snapshot FROM app_state a,json_each(a.payload) u WHERE a.name='users' AND u.key=?").bind(owner_id),
+            self.binding.prepare(resource_query).bind(*resource_params),
             self.binding.prepare("SELECT * FROM background_jobs WHERE logical_key=? AND state IN ('queued','running','retry_wait')").bind(logical_key),
         ])
         if not existing[0].results or not existing[1].results:
+            raise ValueError("RESOURCE_NOT_AUTHORIZED")
+        account_snapshot = existing[0].results[0]["snapshot"]
+        account = json.loads(account_snapshot)
+        if (not isinstance(account, dict) or account.get("id") != owner_id
+                or resource_kind == "repository" and not account_can_read_repository_service(
+                    account, existing[1].results[0])):
             raise ValueError("RESOURCE_NOT_AUTHORIZED")
         if existing[2].results:
             if existing[2].results[0]["requester_id"] != owner_id:
@@ -37,10 +58,11 @@ class D1ManualSyncTransactions:
         await self.binding.batch([
             self.binding.prepare("""INSERT INTO d1_command_guard(ok)
                 VALUES(CASE WHEN EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u
-                    WHERE a.name='users' AND u.key=?) AND """ + resource_guard + """
+                    WHERE a.name='users' AND u.key=? AND u.value=?) AND """ + resource_guard + """
                     AND NOT EXISTS(SELECT 1 FROM background_jobs
                         WHERE logical_key=? AND state IN ('queued','running','retry_wait'))
-                    THEN 1 ELSE 0 END)""").bind(owner_id, resource_id, owner_id, owner_id, logical_key),
+                    THEN 1 ELSE 0 END)""").bind(owner_id, account_snapshot,
+                        *resource_params, logical_key),
             self.binding.prepare("""INSERT INTO background_jobs(
                 id,job_type,logical_key,generation,trusted_trigger,requester_id,
                 state,attempt,created_at,updated_at)

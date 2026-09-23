@@ -554,8 +554,15 @@ denied. It never creates an `analyze_source` Job, provider attempt or
 processing reservation. Five SQLite tests cover replay, archive/concurrency
 rollback, generation and requester fencing. A synthetic local workerd/D1
 probe confirmed one Job and unchanged attempts/reservation after restart.
-HTTP request authentication/idempotency, shared/private watches and repository
-sync remain unported.
+The same trusted mapping now handles owner `sync_repository` after checking the
+current storage account's GitHub App repository item, an active service, and
+the matching unexpired installation discovery proof. The write batch CASes
+the exact account snapshot and resource/proof again. Two race tests withdrew
+account access or proof before the batch and saw no Job. Synthetic workerd/D1
+rejected a missing proof, created one Job after staging it, and retained replay
+across restart with no attempt or added reservation. HTTP request
+authentication/idempotency, member sync and shared/private watches remain
+unported.
 
 - Full ProductStore async reads and consistent authorization-filtered list/count
   snapshots; no use of a Worker/Container local SQLite file as durable storage.

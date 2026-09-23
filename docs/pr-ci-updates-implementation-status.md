@@ -2135,3 +2135,20 @@ not on HTTP and does not contact GitHub or Jev; request idempotency, private/
 shared watches and repository sync remain open.
 The Server CI target plus shared-watch contracts passes **755 tests,
 73 subtests** locally; the candidate module sync check passes.
+
+## Trusted owner repository manual sync D1 queue (2026-09-24 continuation)
+
+The same unmounted D1 manual-sync command now supports an owner repository
+service only with a matching current account GitHub App repository item,
+enabled service and unexpired accessible installation proof. The write batch
+rechecks the exact account snapshot and resource/proof before queuing a
+`sync_repository` Job. A red test preceded the mapping; nine focused tests
+pass, including account/proof withdrawal between read and write batches.
+Synthetic local workerd/D1 first rejected missing proof, then created one
+fact-only Job, reused it after process restart, and kept provider attempts at
+zero with no new processing reservation in `server-map-repository-sync-state`.
+No live GitHub or Jev request, HTTP sync route, remote D1, member permission
+or request idempotency was enabled.
+The Server CI target plus shared-watch contracts passes **759 tests,
+73 subtests** locally; `sync_server_modules.py --check` and `git diff --check`
+pass.

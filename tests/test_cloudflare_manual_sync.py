@@ -1,5 +1,6 @@
 """Trusted D1 manual fact-sync queue never reserves model processing."""
 import asyncio
+import json
 import sqlite3
 from contextlib import closing
 
@@ -104,3 +105,81 @@ def test_manual_sync_does_not_return_another_requesters_active_job(tmp_path):
         asyncio.run(D1ManualSyncTransactions(D1ShapedSQLite(fixture.store)).request(
             resource_kind="watch", resource_id=watch["id"],
             owner_id="owner", job_id="job-owner", now=fixture.now))
+
+
+def _repo_fixture(fixture):
+    fixture.store.put_repository_service(repository_id="repo", installation_id="inst-1",
+        billing_owner_id="owner", expected_revision=0, enabled=True,
+        modules={"pr": True, "ci": False}, analysis_enabled={"pr": False, "ci": False},
+        allow_member_sync=False, default_assignee_id=None, priority_order=0)
+    fixture.store.set_discovery_authorization(resource_kind="repository",
+        resource_id="repo", module="pr", github_repository_id="101",
+        installation_id="inst-1", app_id="app", authorization_revision=1,
+        accessible=True, valid_until=fixture.now + 300, observed_at=fixture.now)
+    with fixture.store._immediate() as db:
+        users = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])
+        users["owner"]["githubRepositoryAccess"] = {
+            "mode": "github-app", "authorizedUserId": "owner",
+            "authorizedGithubId": "author", "repositoriesNeedSync": False,
+            "repositoryItems": [{"id": "repo", "installationId": "inst-1"}],
+        }
+        db.execute("UPDATE app_state SET payload=? WHERE name='users'", (json.dumps(users),))
+
+
+def test_trusted_repository_manual_sync_requires_account_and_fresh_installation_proof(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _repo_fixture(fixture)
+    adapter = D1ManualSyncTransactions(D1ShapedSQLite(fixture.store))
+    first = asyncio.run(adapter.request(resource_kind="repository", resource_id="repo",
+        owner_id="owner", job_id="job-repo-1", now=fixture.now))
+    replay = asyncio.run(adapter.request(resource_kind="repository", resource_id="repo",
+        owner_id="owner", job_id="job-repo-2", now=fixture.now))
+    assert first["jobType"] == "sync_repository" and first["reused"] is False
+    assert replay["id"] == first["id"] and replay["reused"] is True
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT COUNT(*) FROM provider_attempts").fetchone()[0] == 0
+        assert db.execute("SELECT reserved FROM processing_usage_buckets LIMIT 1").fetchone()[0] == 1
+
+
+def test_repository_manual_sync_fails_closed_on_expiry_or_account_removal(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _repo_fixture(fixture)
+    adapter = D1ManualSyncTransactions(D1ShapedSQLite(fixture.store))
+    with pytest.raises(ValueError, match="RESOURCE_NOT_AUTHORIZED"):
+        asyncio.run(adapter.request(resource_kind="repository", resource_id="repo",
+            owner_id="owner", job_id="job-expired", now=fixture.now + 301))
+    with fixture.store._immediate() as db:
+        users = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])
+        users["owner"].pop("githubRepositoryAccess")
+        db.execute("UPDATE app_state SET payload=? WHERE name='users'", (json.dumps(users),))
+    with pytest.raises(ValueError, match="RESOURCE_NOT_AUTHORIZED"):
+        asyncio.run(adapter.request(resource_kind="repository", resource_id="repo",
+            owner_id="owner", job_id="job-no-access", now=fixture.now))
+
+
+@pytest.mark.parametrize("change", ["account", "proof"])
+def test_repository_manual_sync_rechecks_authority_in_write_batch(tmp_path, change):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _repo_fixture(fixture)
+    binding = D1ShapedSQLite(fixture.store)
+    batches = 0
+
+    def revoke_before_write():
+        nonlocal batches
+        batches += 1
+        if batches == 2:
+            with fixture.store._immediate() as db:
+                if change == "account":
+                    users = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])
+                    users["owner"].pop("githubRepositoryAccess")
+                    db.execute("UPDATE app_state SET payload=? WHERE name='users'", (json.dumps(users),))
+                else:
+                    db.execute("UPDATE discovery_targets SET accessible=0 WHERE resource_kind='repository'")
+
+    binding.before_batch = revoke_before_write
+    with pytest.raises(sqlite3.IntegrityError):
+        asyncio.run(D1ManualSyncTransactions(binding).request(
+            resource_kind="repository", resource_id="repo",
+            owner_id="owner", job_id="job-stale", now=fixture.now))
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT COUNT(*) FROM background_jobs WHERE id='job-stale'").fetchone()[0] == 0

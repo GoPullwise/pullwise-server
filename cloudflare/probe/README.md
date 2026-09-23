@@ -47,6 +47,11 @@ before and after a real workerd restart. No model or provider request occurs.
 enqueues one trusted `sync_watch`, replays it before and after workerd restart,
 and checks that provider attempts and processing reservations did not grow.
 The route is probe-only and does not invoke GitHub or Jev.
+`verify_repository_sync_mapping.py` uses fresh
+`.wrangler/server-map-repository-sync-state`: it rejects enqueue without a
+synthetic account/proof, then creates one owner repository fact-sync Job and
+checks replay and restart with zero provider attempts and no added processing
+reservation. These finite routes are not product HTTP sync endpoints.
 Run `verify_repository_mapping.py` with the fresh
 `.wrangler/server-map-repository-parent-state` and again with
 `--after-restart` after restarting workerd. It creates a synthetic linked

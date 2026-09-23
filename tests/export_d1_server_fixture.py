@@ -50,6 +50,7 @@ def main():
                      "cloudflare_watch_adapter",
                      "cloudflare_repository_adapter",
                      "cloudflare_manual_sync",
+                     "product_repository_access",
                      "cloudflare_session_adapter",
                      "cloudflare_oauth_state_adapter",
                      "cloudflare_billing_catalog_write", "product_public_catalog_rules",

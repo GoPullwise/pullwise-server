@@ -107,6 +107,13 @@ class Default(WorkerEntrypoint):
                 (SELECT state FROM background_jobs WHERE id='job-manual-probe') AS state,
                 (SELECT COUNT(*) FROM provider_attempts) AS attempts,
                 (SELECT reserved FROM processing_usage_buckets LIMIT 1) AS reserved''').first())
+        if request.method == 'GET' and name == 'manual-sync-repository-state':
+            return Response.json(await self.env.DB.prepare('''SELECT
+                (SELECT COUNT(*) FROM background_jobs WHERE job_type='sync_repository') AS jobs,
+                (SELECT generation FROM background_jobs WHERE id='job-repository-probe') AS generation,
+                (SELECT state FROM background_jobs WHERE id='job-repository-probe') AS state,
+                (SELECT COUNT(*) FROM provider_attempts) AS attempts,
+                (SELECT reserved FROM processing_usage_buckets LIMIT 1) AS reserved''').first())
         if request.method == 'GET' and name == 'source-read':
             try:
                 items = await D1SourceReads(self.env.DB).list_sources_for_billing_owner(
@@ -205,6 +212,37 @@ class Default(WorkerEntrypoint):
                 return Response.json(result)
             except Exception:
                 return Response.json({'error': 'manual sync rejected'}, status=409)
+        if name == 'repository-seed-manual-proof':
+            user_row = await self.env.DB.prepare("SELECT payload FROM app_state WHERE name='users'").first()
+            if user_row is None:
+                return Response.json({'error': 'account missing'}, status=409)
+            users = json.loads(user_row['payload'])
+            users['owner']['githubRepositoryAccess'] = {
+                'mode': 'github-app', 'authorizedUserId': 'owner',
+                'authorizedGithubId': 'author', 'repositoriesNeedSync': False,
+                'repositoryItems': [{'id': 'repo', 'installationId': 'inst-1'}]}
+            try:
+                await self.env.DB.batch([
+                    self.env.DB.prepare("UPDATE app_state SET payload=? WHERE name='users'").bind(json.dumps(users)),
+                    self.env.DB.prepare("""INSERT INTO discovery_targets(
+                        control_key,resource_kind,resource_id,context_id,module,
+                        repository_id,github_repository_id,installation_id,app_id,
+                        billing_owner_id,authorization_revision,accessible,valid_until)
+                        VALUES('repository-proof','repository','repo','repository:repo',
+                            'pr','repo','101','inst-1','app','owner',1,1,?)""").bind(
+                                DATA['claim']['now'] + 300),
+                ])
+                return Response.json({'staged': True})
+            except Exception:
+                return Response.json({'error': 'repository proof rejected'}, status=409)
+        if name == 'manual-sync-repository':
+            try:
+                result = await D1ManualSyncTransactions(self.env.DB).request(
+                    resource_kind='repository', resource_id='repo', owner_id='owner',
+                    job_id='job-repository-probe', now=DATA['claim']['now'])
+                return Response.json(result)
+            except Exception:
+                return Response.json({'error': 'repository sync rejected'}, status=409)
         if name == 'watch-create':
             try:
                 watch = await D1WatchTransactions(self.env.DB).create_public_watch(
