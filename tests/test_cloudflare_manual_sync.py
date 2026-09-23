@@ -10,6 +10,7 @@ from pullwise_server.cloudflare_manual_sync import D1ManualSyncTransactions
 from pullwise_server.product_jobs import ProductJobScheduler
 from test_cloudflare_account_adapter import D1ShapedSQLite
 from test_cloudflare_server_mapping import seed
+from test_cloudflare_product_reads import TOKEN, _seed_auth
 
 
 def test_trusted_public_watch_manual_sync_is_deduplicated_without_model_cost(tmp_path):
@@ -183,3 +184,116 @@ def test_repository_manual_sync_rechecks_authority_in_write_batch(tmp_path, chan
             owner_id="owner", job_id="job-stale", now=fixture.now))
     with closing(fixture.store.connect()) as db:
         assert db.execute("SELECT COUNT(*) FROM background_jobs WHERE id='job-stale'").fetchone()[0] == 0
+
+
+def test_manual_sync_rechecks_api_key_before_enqueue(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("watches:read", "sync:write"))
+    watch = fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=False)
+    with closing(fixture.store.connect()) as db:
+        key = dict(db.execute("SELECT * FROM api_keys WHERE id='key-local'").fetchone())
+        user = db.execute("SELECT value FROM app_state,json_each(payload) WHERE name='users' AND key='owner'").fetchone()[0]
+    proof = {"user": user, "token": TOKEN, "key": key, "sessions": None}
+    binding = D1ShapedSQLite(fixture.store)
+    batches = 0
+
+    def revoke_before_write():
+        nonlocal batches
+        batches += 1
+        if batches == 2:
+            with fixture.store._immediate() as db:
+                db.execute("UPDATE api_keys SET revoked_at=? WHERE id='key-local'", (fixture.now,))
+
+    binding.before_batch = revoke_before_write
+    with pytest.raises(sqlite3.IntegrityError):
+        asyncio.run(D1ManualSyncTransactions(binding).request(
+            resource_kind="watch", resource_id=watch["id"], owner_id="owner",
+            job_id="job-revoked-key", now=fixture.now, proof=proof))
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT COUNT(*) FROM background_jobs WHERE id='job-revoked-key'").fetchone()[0] == 0
+
+
+def test_manual_sync_rechecks_cookie_session_before_enqueue(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("watches:read", "sync:write"))
+    watch = fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=False)
+    with closing(fixture.store.connect()) as db:
+        user = db.execute("SELECT value FROM app_state,json_each(payload) WHERE name='users' AND key='owner'").fetchone()[0]
+        sessions = db.execute("SELECT payload FROM app_state WHERE name='sessions'").fetchone()[0]
+    proof = {"user": user, "token": None, "key": None, "sessions": sessions,
+             "session_id": "session-local"}
+    binding = D1ShapedSQLite(fixture.store)
+    batches = 0
+
+    def revoke_before_write():
+        nonlocal batches
+        batches += 1
+        if batches == 2:
+            with fixture.store._immediate() as db:
+                db.execute("UPDATE app_state SET payload='{}' WHERE name='sessions'")
+
+    binding.before_batch = revoke_before_write
+    with pytest.raises(sqlite3.IntegrityError):
+        asyncio.run(D1ManualSyncTransactions(binding).request(
+            resource_kind="watch", resource_id=watch["id"], owner_id="owner",
+            job_id="job-revoked-session", now=fixture.now, proof=proof))
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT COUNT(*) FROM background_jobs WHERE id='job-revoked-session'").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("scopes,restrictions", [
+    (("watches:read",), "{}"),
+    (("watches:read", "sync:write"), '{"watchIds":["another-watch"]}'),
+])
+def test_manual_sync_rejects_key_without_sync_scope_or_resource(tmp_path, scopes, restrictions):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=scopes, restrictions=restrictions)
+    watch = fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=False)
+    with closing(fixture.store.connect()) as db:
+        key = dict(db.execute("SELECT * FROM api_keys WHERE id='key-local'").fetchone())
+        user = db.execute("SELECT value FROM app_state,json_each(payload) WHERE name='users' AND key='owner'").fetchone()[0]
+    proof = {"user": user, "token": TOKEN, "key": key, "sessions": None}
+    with pytest.raises(ValueError, match="RESOURCE_NOT_AUTHORIZED"):
+        asyncio.run(D1ManualSyncTransactions(D1ShapedSQLite(fixture.store)).request(
+            resource_kind="watch", resource_id=watch["id"], owner_id="owner",
+            job_id="job-bad-scope", now=fixture.now, proof=proof))
+
+
+def test_manual_sync_rejects_expired_api_key_proof(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("watches:read", "sync:write"),
+        key_expires=fixture.now - 1)
+    watch = fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=False)
+    with closing(fixture.store.connect()) as db:
+        key = dict(db.execute("SELECT * FROM api_keys WHERE id='key-local'").fetchone())
+        user = db.execute("SELECT value FROM app_state,json_each(payload) WHERE name='users' AND key='owner'").fetchone()[0]
+    proof = {"user": user, "token": TOKEN, "key": key, "sessions": None}
+    with pytest.raises(ValueError, match="RESOURCE_NOT_AUTHORIZED"):
+        asyncio.run(D1ManualSyncTransactions(D1ShapedSQLite(fixture.store)).request(
+            resource_kind="watch", resource_id=watch["id"], owner_id="owner",
+            job_id="job-expired-key", now=fixture.now, proof=proof))
+
+
+def test_manual_sync_rejects_expired_cookie_proof(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, session_expires=fixture.now - 1)
+    watch = fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=False)
+    with closing(fixture.store.connect()) as db:
+        user = db.execute("SELECT value FROM app_state,json_each(payload) WHERE name='users' AND key='owner'").fetchone()[0]
+        sessions = db.execute("SELECT payload FROM app_state WHERE name='sessions'").fetchone()[0]
+    proof = {"user": user, "token": None, "key": None, "sessions": sessions,
+             "session_id": "session-local"}
+    with pytest.raises(ValueError, match="RESOURCE_NOT_AUTHORIZED"):
+        asyncio.run(D1ManualSyncTransactions(D1ShapedSQLite(fixture.store)).request(
+            resource_kind="watch", resource_id=watch["id"], owner_id="owner",
+            job_id="job-expired-session", now=fixture.now, proof=proof))

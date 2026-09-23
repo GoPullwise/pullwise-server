@@ -6,6 +6,8 @@ from typing import Any
 
 from .product_dto_rules import job_dto
 from .product_repository_access import account_can_read_repository_service
+from .product_job_filters import job_resource_allowed
+from .cloudflare_watch_adapter import _credential_guard
 
 
 class D1ManualSyncTransactions:
@@ -13,7 +15,8 @@ class D1ManualSyncTransactions:
         self.binding = binding
 
     async def request(self, *, resource_kind: str, resource_id: str,
-                      owner_id: str, job_id: str, now: int) -> dict:
+                      owner_id: str, job_id: str, now: int,
+                      proof: dict | None = None) -> dict:
         if (resource_kind not in {"watch", "repository"} or any(not isinstance(value, str) or not value
                 for value in (resource_id, owner_id, job_id))
                 or type(now) is not int or now < 0):
@@ -38,8 +41,35 @@ class D1ManualSyncTransactions:
                       AND d.accessible=1 AND d.valid_until>=?)"""
             resource_params = (resource_id, owner_id, now)
             resource_guard = "EXISTS(" + resource_query + ")"
+        if proof is not None and proof.get("token"):
+            try:
+                scopes = json.loads(proof["key"]["scopes"])
+                restrictions = json.loads(proof["key"]["restrictions"])
+                expires_at = proof["key"]["expires_at"]
+            except (KeyError, TypeError, ValueError):
+                raise ValueError("RESOURCE_NOT_AUTHORIZED") from None
+            required_read = "watches:read" if resource_kind == "watch" else "repositories:read"
+            if (not isinstance(scopes, list) or not {required_read, "sync:write"}.issubset(scopes)
+                    or not isinstance(restrictions, dict)
+                    or expires_at is not None and (type(expires_at) is not int or expires_at < now)
+                    or not job_resource_allowed(job_type=job_type,
+                        resource_id=resource_id, target_repository_id=None,
+                        restrictions=restrictions)):
+                raise ValueError("RESOURCE_NOT_AUTHORIZED")
+        elif proof is not None:
+            try:
+                session = json.loads(proof["sessions"])[proof["session_id"]]
+                expires_at = session["expiresAt"]
+            except (KeyError, TypeError, ValueError):
+                raise ValueError("RESOURCE_NOT_AUTHORIZED") from None
+            if (session.get("userId") != owner_id or type(expires_at) is not int
+                    or expires_at < now):
+                raise ValueError("RESOURCE_NOT_AUTHORIZED")
+        credential_sql, credential_params = _credential_guard(owner_id, proof)
         existing = await self.binding.batch([
-            self.binding.prepare("SELECT u.value AS snapshot FROM app_state a,json_each(a.payload) u WHERE a.name='users' AND u.key=?").bind(owner_id),
+            self.binding.prepare("""SELECT u.value AS snapshot FROM app_state a,json_each(a.payload) u
+                WHERE a.name='users' AND u.key=? AND """ + credential_sql).bind(
+                    owner_id, *credential_params),
             self.binding.prepare(resource_query).bind(*resource_params),
             self.binding.prepare("SELECT * FROM background_jobs WHERE logical_key=? AND state IN ('queued','running','retry_wait')").bind(logical_key),
         ])
@@ -57,12 +87,14 @@ class D1ManualSyncTransactions:
             return job_dto(existing[2].results[0], reused=True)
         await self.binding.batch([
             self.binding.prepare("""INSERT INTO d1_command_guard(ok)
-                VALUES(CASE WHEN EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u
-                    WHERE a.name='users' AND u.key=? AND u.value=?) AND """ + resource_guard + """
+                VALUES(CASE WHEN """ + credential_sql + """
+                    AND EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u
+                        WHERE a.name='users' AND u.key=? AND u.value=?)
+                    AND """ + resource_guard + """
                     AND NOT EXISTS(SELECT 1 FROM background_jobs
                         WHERE logical_key=? AND state IN ('queued','running','retry_wait'))
-                    THEN 1 ELSE 0 END)""").bind(owner_id, account_snapshot,
-                        *resource_params, logical_key),
+                    THEN 1 ELSE 0 END)""").bind(*credential_params,
+                        owner_id, account_snapshot, *resource_params, logical_key),
             self.binding.prepare("""INSERT INTO background_jobs(
                 id,job_type,logical_key,generation,trusted_trigger,requester_id,
                 state,attempt,created_at,updated_at)

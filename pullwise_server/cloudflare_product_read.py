@@ -298,7 +298,8 @@ def _resource_auth_snapshot(binding: Any, headers: Mapping[str, object],
                         and expiry >= now):
                     if proof is not None:
                         proof.update(key=None, sessions=session_rows[0]["payload"],
-                                     user=user_rows[0]["snapshot"], token=None)
+                                     user=user_rows[0]["snapshot"], token=None,
+                                     session_id=session_id)
                     return
         raise ProductReadAuthError(401, "UNAUTHENTICATED", "A session or API key is required.")
 

@@ -2152,3 +2152,15 @@ or request idempotency was enabled.
 The Server CI target plus shared-watch contracts passes **759 tests,
 73 subtests** locally; `sync_server_modules.py --check` and `git diff --check`
 pass.
+
+## Manual sync credential proof seam (2026-09-24 continuation)
+
+The unmounted trusted manual-sync command now accepts a validated Cookie or
+API-key proof. It rejects expired credentials and API keys without resource
+read plus `sync:write` scope or the resource restriction; it CASes the exact
+key/session/account in the D1 enqueue batch. Tests first exposed key/session
+revocation, missing scopes and expired proofs; the focused manual-sync and
+product-read suite passes **53 tests**. The product POST routes and
+idempotency transaction remain unported; no model or provider request ran.
+The expanded local Server target passes **765 tests, 73 subtests** after this
+seam. Remote Server CI remains old run `35848982912` on `7a1ade3`.

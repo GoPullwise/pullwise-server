@@ -222,6 +222,11 @@ revision; pending or incomplete assessment must not silently close an item.
   `sync_repository` with `manual_sync` trigger and no model reservation or
   attempt. Private/shared watches, member sync, request idempotency and HTTP
   authentication remain unmapped for this command.
+  When a caller supplies a Cookie/API-key proof, the trusted command validates
+  its expiry, required read plus `sync:write` scopes and resource restriction,
+  then rechecks the exact key/session/user in the D1 enqueue batch. The
+  authenticated read helper records the concrete session ID for that proof.
+  These checks prepare HTTP composition but do not themselves mount POST sync.
   `GET /api/v1/watches/{id}` is now shared by local REST and the candidate;
   resolve only an unarchived owner watch, apply API-key watchIds restrictions,
   and keep the candidate's identity and watch row in one D1 read snapshot.

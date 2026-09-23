@@ -563,6 +563,13 @@ rejected a missing proof, created one Job after staging it, and retained replay
 across restart with no attempt or added reservation. HTTP request
 authentication/idempotency, member sync and shared/private watches remain
 unported.
+The trusted manual-sync write seam now accepts a validated Cookie/API-key
+proof. It rejects expired session/key records and keys missing the relevant
+resource read scope, `sync:write`, or their resource ID. The D1 write guard
+CASes the exact stored account and current key or session payload so a
+revocation after the read snapshot rolls back enqueue. Focused tests revoked
+both credential types before the batch and observed no Job. This is not yet
+HTTP authentication, request idempotency or a public POST route.
 
 - Full ProductStore async reads and consistent authorization-filtered list/count
   snapshots; no use of a Worker/Container local SQLite file as durable storage.

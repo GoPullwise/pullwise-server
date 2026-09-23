@@ -39,6 +39,10 @@ active resource and logical Job, plus the GitHub App account item and fresh
 installation proof for repository sync, then enqueues a fact-only Job without
 a model attempt or processing reservation. POST sync, request idempotency,
 member sync and private/shared watches remain unported.
+The trusted enqueue accepts a validated Cookie/API-key proof and rechecks the
+exact session/key and account in the D1 write batch. It rejects expired proofs
+and keys without read plus `sync:write` scope or the resource restriction;
+product POST routing and idempotency are still unmounted.
 
 `src/entry.py` calls Server-owned `cloudflare_http_contract.py`. The latter
 requires raw request bytes, checks the 64 KiB bound and signature before D1,
