@@ -85,38 +85,48 @@ class D1AnalysisTransactions:
                                  global_rolling_limit: int) -> dict | None:
         if not isinstance(token, str) or not token:
             raise ValueError("trusted claim token is required")
-        due = await self.binding.prepare("""SELECT job.id FROM background_jobs job
-            JOIN source_records source ON source.source_id=job.source_id
-            JOIN source_contexts context ON context.source_id=job.source_id
-                AND context.context_id=job.context_id
-            JOIN processing_usage_ledger ledger ON ledger.reservation_id=job.reservation_id
-            JOIN account_entitlement_authority authority ON authority.owner_id=job.billing_owner_id
+        due = await self.binding.prepare("""SELECT job.id,
+            EXISTS(SELECT 1 FROM source_records source
+                JOIN source_contexts context ON context.source_id=source.source_id
+                    AND context.context_id=job.context_id
+                JOIN processing_usage_ledger ledger ON ledger.reservation_id=job.reservation_id
+                WHERE source.source_id=job.source_id
+                AND source.processing_mode='model' AND source.lifecycle='active'
+                AND source.latest_version=job.source_version_id
+                AND source.source_revision=job.source_revision
+                AND context.accessible=1 AND context.analysis_enabled=1 AND context.context_stale=0
+                AND context.authorization_valid_until>=?
+                AND context.authorization_revision=job.authorization_revision
+                AND context.configuration_revision=job.configuration_revision
+                AND context.context_version=job.context_version
+                AND context.billing_owner_id=job.billing_owner_id
+                AND ledger.billing_owner_id=job.billing_owner_id AND ledger.state='reserved') AS valid_binding,
+            EXISTS(SELECT 1 FROM account_entitlement_authority authority
+                JOIN processing_usage_ledger ledger ON ledger.reservation_id=job.reservation_id
+                WHERE authority.owner_id=job.billing_owner_id AND authority.dirty=0
+                AND authority.period_start<=? AND authority.valid_until>?
+                AND ledger.period=authority.period) AS account_ready
+            FROM background_jobs job
             LEFT JOIN analysis_claim_owners fairness ON fairness.billing_owner_id=job.billing_owner_id
             WHERE job.job_type='analyze_source' AND job.attempt<3
             AND ((job.state IN ('queued','retry_wait') AND COALESCE(job.next_attempt_at,0)<=?)
                 OR (job.state='running' AND COALESCE(job.claimed_until,0)<=?))
-            AND source.processing_mode='model' AND source.lifecycle='active'
-            AND source.latest_version=job.source_version_id
-            AND source.source_revision=job.source_revision
-            AND context.accessible=1 AND context.analysis_enabled=1 AND context.context_stale=0
-            AND context.authorization_valid_until>=? AND context.authorization_revision=job.authorization_revision
-            AND context.configuration_revision=job.configuration_revision
-            AND context.context_version=job.context_version
-            AND context.billing_owner_id=job.billing_owner_id
-            AND ledger.billing_owner_id=job.billing_owner_id AND ledger.state='reserved'
-            AND ledger.period=authority.period AND authority.dirty=0
-            AND authority.period_start<=? AND authority.valid_until>?
-            ORDER BY COALESCE(fairness.last_claim_order,0),job.rowid LIMIT 1""").bind(
+            ORDER BY COALESCE(fairness.last_claim_order,0),job.rowid LIMIT 16""").bind(
                 now, now, now, now, now).all()
-        rows = due.results
-        if not rows:
-            return None
-        job_id = rows[0]["id"]
-        await self.claim(job_id=job_id, token=token, now=now,
-            global_monthly_limit=global_monthly_limit,
-            owner_rolling_limit=owner_rolling_limit,
-            global_rolling_limit=global_rolling_limit)
-        return {"jobId": job_id, "token": token}
+        for row in due.results:
+            job_id = row["id"]
+            if not row["valid_binding"]:
+                await execute_d1_batch(self.binding,
+                    mapping.terminate_invalid_due_job(job_id=job_id, now=now))
+                continue
+            if not row["account_ready"]:
+                continue
+            await self.claim(job_id=job_id, token=token, now=now,
+                global_monthly_limit=global_monthly_limit,
+                owner_rolling_limit=owner_rolling_limit,
+                global_rolling_limit=global_rolling_limit)
+            return {"jobId": job_id, "token": token}
+        return None
 
     async def claim(self, *, job_id: str, token: str, now: int,
                     global_monthly_limit: int, owner_rolling_limit: int,

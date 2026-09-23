@@ -69,6 +69,7 @@ class Default(WorkerEntrypoint):
                 (SELECT COUNT(*) FROM assessments) AS results,
                 (SELECT COUNT(*) FROM item_versions) AS versions,
                 (SELECT state FROM background_jobs LIMIT 1) AS jobState,
+                (SELECT state FROM processing_usage_ledger WHERE charge_key='charge') AS chargeState,
                 (SELECT attempt FROM background_jobs LIMIT 1) AS jobAttempt,
                 (SELECT next_attempt_at FROM background_jobs LIMIT 1) AS nextAttemptAt,
                 (SELECT revision FROM account_entitlement_authority LIMIT 1) AS accountRevision,
@@ -257,6 +258,8 @@ class Default(WorkerEntrypoint):
                 return Response.json({'committed': False}, status=409)
         elif name == 'edit-parent':
             commands = [("UPDATE source_records SET source_revision=source_revision+1 WHERE source_id='2'", ())]
+        elif name == 'stale-analysis-source':
+            commands = [("UPDATE source_records SET source_revision=source_revision+1 WHERE source_id='1'", ())]
         elif name == 'change-account':
             commands = [("UPDATE app_state SET payload='{}' WHERE name='users'", ())]
         elif name == 'break-reservation':

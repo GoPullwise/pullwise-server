@@ -1180,3 +1180,30 @@ invalidate this revision guarantee, so production Jev and live GitHub ingestion
 remain disabled. The mapped publication still covers one first-result Item;
 source-only/cache replay, full thread projection and release/retry paths remain
 CF2 work. No credentials, payment settings or provider transactions changed.
+
+## D1 stale due-job termination (2026-09-23 continuation)
+
+The async due scan now examines at most 16 owner-fair candidates. A due Job
+whose source, context, authorization or reservation binding is invalid is
+terminally marked superseded, cancelled or blocked; any reserved processing
+unit is released in the same D1 batch. An unexpired running lease is not
+cleaned up. A dirty account projection remains pending refresh rather than
+being treated as a revoked source. The guarded batch rechecks the invalidity,
+due state and bucket balance, so an inconsistent bucket rolls back the Job
+change. The scan can then claim an eligible candidate without a model call.
+
+Test first: two async tests failed while stale Jobs remained queued/running.
+After implementation, `tests/test_cloudflare_analysis_adapter.py` reported
+**11 passed**, and combined with actual-schema mapping tests **39 passed**
+under Python 3.13 with workspace TEMP/TMP. The generated synthetic package
+ran through local Wrangler 4.136.3/workerd and D1 at 127.0.0.1:8796 using
+`.wrangler/server-map-cycle-state`; `verify_server_mapping.py` and its
+`--after-restart` replay passed after a real stop/restart. The process was
+stopped. These are local tests only; no remote Cloudflare runtime, Server
+REST, Creem handler, live GitHub or Jev path was exercised.
+
+The scan limit, account-cycle mismatch, exhausted attempts and concurrent
+selector races need further mapping before calling this a full scheduler.
+Remote Server CI still shows run 35824307016 failing before tests at the
+retired Worker checkout; Web Actions remain empty. Neither repository was
+pushed or deployed in this continuation.

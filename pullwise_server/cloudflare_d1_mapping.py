@@ -418,6 +418,59 @@ def _job_binding(job_id, now):
         AND l.state='reserved')""", (job_id, now))
 
 
+def terminate_invalid_due_job(*, job_id, now):
+    """Discard a due job whose source/context/reservation fence no longer holds."""
+    return [
+        _check("""EXISTS(SELECT 1 FROM background_jobs WHERE id=?
+            AND job_type='analyze_source' AND (
+            (state IN ('queued','retry_wait') AND COALESCE(next_attempt_at,0)<=?)
+            OR (state='running' AND COALESCE(claimed_until,0)<=?)))""",
+            (job_id, now, now)),
+        _check("""NOT EXISTS(SELECT 1 FROM background_jobs j
+            JOIN source_records s ON s.source_id=j.source_id
+            JOIN source_contexts c ON c.source_id=j.source_id AND c.context_id=j.context_id
+            JOIN processing_usage_ledger l ON l.reservation_id=j.reservation_id
+            WHERE j.id=? AND s.processing_mode='model' AND s.lifecycle='active'
+            AND s.latest_version=j.source_version_id AND s.source_revision=j.source_revision
+            AND c.accessible=1 AND c.analysis_enabled=1 AND c.context_stale=0
+            AND c.authorization_valid_until>=? AND c.authorization_revision=j.authorization_revision
+            AND c.configuration_revision=j.configuration_revision AND c.context_version=j.context_version
+            AND c.billing_owner_id=j.billing_owner_id AND l.billing_owner_id=j.billing_owner_id
+            AND l.state='reserved')""", (job_id, now)),
+        ("""UPDATE processing_usage_buckets SET reserved=reserved-1,updated_at=?
+            WHERE (billing_owner_id,period)=(SELECT l.billing_owner_id,l.period
+                FROM background_jobs j JOIN processing_usage_ledger l
+                ON l.reservation_id=j.reservation_id WHERE j.id=? AND l.state='reserved')
+            AND metric='intelligent_processing' AND reserved>=1""", (now, job_id)),
+        _check("""changes()=1 OR NOT EXISTS(SELECT 1 FROM background_jobs j
+            JOIN processing_usage_ledger l ON l.reservation_id=j.reservation_id
+            WHERE j.id=? AND l.state='reserved')""", (job_id,)),
+        ("""UPDATE processing_usage_ledger SET state='released',finished_at=?
+            WHERE reservation_id=(SELECT reservation_id FROM background_jobs WHERE id=?)
+            AND state='reserved'""", (now, job_id)),
+        _check("""changes()=1 OR NOT EXISTS(SELECT 1 FROM background_jobs j
+            JOIN processing_usage_ledger l ON l.reservation_id=j.reservation_id
+            WHERE j.id=? AND l.state='reserved')""", (job_id,)),
+        ("""UPDATE background_jobs SET state=CASE
+            WHEN NOT EXISTS(SELECT 1 FROM source_records s WHERE s.source_id=background_jobs.source_id
+                AND s.processing_mode='model' AND s.lifecycle='active'
+                AND s.latest_version=background_jobs.source_version_id
+                AND s.source_revision=background_jobs.source_revision)
+              OR EXISTS(SELECT 1 FROM source_contexts c
+                WHERE c.source_id=background_jobs.source_id AND c.context_id=background_jobs.context_id
+                AND (c.context_version<>background_jobs.context_version
+                    OR c.configuration_revision<>background_jobs.configuration_revision))
+                THEN 'superseded'
+            WHEN EXISTS(SELECT 1 FROM source_contexts c
+                WHERE c.source_id=background_jobs.source_id AND c.context_id=background_jobs.context_id
+                AND c.analysis_enabled=0) THEN 'cancelled'
+            ELSE 'blocked' END,
+            claim_token=NULL,claimed_until=NULL,next_attempt_at=NULL,updated_at=? WHERE id=?""",
+            (now, job_id)), _changed(),
+        ("DELETE FROM d1_command_guard", ()),
+    ]
+
+
 def claim(*, job_id, token, now, account_snapshot, account_revision, owner_monthly_limit,
           global_monthly_limit, owner_rolling_limit, global_rolling_limit):
     period = datetime.fromtimestamp(now, timezone.utc).strftime("%Y-%m")

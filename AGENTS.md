@@ -62,11 +62,13 @@ revision; pending or incomplete assessment must not silently close an item.
   source context throttled without creating a job. Existing-generation reuse,
   supersession, stale-admission release and complete due-job lifecycle still
   need mapping before a real Cloudflare scheduler can run.
-- `cloudflare_analysis_adapter.claim_due_analysis` reads one due eligible Job
-  ordered by persisted owner fairness, then rechecks it in the claim batch.
-  The local probe's scheduled handler invokes it with a deterministic clock
-  and no model call. Ineligible/stale queued Jobs are currently skipped rather
-  than terminally invalidated, so this is not a complete scheduler.
+- `cloudflare_analysis_adapter.claim_due_analysis` scans at most 16 due Jobs
+  in persisted owner-fair order. It atomically terminates an invalid
+  source/context/reservation binding and releases any reserved usage before
+  claiming an eligible Job; a live running lease and an account projection
+  awaiting refresh stay untouched. The local scheduled probe calls no model.
+  Account-cycle mismatch, exhausted-attempt cleanup, concurrent selector races
+  and complete scheduler composition still require mapping.
 - The real Creem handler mutates in-memory users, billingEvents and pending
   updates under `STATE_LOCK`; `persist_state` later flushes them through
   `db.save_state` and `state_for_storage`. The probe event batch is not this

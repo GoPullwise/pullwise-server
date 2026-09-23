@@ -135,3 +135,62 @@ def test_async_due_selection_obeys_persisted_retry_deadline(tmp_path):
     assert asyncio.run(adapter.claim_due_analysis(now=fixture.now + 39, token="early", **limits)) is None
     claimed = asyncio.run(adapter.claim_due_analysis(now=fixture.now + 40, token="due-two", **limits))
     assert claimed == {"jobId": job["id"], "token": "due-two"}
+
+
+def test_async_due_selection_terminates_stale_job_and_releases_reservation(tmp_path):
+    fixture, job, _ = seed(tmp_path / "domain.db")
+    adapter = D1AnalysisTransactions(D1ShapedSQLite(fixture.store))
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE source_records SET source_revision=source_revision+1 WHERE source_id='1'")
+    limits = dict(global_monthly_limit=10, owner_rolling_limit=6, global_rolling_limit=60)
+    assert asyncio.run(adapter.claim_due_analysis(now=fixture.now, token="stale", **limits)) is None
+    with closing(fixture.store.connect()) as db:
+        assert tuple(db.execute("SELECT state,claim_token FROM background_jobs WHERE id=?",
+            (job["id"],)).fetchone()) == ("superseded", None)
+        assert db.execute("SELECT state FROM processing_usage_ledger WHERE charge_key='charge'").fetchone()[0] == "released"
+        assert db.execute("SELECT reserved FROM processing_usage_buckets WHERE billing_owner_id='owner'").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM provider_attempts").fetchone()[0] == 0
+    assert asyncio.run(adapter.claim_due_analysis(now=fixture.now, token="repeat", **limits)) is None
+
+
+def test_async_due_selection_keeps_live_claim_until_lease_expires(tmp_path):
+    fixture, job, _ = seed(tmp_path / "domain.db")
+    adapter = D1AnalysisTransactions(D1ShapedSQLite(fixture.store))
+    limits = dict(global_monthly_limit=10, owner_rolling_limit=6, global_rolling_limit=60)
+    assert asyncio.run(adapter.claim_due_analysis(now=fixture.now, token="live", **limits))
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE source_records SET source_revision=source_revision+1 WHERE source_id='1'")
+    assert asyncio.run(adapter.claim_due_analysis(now=fixture.now + 1, token="early", **limits)) is None
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT state FROM background_jobs WHERE id=?", (job["id"],)).fetchone()[0] == "running"
+        assert db.execute("SELECT state FROM processing_usage_ledger WHERE charge_key='charge'").fetchone()[0] == "reserved"
+    assert asyncio.run(adapter.claim_due_analysis(now=fixture.now + 120, token="expired", **limits)) is None
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT state FROM background_jobs WHERE id=?", (job["id"],)).fetchone()[0] == "superseded"
+        assert db.execute("SELECT state FROM processing_usage_ledger WHERE charge_key='charge'").fetchone()[0] == "released"
+
+
+def test_async_due_invalidation_rolls_back_if_reservation_bucket_is_inconsistent(tmp_path):
+    fixture, job, _ = seed(tmp_path / "domain.db")
+    adapter = D1AnalysisTransactions(D1ShapedSQLite(fixture.store))
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE source_records SET source_revision=source_revision+1 WHERE source_id='1'")
+        db.execute("UPDATE processing_usage_buckets SET reserved=0 WHERE billing_owner_id='owner'")
+    with pytest.raises(sqlite3.IntegrityError):
+        asyncio.run(adapter.claim_due_analysis(now=fixture.now, token="inconsistent",
+            global_monthly_limit=10, owner_rolling_limit=6, global_rolling_limit=60))
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT state FROM background_jobs WHERE id=?", (job["id"],)).fetchone()[0] == "queued"
+        assert db.execute("SELECT state FROM processing_usage_ledger WHERE charge_key='charge'").fetchone()[0] == "reserved"
+
+
+def test_async_due_invalidation_cancels_disabled_analysis(tmp_path):
+    fixture, job, _ = seed(tmp_path / "domain.db")
+    adapter = D1AnalysisTransactions(D1ShapedSQLite(fixture.store))
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE source_contexts SET analysis_enabled=0 WHERE source_id='1'")
+    assert asyncio.run(adapter.claim_due_analysis(now=fixture.now, token="disabled",
+        global_monthly_limit=10, owner_rolling_limit=6, global_rolling_limit=60)) is None
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT state FROM background_jobs WHERE id=?", (job["id"],)).fetchone()[0] == "cancelled"
+        assert db.execute("SELECT state FROM processing_usage_ledger WHERE charge_key='charge'").fetchone()[0] == "released"

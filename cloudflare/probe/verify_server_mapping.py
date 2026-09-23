@@ -58,6 +58,13 @@ def main():
     assert scheduled() == 200
     assert call("state", "GET")[1]["attempts"] == 1
     assert call("reset")[0] == 200
+    assert call("stale-analysis-source")[0] == 200
+    assert call("schedule-enable")[0] == 200
+    assert scheduled() == 200
+    state = call("state", "GET")[1]
+    assert state["jobState"] == "superseded" and state["chargeState"] == "released", state
+    assert state["reserved"] == state["attempts"] == 0, state
+    assert call("reset")[0] == 200
     with ThreadPoolExecutor(max_workers=2) as pool:
         statuses = list(pool.map(lambda _: call("claim")[0], range(2)))
     assert sorted(statuses) == [200, 409], statuses

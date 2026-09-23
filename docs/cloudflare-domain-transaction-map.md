@@ -115,14 +115,19 @@ reservation and marks the context throttled in that same batch. Generation
   reuse, supersession, cancellation/revocation and stale eligibility still
   require target-runtime mapping.
 
-The Server async adapter now selects one due, currently eligible analysis Job
-by durable owner claim order and insertion order, then runs the guarded claim
-batch. The isolated Python Worker's actual `scheduled` handler can wake this
+The Server async adapter scans due analysis Jobs by durable owner claim order
+and insertion order, then runs the guarded claim batch for one eligible Job.
+The isolated Python Worker's actual `scheduled` handler can wake this
 path behind a local probe flag. Local D1 observed one attempt on the first
 wake, no duplicate attempt on a second wake, and state persistence after a
-real process restart. It never calls Jev. Stale jobs are filtered from this
-selection but not yet terminally invalidated/released; full scheduler fairness,
-batch bounds and response-loss execution remain CF2 work.
+real process restart. It never calls Jev. The due scan now inspects at most 16
+owner-fair candidates and atomically marks stale source/context/reservation
+bindings superseded, cancelled or blocked, releasing any reserved usage in the
+same D1 batch. Live running leases and temporarily dirty account projections
+remain untouched. SQLite tests covered rollback on an inconsistent bucket; the
+local scheduled workerd/D1 probe covered stale source release and restart.
+Account-cycle mismatch, exhausted attempts, selector races, complete scheduler
+fairness, batch bounds and response-loss execution remain CF2 work.
 
 The command builders now live in Server `cloudflare_d1_mapping.py`, with
 `cloudflare_account_adapter.py` providing async snapshot reads and one D1
