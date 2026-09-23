@@ -81,11 +81,20 @@ revision; pending or incomplete assessment must not silently close an item.
   updates under `STATE_LOCK`; `persist_state` later flushes them through
   `db.save_state` and `state_for_storage`. The probe event batch is not this
   path. An async D1 adapter must cover every account writer with revision
-  changes and preserve encrypted fields, pending and late events. Its billing
-  reducer also calls synchronous `ensure_billing_quota_bucket_for_user`;
-  extract or inject that effect when reusing the existing lifecycle on D1.
+  changes and preserve encrypted fields, pending and late events.
+  `billing_account_rules.py` now owns the pure account/event/history decision;
+  the existing handler applies its output and retains the local quota write.
+  `D1AccountTransactions.settle_webhook_receipt` calculates from the stored
+  encrypted account JSON without decrypting untouched token fields, checks
+  receipt ID/owner/revision/content, and atomically stores account/event/receipt.
+  Pending-event association, the real key/HTTP handler and every other account
+  writer still need D1 composition.
   ACK must follow durable receipt persistence, unlike the current HTTP
   response-before-finally flush order.
+- On D1 entitlement refresh, update an existing current-period processing
+  bucket's limit only when it changed; preserve used/reserved counts and do
+  not write the whole backlog. A new period bucket remains created on first
+  reservation. An upgrade's saved usage must not show the old limit.
 - `product_api._store()` constructs a synchronous SQLite `ProductStore` for
   each product-v1 route; some reads also call `db` directly and authenticate
   through the in-memory users map. Cloudflare REST adaptation must map all

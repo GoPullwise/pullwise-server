@@ -44,6 +44,16 @@ analysis command can run, the projection must correspond to the current durable
 payment/account revision and effective period; stale or absent projection must
 deny admission, not reuse the old paid limit.
 
+The existing account/history decision is now available from pure
+`billing_account_rules.reduce_billing_update` with a fixed processedAt. The
+legacy handler uses that same decision and keeps its local quota write. The
+async D1 adapter can settle one persisted receipt for a matched owner using
+the storage-form user JSON, retaining already encrypted token fields without
+opening the key. It reads the receipt update, account revision and event/pending
+snapshots, then fences receipt content, owner account snapshot, revision and
+whole-map CAS in one D1 batch. A mismatched owner or changed receipt cannot
+settle. This is local Worker evidence, not the real HTTP/Creem runtime.
+
 The finite local mapping now has `account_entitlement_authority` and
 `d1_claim_authority`. A previously accepted synthetic event updates the matching
 user entry and billingEvents entry, increments the owner revision, and marks the
@@ -166,6 +176,9 @@ isolated Worker has no copy of the tariff or monthly-cycle rules. Local tests
 cover paid expiry to free, anchored monthly cycles, an upgrade in the same
 period without clearing used/reserved counts, dirty projection and A-B-A
 revision fencing. This is still a fixture, not an account writer.
+Refresh also updates an already existing current-period processing bucket's
+limit only when it differs, leaving used/reserved intact; a new period bucket
+is still created on first reservation. This avoids an extra no-op D1 write.
 
 The real webhook verifies the signature and delegates to
 `apply_billing_update`. It changes in-memory USERS, BILLING_EVENTS and

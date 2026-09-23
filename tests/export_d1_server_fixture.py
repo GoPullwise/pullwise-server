@@ -36,7 +36,7 @@ def main():
         package = output.parent / "pullwise_server"
         package.mkdir(exist_ok=True)
         (package / "__init__.py").write_text("", encoding="utf-8")
-        for name in ("account_cycle_rules", "product_entitlement_rules", "cloudflare_d1_batch",
+        for name in ("account_cycle_rules", "product_entitlement_rules", "billing_account_rules", "cloudflare_d1_batch",
                      "cloudflare_d1_mapping", "cloudflare_account_adapter", "cloudflare_analysis_adapter",
                      "creem_signature", "creem_event_rules", "cloudflare_webhook_receipts"):
             source = Path(__file__).parents[1] / "pullwise_server" / f"{name}.py"

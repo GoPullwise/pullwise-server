@@ -181,14 +181,17 @@ def stage_billing_reconciliation(*, owner_id, expected_revision, account_snapsho
     ]
 
 
-def apply_webhook_receipt(*, receipt_event_id, owner_id, expected_revision,
+def apply_webhook_receipt(*, receipt_event_id, expected_update_json, owner_id, expected_revision,
                           account_snapshot, next_account_json, expected_events_json,
                           next_events_json, expected_pending_json, next_pending_json, now):
     """Settle a pending verified receipt with its trusted billing state change."""
     before_events = json.loads(expected_events_json)
     after_events = json.loads(next_events_json)
+    receipt_update = json.loads(expected_update_json)
     if (not isinstance(receipt_event_id, str) or not receipt_event_id
             or not isinstance(before_events, dict) or not isinstance(after_events, dict)
+            or not isinstance(receipt_update, dict)
+            or receipt_update.get("eventId") != receipt_event_id
             or receipt_event_id in before_events or receipt_event_id not in after_events):
         raise ValueError("receipt must add its billing event record")
     state_commands = stage_billing_reconciliation(
@@ -198,7 +201,8 @@ def apply_webhook_receipt(*, receipt_event_id, owner_id, expected_revision,
         expected_pending_json=expected_pending_json, next_pending_json=next_pending_json, now=now)
     return [
         _check("""EXISTS(SELECT 1 FROM billing_webhook_receipts
-            WHERE event_id=? AND state='pending')""", (receipt_event_id,)),
+            WHERE event_id=? AND update_json=? AND state='pending')""",
+            (receipt_event_id, expected_update_json)),
         *state_commands[:-1],
         ("""UPDATE billing_webhook_receipts SET state='applied'
             WHERE event_id=? AND state='pending'""", (receipt_event_id,)), _changed(),
@@ -250,6 +254,10 @@ def refresh_account_entitlement(*, owner_id, expected_revision, account_snapshot
             period_start=?,monthly_processing_limit=?,valid_until=?,dirty=0
             WHERE owner_id=? AND revision=?""",
             (plan, period, period_start, monthly_processing_limit, valid_until, owner_id, expected_revision)), _changed(),
+        ("""UPDATE processing_usage_buckets SET limit_value=?,updated_at=?
+            WHERE billing_owner_id=? AND period=? AND metric='intelligent_processing'
+            AND limit_value<>?""",
+            (monthly_processing_limit, now, owner_id, period, monthly_processing_limit)),
         ("DELETE FROM d1_command_guard", ()),
     ]
 

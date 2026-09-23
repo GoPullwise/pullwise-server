@@ -5,9 +5,10 @@ All next-account JSON arguments must already be state_for_storage output.
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
-from . import cloudflare_d1_mapping as mapping
+from . import billing_account_rules, cloudflare_d1_mapping as mapping
 from .cloudflare_d1_batch import execute_d1_batch
 
 
@@ -70,16 +71,59 @@ class D1AccountTransactions:
                                     expected_revision: int, next_account_json: str,
                                     next_events_json: str, next_pending_json: str,
                                     now: int) -> Any:
+        receipt = await self.binding.prepare("""SELECT update_json FROM billing_webhook_receipts
+            WHERE event_id=? AND state='pending'""").bind(receipt_event_id).first()
+        if not receipt:
+            raise ValueError("pending webhook receipt is missing")
         account = await self._snapshot(owner_id)
         events = await self._state_snapshot("billingEvents")
         pending = await self._state_snapshot("billingPendingUpdates")
         commands = mapping.apply_webhook_receipt(
-            receipt_event_id=receipt_event_id, owner_id=owner_id,
+            receipt_event_id=receipt_event_id,
+            expected_update_json=receipt["update_json"], owner_id=owner_id,
             expected_revision=expected_revision, account_snapshot=account,
             next_account_json=next_account_json, expected_events_json=events,
             next_events_json=next_events_json, expected_pending_json=pending,
             next_pending_json=next_pending_json, now=now)
         return await execute_d1_batch(self.binding, commands)
+
+    async def settle_webhook_receipt(self, *, receipt_event_id: str,
+                                     owner_id: str, now: int) -> dict:
+        receipt = await self.binding.prepare("""SELECT update_json FROM billing_webhook_receipts
+            WHERE event_id=? AND state='pending'""").bind(receipt_event_id).first()
+        account = await self.binding.prepare("""SELECT u.value AS snapshot,
+            authority.revision AS revision FROM account_entitlement_authority authority
+            JOIN app_state a ON a.name='users'
+            JOIN json_each(a.payload) u ON u.key=authority.owner_id
+            WHERE authority.owner_id=?""").bind(owner_id).first()
+        if not receipt or not account:
+            raise ValueError("pending receipt or persisted account is missing")
+        update = json.loads(receipt["update_json"])
+        stored_user = json.loads(account["snapshot"])
+        events = json.loads(await self._state_snapshot("billingEvents"))
+        pending = json.loads(await self._state_snapshot("billingPendingUpdates"))
+        if (not isinstance(update, dict) or update.get("eventId") != receipt_event_id
+                or not isinstance(events, dict) or receipt_event_id in events
+                or not isinstance(pending, list)):
+            raise ValueError("receipt is not eligible for account settlement")
+        if not billing_account_rules.billing_update_matches_user(update, stored_user):
+            raise ValueError("receipt owner does not match persisted account")
+        decision = billing_account_rules.reduce_billing_update(stored_user, update,
+            processed_at=now)
+        if decision["eventRecord"] is None:
+            raise ValueError("receipt has no billing event record")
+        next_events = billing_account_rules.with_billing_event(
+            events, receipt_event_id, decision["eventRecord"])
+        await self.apply_webhook_receipt(receipt_event_id=receipt_event_id,
+            owner_id=owner_id, expected_revision=account["revision"],
+            next_account_json=json.dumps(decision["user"], ensure_ascii=False,
+                allow_nan=False, separators=(",", ":")),
+            next_events_json=json.dumps(next_events, ensure_ascii=False,
+                allow_nan=False, separators=(",", ":")),
+            next_pending_json=json.dumps(pending, ensure_ascii=False,
+                allow_nan=False, separators=(",", ":")), now=now)
+        return {"applied": decision["applied"], "ownerId": owner_id,
+                "eventId": receipt_event_id}
 
     async def refresh_account_entitlement(self, *, owner_id: str,
                                           expected_revision: int, now: int) -> Any:

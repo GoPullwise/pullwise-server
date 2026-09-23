@@ -29,6 +29,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse, urlunparse
 
 from . import billing, checkout, db, deployment_status, fix_workflow, github_auth, logging_config, quota, review, scan_logging, system_config, system_metrics
+from .billing_account_rules import MAX_BILLING_EVENT_RECORDS
 from ._app_imports import sync_compat_globals as _sync_compat_globals
 
 logger = logging.getLogger(__name__)
@@ -332,7 +333,6 @@ PREVIEW_SCAN_LOCKS: dict[str, PreviewScanLockEntry] = {}
 PREVIEW_SCAN_LOCKS_GUARD = threading.Lock()
 AUDIT_BUNDLE_CACHE_LOCKS: dict[str, AuditBundleCacheLockEntry] = {}
 AUDIT_BUNDLE_CACHE_LOCKS_GUARD = threading.Lock()
-MAX_BILLING_EVENT_RECORDS = 5000
 MAX_BILLING_PENDING_UPDATES = 1000
 
 

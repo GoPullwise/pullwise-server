@@ -11,6 +11,7 @@ import pytest
 from pullwise_server.cloudflare_webhook_receipts import D1WebhookReceipts
 from pullwise_server import billing
 from pullwise_server.cloudflare_account_adapter import D1AccountTransactions
+from pullwise_server import creem_event_rules
 from test_cloudflare_account_adapter import D1ShapedSQLite
 from test_cloudflare_server_mapping import seed, mapping, execute
 
@@ -93,6 +94,75 @@ def test_signed_creem_event_skips_unsupported_and_never_normalizes_bad_signature
         assert db.execute("SELECT COUNT(*) FROM billing_webhook_receipts").fetchone()[0] == 0
 
 
+def test_receipt_settlement_uses_persisted_account_without_decrypting_other_fields(tmp_path):
+    fixture, _, frozen = seed(tmp_path / "domain.db")
+    binding = D1ShapedSQLite(fixture.store)
+    raw = json.dumps({"id": "evt-settle", "eventType": "subscription.canceled",
+        "created_at": fixture.now * 1000, "object": {"id": "sub-fixture",
+            "metadata": {"userId": "owner"}}}, separators=(",", ":")).encode()
+    signature = hmac.new(b"synthetic-secret", raw, hashlib.sha256).hexdigest()
+    asyncio.run(D1WebhookReceipts(binding).record_signed_creem_event(
+        raw_body=raw, signature=signature, secret="synthetic-secret",
+        normalize_event=lambda event: creem_event_rules.billing_update_from_creem_event(
+            event, {"pro": (), "max": ()}), now=fixture.now))
+    asyncio.run(D1AccountTransactions(binding).settle_webhook_receipt(
+        receipt_event_id="evt-settle", owner_id="owner", now=fixture.now))
+    with closing(fixture.store.connect()) as db:
+        stored = json.loads(db.execute("SELECT value FROM app_state,json_each(payload) "
+            "WHERE name='users' AND key='owner'").fetchone()[0])
+        assert stored["githubAccessToken"] == json.loads(frozen)["githubAccessToken"]
+        assert stored["githubIdentities"] == json.loads(frozen)["githubIdentities"]
+        assert stored["billing"]["status"] == "canceled"
+        events = json.loads(db.execute("SELECT payload FROM app_state WHERE name='billingEvents'").fetchone()[0])
+        assert events["evt-settle"]["applied"] is True
+        assert tuple(db.execute("SELECT revision,dirty FROM account_entitlement_authority").fetchone()) == (2, 1)
+        assert db.execute("SELECT state FROM billing_webhook_receipts WHERE event_id='evt-settle'").fetchone()[0] == "applied"
+
+
+def test_receipt_settlement_rejects_changed_receipt_between_read_and_batch(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    binding = D1ShapedSQLite(fixture.store)
+    raw = b'{"id":"evt-race","eventType":"subscription.canceled"}'
+    signature = hmac.new(b"synthetic-secret", raw, hashlib.sha256).hexdigest()
+    asyncio.run(D1WebhookReceipts(binding).record_signed_update(
+        raw_body=raw, signature=signature, secret="synthetic-secret",
+        normalized_update={"eventId": "evt-race", "userId": "owner", "status": "canceled",
+            "subscriptionId": "sub-fixture", "eventCreated": fixture.now}, now=fixture.now))
+
+    def change_receipt():
+        binding.before_batch = None
+        with fixture.store._immediate() as db:
+            db.execute("UPDATE billing_webhook_receipts SET update_json=? WHERE event_id='evt-race'",
+                ('{"eventId":"evt-race","status":"active"}',))
+
+    binding.before_batch = change_receipt
+    with pytest.raises(sqlite3.IntegrityError):
+        asyncio.run(D1AccountTransactions(binding).settle_webhook_receipt(
+            receipt_event_id="evt-race", owner_id="owner", now=fixture.now))
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT state FROM billing_webhook_receipts WHERE event_id='evt-race'").fetchone()[0] == "pending"
+        assert db.execute("SELECT revision FROM account_entitlement_authority").fetchone()[0] == 1
+        assert db.execute("SELECT state FROM processing_usage_ledger WHERE charge_key='charge'").fetchone()[0] == "reserved"
+
+
+def test_receipt_settlement_rejects_unrelated_billing_owner(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    binding = D1ShapedSQLite(fixture.store)
+    raw = b'{"id":"evt-other-owner","eventType":"subscription.canceled"}'
+    signature = hmac.new(b"synthetic-secret", raw, hashlib.sha256).hexdigest()
+    asyncio.run(D1WebhookReceipts(binding).record_signed_update(
+        raw_body=raw, signature=signature, secret="synthetic-secret",
+        normalized_update={"eventId": "evt-other-owner", "userId": "elsewhere",
+            "subscriptionId": "other-sub", "customerId": "other-customer",
+            "status": "canceled", "eventCreated": fixture.now}, now=fixture.now))
+    with pytest.raises(ValueError, match="owner"):
+        asyncio.run(D1AccountTransactions(binding).settle_webhook_receipt(
+            receipt_event_id="evt-other-owner", owner_id="owner", now=fixture.now))
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT state FROM billing_webhook_receipts WHERE event_id='evt-other-owner'").fetchone()[0] == "pending"
+        assert db.execute("SELECT revision FROM account_entitlement_authority").fetchone()[0] == 1
+
+
 def test_applying_receipt_and_account_projection_dirtiness_is_atomic(tmp_path):
     fixture, _, frozen = seed(tmp_path / "domain.db")
     secret = "synthetic-secret"
@@ -102,11 +172,13 @@ def test_applying_receipt_and_account_projection_dirtiness_is_atomic(tmp_path):
         raw_body=raw, signature=signature, secret=secret,
         normalized_update={"eventId": "evt-1"}, now=fixture.now))
     args = dict(owner_id="owner", expected_revision=1, account_snapshot=frozen,
+        expected_update_json='{"eventId":"evt-1"}',
         next_account_json=frozen, expected_events_json='{"event_fixture":{"status":"processed"}}',
         next_events_json='{"event_fixture":{"status":"processed"},"evt-1":{"applied":true}}',
         expected_pending_json='[]', next_pending_json='[]', now=fixture.now)
     with pytest.raises(sqlite3.IntegrityError):
         execute(fixture.store, mapping().apply_webhook_receipt(**{**args,
+            "expected_update_json": '{"eventId":"missing"}',
             "next_events_json": '{"event_fixture":{"status":"processed"},"missing":{"applied":true}}'},
             receipt_event_id="missing"))
     with closing(fixture.store.connect()) as db:

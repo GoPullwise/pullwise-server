@@ -11,7 +11,7 @@ import unittest
 from http import HTTPStatus
 from unittest.mock import Mock, patch
 
-from pullwise_server import app, billing, system_config
+from pullwise_server import app, billing, billing_account_rules, system_config
 
 
 def creem_product(product_id: str, *, price: int, period: str) -> dict:
@@ -1296,7 +1296,7 @@ class BillingRoutesTest(unittest.TestCase):
         handler = HandlerHarness()
         older_reached_write_path = threading.Event()
         release_older = threading.Event()
-        original_billing_update_text = app.billing_update_text
+        original_billing_update_text = billing_account_rules.billing_update_text
 
         def pausing_billing_update_text(value):
             if (
@@ -1329,7 +1329,7 @@ class BillingRoutesTest(unittest.TestCase):
             "eventCreated": 200,
         }
 
-        with patch.object(app, "billing_update_text", side_effect=pausing_billing_update_text):
+        with patch.object(billing_account_rules, "billing_update_text", side_effect=pausing_billing_update_text):
             older_thread = threading.Thread(
                 target=app.PullwiseHandler.apply_billing_update,
                 args=(handler, older_update),

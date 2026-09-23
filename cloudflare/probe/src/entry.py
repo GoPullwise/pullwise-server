@@ -131,6 +131,25 @@ class Default(WorkerEntrypoint):
                 return Response.json({'committed': True})
             except Exception:
                 return Response.json({'committed': False}, status=409)
+        elif name == 'upgrade-max':
+            account = json.loads(DATA['claim']['account_snapshot'])
+            changed = json.dumps(dict(account, billing=dict(account['billing'], plan='max')),
+                separators=(',', ':'))
+            try:
+                await D1AccountTransactions(self.env.DB).stage_account_event(
+                    owner_id='owner', expected_revision=1, next_account_json=changed,
+                    event_id='upgrade-max', event_record_json='{"applied":true}',
+                    now=DATA['claim']['now'])
+                return Response.json({'committed': True})
+            except Exception:
+                return Response.json({'committed': False}, status=409)
+        elif name == 'refresh-upgrade':
+            try:
+                await D1AccountTransactions(self.env.DB).refresh_account_entitlement(
+                    owner_id='owner', expected_revision=2, now=DATA['claim']['now'])
+                return Response.json({'committed': True})
+            except Exception:
+                return Response.json({'committed': False}, status=409)
         elif name in {'account-write-a', 'account-write-b'}:
             account = json.loads(DATA['claim']['account_snapshot'])
             changed = json.dumps(dict(account, githubLogin='renamed'), separators=(',', ':'))
@@ -226,11 +245,8 @@ class Default(WorkerEntrypoint):
                 return Response.json({'committed': False}, status=409)
         elif name == 'webhook-apply':
             try:
-                await D1AccountTransactions(self.env.DB).apply_webhook_receipt(
-                    receipt_event_id='evt-local', owner_id='owner', expected_revision=1,
-                    next_account_json=DATA['claim']['account_snapshot'],
-                    next_events_json='{"event_fixture":{"status":"processed"},"evt-local":{"applied":true}}',
-                    next_pending_json='[]', now=DATA['claim']['now'])
+                await D1AccountTransactions(self.env.DB).settle_webhook_receipt(
+                    receipt_event_id='evt-local', owner_id='owner', now=DATA['claim']['now'])
                 return Response.json({'committed': True})
             except Exception:
                 return Response.json({'committed': False}, status=409)

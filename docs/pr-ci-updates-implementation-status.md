@@ -1293,3 +1293,33 @@ remote schedules were empty, including `pullwise-web`, `pullwise-admin` and
 the separately stopped `gamelens-jobs-staging`. No remote schedule was changed
 or enabled. Real Creem handler/key binding, account settlement and Server REST
 remain unconnected.
+
+## Pure account decision and guarded receipt settlement (2026-09-23 continuation)
+
+Extracted the existing Creem account, subscription-history and stale-event
+decision into `billing_account_rules.py`. It takes a stored account snapshot,
+normalized update and fixed processedAt; it returns a new account, event
+record and quota-refresh instruction without touching globals or SQLite.
+The existing handler now applies this same decision and performs its local
+quota write. A concurrency test was retargeted to the pure decision seam;
+the old/new event ordering remains protected by `STATE_LOCK`.
+
+`D1AccountTransactions.settle_webhook_receipt` reads a pending signed receipt,
+stored user JSON, owner revision, event map and pending list. It rejects an
+unrelated owner and duplicate event, computes the account decision without
+decrypting untouched token fields, and commits user/event/pending snapshots,
+owner revision and receipt state in one guarded batch. The receipt's exact
+`update_json` is rechecked inside that batch. A changed receipt or account
+snapshot rolls back all writes. The local Worker probe now executes this
+settlement using a synthetic signed event, not a fabricated next-account
+payload. Pending event association and the real HTTP/secret boundary remain.
+
+Entitlement refresh now updates an existing current-period processing bucket
+only when its limit changes; used/reserved counts remain intact. The upgrade
+test failed on the old 5,000 limit and passes with 25,000. Local workerd/D1
+`verify_server_mapping.py` passed with a separate upgrade case, followed by
+a real process restart and passing `--after-restart` replay. No cron is
+configured, no remote D1 was written, and the owned process was stopped.
+The selected billing, entitlement and D1 regression passed **150 tests,
+15 subtests**. Server remote CI remains at the retired Worker checkout
+failure before tests; this continuation was not pushed or deployed.

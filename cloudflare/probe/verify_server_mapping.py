@@ -101,6 +101,11 @@ def main():
     assert state["jobCount"] == 1 and state["reserved"] == 1, state
     assert state["secondLedgerState"] == "released" and state["thirdSourceStatus"] == "throttled", state
     assert call("reset")[0] == 200
+    assert call("upgrade-max")[0] == 200
+    assert call("refresh-upgrade")[0] == 200
+    state = call("state", "GET")[1]
+    assert state["limitValue"] == 25000 and state["reserved"] == 1, state
+    assert call("reset")[0] == 200
     assert call("claim")[0] == 200
     status, reuse = call("reserve-charge")
     assert status == 200 and reuse["reservation"]["reused"] is True, reuse

@@ -383,6 +383,25 @@ def test_first_d1_reservation_uses_projected_limit_without_resetting_usage(tmp_p
         assert tuple(db.execute("SELECT used,reserved FROM processing_usage_buckets WHERE billing_owner_id='owner'").fetchone()) == (3, 2)
 
 
+def test_entitlement_refresh_updates_existing_bucket_limit_without_resetting_counts(tmp_path):
+    m = mapping()
+    f, _, frozen = seed(tmp_path / "domain.db")
+    with f.store._immediate() as db:
+        db.execute("UPDATE processing_usage_buckets SET used=3 WHERE billing_owner_id='owner'")
+    changed = json.dumps({**json.loads(frozen), "billing": {**json.loads(frozen)["billing"],
+        "plan": "max"}}, separators=(",", ":"))
+    execute(f.store, m.stage_account_event(owner_id="owner", expected_revision=1,
+        account_snapshot=frozen, next_account_json=changed, event_id="upgrade-limit",
+        event_record_json='{"applied":true}', now=f.now))
+    execute(f.store, m.refresh_account_entitlement(owner_id="owner", expected_revision=2,
+        account_snapshot=changed, now=f.now))
+    with closing(f.store.connect()) as db:
+        bucket = db.execute("SELECT used,reserved,limit_value FROM processing_usage_buckets "
+            "WHERE billing_owner_id='owner'").fetchone()
+        assert tuple(bucket) == (3, 1, 25000)
+        assert db.execute("SELECT COUNT(*) FROM processing_usage_ledger").fetchone()[0] == 1
+
+
 @pytest.mark.parametrize("fault", ["quota", "dirty", "stale_snapshot"])
 def test_first_d1_reservation_rejection_has_no_partial_ledger_or_usage(tmp_path, fault):
     m = mapping()

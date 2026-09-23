@@ -8,49 +8,14 @@ from ._app_imports import import_compat_globals as _import_compat_globals
 _import_compat_globals(vars(_previous_app_part), globals())
 del _import_compat_globals, _previous_app_part
 
-MAX_BILLING_SUBSCRIPTION_RECORDS = 25
-MAX_BILLING_SUBSCRIPTION_EVENTS = 100
+from . import billing_account_rules as billing_rules
+from .billing_account_rules import (
+    billing_event_id, billing_update_text, billing_update_scalar,
+    billing_update_bool, billing_event_created, billing_update_matches_user,
+)
 
-
-def billing_event_id(update: dict) -> str:
-    return billing_update_text(update.get("eventId"))
-
-
-def billing_update_text(value: object) -> str:
-    if not isinstance(value, str):
-        return ""
-    text = value.strip()
-    if not text or any(ord(char) < 32 or ord(char) == 127 for char in text):
-        return ""
-    return text
-
-
-def billing_update_scalar(value: object) -> object | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, str):
-        return value if value.strip() else None
-    if isinstance(value, int | float):
-        return value if math.isfinite(value) else None
-    return None
-
-
-def billing_update_bool(value: object) -> bool | None:
-    return value if isinstance(value, bool) else None
-
-
-def billing_event_created(update: dict) -> int | float | None:
-    value = update.get("eventCreated")
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int | float):
-        if not math.isfinite(value):
-            return None
-        candidate = float(value)
-        return int(candidate) if candidate.is_integer() else candidate
-    if isinstance(value, str) and value.isdigit():
-        return int(value)
-    return None
+MAX_BILLING_SUBSCRIPTION_RECORDS = billing_rules.MAX_BILLING_SUBSCRIPTION_RECORDS
+MAX_BILLING_SUBSCRIPTION_EVENTS = billing_rules.MAX_BILLING_SUBSCRIPTION_EVENTS
 
 
 def billing_event_processed(update: dict) -> bool:
@@ -58,17 +23,15 @@ def billing_event_processed(update: dict) -> bool:
     return bool(event_id and event_id in BILLING_EVENTS)
 
 
-def remember_billing_event(update: dict, *, applied: bool, stale: bool = False) -> None:
+def remember_billing_event(update: dict, *, applied: bool, stale: bool = False,
+                           processed_at: int | None = None) -> None:
     event_id = billing_event_id(update)
-    if not event_id:
+    record = billing_rules.billing_event_record(update,
+        processed_at=processed_at if processed_at is not None else now(),
+        applied=applied, stale=stale)
+    if record is None:
         return
-    BILLING_EVENTS[event_id] = {
-        "eventType": billing_update_text(update.get("eventType")) or None,
-        "eventCreated": billing_event_created(update),
-        "processedAt": now(),
-        "applied": applied,
-        "stale": stale,
-    }
+    BILLING_EVENTS[event_id] = record
     prune_billing_events()
     mark_state_dirty()
 
@@ -105,184 +68,39 @@ def billing_user_for_update(update: dict) -> dict | None:
     return None
 
 
-def billing_update_matches_user(update: dict, user: dict) -> bool:
-    current = user.get("billing") or {}
-    checkout = user.get("billingCheckout") if isinstance(user.get("billingCheckout"), dict) else {}
-    customer_id = billing_update_text(update.get("customerId"))
-    subscription_id = billing_update_text(update.get("subscriptionId"))
-    user_id = billing_update_text(update.get("userId"))
-    request_id = billing_update_text(update.get("requestId"))
-    if customer_id and current.get("customerId") == customer_id:
-        return True
-    if subscription_id and current.get("subscriptionId") == subscription_id:
-        return True
-    if request_id and checkout.get("requestId") == request_id:
-        return True
-    return bool(user_id and user_id == user.get("id"))
-
-
 def ensure_billing_quota_bucket_for_user(user: dict) -> None:
     entitlement = quota.quota_entitlement_for_user(user)
     quota.ensure_quota_bucket(
-        scope_type="user",
-        scope_id=str(user["id"]),
-        period=entitlement["period"],
-        plan=entitlement["plan"],
-        limit=entitlement["userLimit"],
-        reset_at=entitlement["resetAt"],
+        scope_type="user", scope_id=str(user["id"]),
+        period=entitlement["period"], plan=entitlement["plan"],
+        limit=entitlement["userLimit"], reset_at=entitlement["resetAt"],
     )
 
 
 def upsert_billing_subscription_record(user: dict, billing_state: dict) -> None:
-    subscription_id = billing_update_text(billing_state.get("subscriptionId"))
-    customer_id = billing_update_text(billing_state.get("customerId"))
-    provider = billing_update_text(billing_state.get("provider"))
-    if not (subscription_id or customer_id):
-        return
-
-    record = {
-        "provider": provider or None,
-        "customerId": customer_id or None,
-        "customerEmail": billing_update_text(billing_state.get("customerEmail")) or None,
-        "subscriptionId": subscription_id or None,
-        "subscriptionItemId": billing_update_text(billing_state.get("subscriptionItemId")) or None,
-        "status": billing_update_text(billing_state.get("status")) or None,
-        "plan": billing_update_text(billing_state.get("plan")) or None,
-        "interval": billing_update_text(billing_state.get("interval")) or None,
-        "currentPeriodStart": billing_update_scalar(billing_state.get("currentPeriodStart")),
-        "currentPeriodEnd": billing_update_scalar(billing_state.get("currentPeriodEnd")),
-        "cancelAtPeriodEnd": billing_update_bool(billing_state.get("cancelAtPeriodEnd")),
-        "canceledAt": billing_update_scalar(billing_state.get("canceledAt")),
-        "lastEventType": billing_update_text(billing_state.get("lastEventType")) or None,
-        "lastEventId": billing_update_text(billing_state.get("lastEventId")) or None,
-        "lastEventCreated": billing_event_created({"eventCreated": billing_state.get("lastEventCreated")}),
-        "updatedAt": billing_event_created({"eventCreated": billing_state.get("updatedAt")}) or now(),
-    }
-    existing_records = user.get("billingSubscriptions") if isinstance(user.get("billingSubscriptions"), list) else []
-    records = [item for item in existing_records if isinstance(item, dict)]
-    replaced = False
-    for index, existing in enumerate(records):
-        existing_subscription_id = billing_update_text(existing.get("subscriptionId"))
-        existing_customer_id = billing_update_text(existing.get("customerId"))
-        existing_provider = billing_update_text(existing.get("provider"))
-        matches_subscription = bool(subscription_id and existing_subscription_id == subscription_id)
-        matches_customer = bool(not subscription_id and customer_id and existing_customer_id == customer_id and existing_provider == provider)
-        if matches_subscription or matches_customer:
-            records[index] = {**existing, **record}
-            replaced = True
-            break
-    if not replaced:
-        records.insert(0, record)
-    records.sort(key=lambda item: billing_event_created({"eventCreated": item.get("updatedAt")}) or 0, reverse=True)
-    user["billingSubscriptions"] = records[:MAX_BILLING_SUBSCRIPTION_RECORDS]
+    billing_rules.upsert_billing_subscription_record(user, billing_state, processed_at=now())
 
 
-def append_billing_subscription_event(user: dict, update: dict, billing_state: dict, *, stale: bool = False, processed_at: int | None = None) -> None:
-    event_id = billing_event_id(update)
-    event_type = billing_update_text(update.get("eventType"))
-    if not event_id or not event_type:
-        return
-
-    subscription_id = billing_update_text(update.get("subscriptionId")) or billing_update_text(billing_state.get("subscriptionId"))
-    customer_id = billing_update_text(update.get("customerId")) or billing_update_text(billing_state.get("customerId"))
-    provider = billing_update_text(update.get("provider")) or billing_update_text(billing_state.get("provider"))
-    if not (subscription_id or customer_id):
-        return
-
-    recorded_at = processed_at or now()
-    record = {
-        "provider": provider or None,
-        "customerId": customer_id or None,
-        "customerEmail": billing_update_text(update.get("customerEmail")) or billing_update_text(billing_state.get("customerEmail")) or None,
-        "subscriptionId": subscription_id or None,
-        "subscriptionItemId": billing_update_text(update.get("subscriptionItemId")) or billing_update_text(billing_state.get("subscriptionItemId")) or None,
-        "status": billing_update_text(update.get("status")) or billing_update_text(billing_state.get("status")) or None,
-        "plan": billing_update_text(update.get("plan")) or billing_update_text(billing_state.get("plan")) or None,
-        "interval": billing_update_text(update.get("interval")) or billing_update_text(billing_state.get("interval")) or None,
-        "currentPeriodStart": billing_update_scalar(update.get("currentPeriodStart")) if billing_update_scalar(update.get("currentPeriodStart")) is not None else billing_update_scalar(billing_state.get("currentPeriodStart")),
-        "currentPeriodEnd": billing_update_scalar(update.get("currentPeriodEnd")) if billing_update_scalar(update.get("currentPeriodEnd")) is not None else billing_update_scalar(billing_state.get("currentPeriodEnd")),
-        "cancelAtPeriodEnd": billing_update_bool(update.get("cancelAtPeriodEnd")) if billing_update_bool(update.get("cancelAtPeriodEnd")) is not None else billing_update_bool(billing_state.get("cancelAtPeriodEnd")),
-        "canceledAt": billing_update_scalar(update.get("canceledAt")) if billing_update_scalar(update.get("canceledAt")) is not None else billing_update_scalar(billing_state.get("canceledAt")),
-        "eventType": event_type,
-        "eventId": event_id,
-        "eventCreated": billing_event_created(update),
-        "processedAt": recorded_at,
-        "stale": stale,
-    }
-    existing_events = user.get("billingSubscriptionEvents") if isinstance(user.get("billingSubscriptionEvents"), list) else []
-    events = [item for item in existing_events if isinstance(item, dict) and billing_update_text(item.get("eventId")) != event_id]
-    events.insert(0, record)
-    events.sort(
-        key=lambda item: (
-            billing_event_created({"eventCreated": item.get("eventCreated")}) or 0,
-            billing_event_created({"eventCreated": item.get("processedAt")}) or 0,
-        ),
-        reverse=True,
-    )
-    user["billingSubscriptionEvents"] = events[:MAX_BILLING_SUBSCRIPTION_EVENTS]
+def append_billing_subscription_event(user: dict, update: dict, billing_state: dict,
+                                      *, stale: bool = False,
+                                      processed_at: int | None = None) -> None:
+    billing_rules.append_billing_subscription_event(user, update, billing_state,
+        stale=stale, processed_at=processed_at if processed_at is not None else now())
 
 
 def apply_billing_update_to_user(user: dict, update: dict) -> bool:
-    current = user.get("billing") or {}
-    incoming_created = billing_event_created(update)
-    current_created = billing_event_created({"eventCreated": current.get("lastEventCreated")})
-    if current_created is not None and (incoming_created is None or incoming_created < current_created):
-        append_billing_subscription_event(user, update, current, stale=True)
-        remember_billing_event(update, applied=False, stale=True)
-        return False
-
-    customer_id = billing_update_text(update.get("customerId"))
-    customer_email = billing_update_text(update.get("customerEmail"))
-    subscription_id = billing_update_text(update.get("subscriptionId"))
-    subscription_item_id = billing_update_text(update.get("subscriptionItemId"))
-    status = billing_update_text(update.get("status"))
-    plan = billing_update_text(update.get("plan"))
-    if plan and plan not in set(billing.PLAN_IDS):
-        plan = ""
-    interval = billing_update_text(update.get("interval"))
-    current_period_start = billing_update_scalar(update.get("currentPeriodStart"))
-    current_period_end = billing_update_scalar(update.get("currentPeriodEnd"))
-    cancel_at_period_end = billing_update_bool(update.get("cancelAtPeriodEnd"))
-    canceled_at = billing_update_scalar(update.get("canceledAt"))
-    provider = billing_update_text(update.get("provider"))
-    event_type = billing_update_text(update.get("eventType"))
-    event_id = billing_event_id(update)
-    request_id = billing_update_text(update.get("requestId"))
-    updated_at = now()
-
-    user["billing"] = {
-        **current,
-        "provider": provider or current.get("provider"),
-        "customerId": customer_id or current.get("customerId"),
-        "customerEmail": customer_email or current.get("customerEmail"),
-        "subscriptionId": subscription_id or current.get("subscriptionId"),
-        "subscriptionItemId": subscription_item_id or current.get("subscriptionItemId"),
-        "status": status or current.get("status") or "active",
-        "plan": plan or current.get("plan") or "pro",
-        "interval": interval or current.get("interval") or "month",
-        "currentPeriodStart": current_period_start if current_period_start is not None else current.get("currentPeriodStart"),
-        "currentPeriodEnd": current_period_end if current_period_end is not None else current.get("currentPeriodEnd"),
-        "cancelAtPeriodEnd": cancel_at_period_end if cancel_at_period_end is not None else current.get("cancelAtPeriodEnd"),
-        "canceledAt": canceled_at if canceled_at is not None else current.get("canceledAt"),
-        "updatedAt": updated_at,
-        "lastEventType": event_type or current.get("lastEventType"),
-        "lastEventId": event_id or current.get("lastEventId"),
-        "lastEventCreated": incoming_created if incoming_created is not None else current.get("lastEventCreated"),
-    }
-    checkout = user.get("billingCheckout") if isinstance(user.get("billingCheckout"), dict) else {}
-    if request_id and checkout.get("requestId") == request_id:
-        user["billingCheckout"] = {
-            **checkout,
-            "status": "completed",
-            "completedAt": updated_at,
-            "eventId": event_id or checkout.get("eventId"),
-        }
-    upsert_billing_subscription_record(user, user["billing"])
-    append_billing_subscription_event(user, update, user["billing"], processed_at=updated_at)
-    ensure_billing_quota_bucket_for_user(user)
-    remember_billing_event(update, applied=True)
-    mark_state_dirty()
-    return True
+    processed_at = now()
+    decision = billing_rules.reduce_billing_update(user, update, processed_at=processed_at)
+    if decision["quotaRefresh"]:
+        ensure_billing_quota_bucket_for_user(decision["user"])
+    user.clear()
+    user.update(decision["user"])
+    if decision["eventRecord"] is not None:
+        remember_billing_event(update, applied=decision["applied"],
+            stale=not decision["applied"], processed_at=processed_at)
+    if decision["applied"]:
+        mark_state_dirty()
+    return decision["applied"]
 
 
 def apply_pending_billing_updates_for_user(user: dict) -> None:
@@ -295,7 +113,6 @@ def apply_pending_billing_updates_for_user(user: dict) -> None:
             remaining.append(update)
     if not matching:
         return
-
     BILLING_PENDING_UPDATES[:] = remaining
     mark_state_dirty()
     for update in sorted(matching, key=lambda item: billing_event_created(item) or 0):
