@@ -55,8 +55,11 @@ revision; pending or incomplete assessment must not silently close an item.
   with the same Creem HMAC helper as `billing.py`, then stores a normalized
   trusted update before ACK. Applying that receipt marks it applied in the
   same batch as users, billingEvents, pending updates and owner revision.
-  The probe uses a synthetic secret and update; real Creem mapping/key binding
-  and receipt retention remain unconnected.
+  `record_signed_creem_event` accepts the existing Server billing normalizer
+  as a trusted callback; every saved normalized eventId must match the signed
+  raw event ID. The probe uses a synthetic secret and normalizer; real
+  handler/key binding, account settlement and receipt retention remain
+  unconnected.
 - First-generation D1 analysis enqueue computes owner/global active caps in
   one batch. On cap rejection, it releases the new reservation and marks the
   source context throttled without creating a job. Existing-generation reuse,
@@ -85,6 +88,11 @@ revision; pending or incomplete assessment must not silently close an item.
   each product-v1 route; some reads also call `db` directly and authenticate
   through the in-memory users map. Cloudflare REST adaptation must map all
   three seams while preserving the same Cookie/API-key contract and DTOs.
+- D1 charges by rows written, including indexed writes. Keep scheduled D1
+  commands bounded to changed rows; never refresh an entire waiting backlog
+  on each wake. Inspect D1 `meta.rows_written` and per-query analytics before
+  expanding queue or cron frequency. The local probe uses `remote: false` and
+  does not establish remote cost behavior.
 
 - `pr_followup.reconcile_thread` aggregates saved pr-followup/v3 answers inside
   the fact/result transaction. One verified thread/context has one Item; source

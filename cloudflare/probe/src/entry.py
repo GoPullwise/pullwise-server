@@ -214,13 +214,11 @@ class Default(WorkerEntrypoint):
                 raw = body if isinstance(body, bytes) else body.to_bytes()
                 if len(raw) > 65536:
                     return Response.json({'committed': False}, status=413)
-                event = json.loads(raw)
-                if not isinstance(event, dict):
-                    return Response.json({'committed': False}, status=400)
-                await D1WebhookReceipts(self.env.DB).record_signed_update(
+                await D1WebhookReceipts(self.env.DB).record_signed_creem_event(
                     raw_body=raw, signature=request.headers.get('creem-signature'),
-                    secret=secret, normalized_update={"eventId": event.get('id'),
-                        "customerId": "synthetic-customer"}, now=DATA['claim']['now'])
+                    secret=secret, normalize_event=lambda event: {
+                        "eventId": event.get('id'), "customerId": "synthetic-customer"},
+                    now=DATA['claim']['now'])
                 return Response.json({'committed': True})
             except Exception:
                 return Response.json({'committed': False}, status=409)

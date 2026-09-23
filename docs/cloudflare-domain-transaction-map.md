@@ -103,10 +103,14 @@ Worker reads actual raw HTTP bytes and a signature header, uses the same pure
 HMAC check as the local billing module, and persists a normalized synthetic
 update before acknowledging. Duplicate identical bytes keep one receipt;
 invalid signatures and same-ID conflicting bytes cannot overwrite it.
+The normalized event ID is checked against the signed raw event ID. The
+Server adapter can call the existing `billing_update_from_creem_event` through
+`record_signed_creem_event`; the local Worker exercises that entry with a
+synthetic normalizer and no production product IDs.
 Applying a pending receipt marks it applied in the same D1 batch as the
 trusted user, billingEvents, billingPendingUpdates and owner-revision change.
-This is local protocol evidence only: the real Creem mapper, secret binding,
-checkout lifecycle and receipt retention are not wired into the Worker.
+This is local protocol evidence only: real Creem handler composition, secret
+binding, checkout lifecycle and receipt retention are not wired into the Worker.
 
 A first-generation enqueue command now freezes the current source/context
 revisions and trusted trigger into a queued job. It computes global and owner

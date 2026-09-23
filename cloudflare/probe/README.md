@@ -145,7 +145,8 @@ re-reservation. One local restart exited with a workerd disconnected error;
 a subsequent restart with the same persisted D1 passed the replay check.
 The local HTTP receipt route now reads request bytes/signature rather than
 fabricating a signature inside the Worker. It uses a synthetic secret and
-normalized update, verifies a 64 KiB Content-Length bound, and proves the
+normalizer through `record_signed_creem_event`, verifies a 64 KiB
+Content-Length bound, and proves the
 receipt/apply and first-generation queue-admission batches on local D1.
 Do not treat this route as a production Creem endpoint or Server scheduler.
 After `/server-map/schedule-enable`, the local Wrangler scheduled test URL

@@ -1248,3 +1248,26 @@ Creem lifecycle needs an injected durable quota write alongside its account,
 event and pending-state decisions; merely copying its in-memory maps into D1
 would still leave a split transaction. These are implementation findings, not
 completed Cloudflare integration.
+
+## Signed Creem event-to-receipt binding (2026-09-23 continuation)
+
+The local D1 receipt adapter now rejects a normalized eventId that differs
+from the ID in the signed raw JSON. A new trusted entry accepts the existing
+`billing.billing_update_from_creem_event` as its normalization callback before
+writing the receipt; unsupported events create no receipt. The isolated
+Worker uses a synthetic normalizer through that same entry and does not
+package or duplicate the payment product rules.
+
+The mismatched-ID and missing-entry tests failed first. Server receipt,
+account/mapping and existing billing-route verification reported **90 passed,
+2 subtests**. The
+regenerated local Worker passed `verify_server_mapping.py` against local
+workerd/D1 (`remote: false`); the process was stopped. No remote D1 write,
+production key, payment configuration or real Creem handler was used.
+
+Cloudflare cost inspection in the connected account found a separate staging
+database's repeated whole-backlog UPDATE had dominated Rows Written. Pullwise
+has no remote D1 binding yet. For its future D1 runtime, bound scheduled
+updates to changed rows and inspect `meta.rows_written` plus per-query
+analytics before raising cadence or queue limits. The external staging fix
+and deployment are outside this repository and are not Pullwise validation.
