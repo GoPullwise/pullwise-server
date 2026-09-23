@@ -1371,3 +1371,38 @@ bucket limit, and rejected duplicate reapplication in `verify_server_mapping.py`
 The probe has no cron, uses `remote: false`, and was stopped. Real Creem
 secret binding, checkout/account writer coverage, product HTTP routing,
 actual Cloudflare runtime and migration gates remain open. No push or deploy.
+
+## Candidate Server Worker HTTP entry (2026-09-23 continuation)
+
+Added `cloudflare/server` as a separate local-only Python Worker entry with
+no cron, public route or remote D1 binding. `src/entry.py` delegates to
+Server-owned `cloudflare_http_contract.py`, which implements read-only
+`/health` and raw-byte `POST /webhooks/creem`; unported product paths return
+404. The webhook keeps the existing `{"received": true}` success body,
+rejects invalid signatures or malformed/oversized bodies before D1, hides
+internal errors, and returns 503 so provider redelivery can repair a receipt
+settled before a projection-refresh failure. No probe/reset route is mounted
+in this candidate.
+
+Test first: the HTTP contract module was absent. Unit tests then covered
+the ACK shape, read-only health, unported path, missing configuration,
+malformed signed JSON and a durable-receipt/retry transition. The candidate
+initially failed to start because its own local Python modules lacked the
+existing pinned Workers SDK; copying the probe's already installed, ignored
+`python_modules` bytes fixed local packaging without installing a dependency.
+`sync_server_modules.py --check` confirms the candidate's ignored Server
+package matches checked-in source.
+
+The fixture exporter wrote only synthetic account tables to a new local D1
+directory using `wrangler d1 execute --local`; no real user DB was opened.
+The actual local Worker returned 503 on empty-schema health, then after
+seeding returned 200 health, 404 for `/api/v1/items`, 400 for an invalid
+signature and 200 for signed acceptance and replay. A read-only local D1
+query found receipt `applied`, revision 3, `dirty=0`, and canceled status.
+After stopping and restarting workerd against the same directory, the HTTP
+driver passed again and revision stayed 3. This is local workerd/D1 evidence,
+not remote Cloudflare, full Server REST or production Creem integration.
+The selected HTTP, billing, entitlement and D1 regression reported **165
+passed, 15 subtests**. `sync_server_modules.py --check` passed. Server remote
+CI still shows run 35824307016 failing at the retired Worker checkout before
+tests; Web Actions are empty. No push, deployment, cron or remote D1 use.

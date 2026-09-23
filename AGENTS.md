@@ -109,6 +109,15 @@ revision; pending or incomplete assessment must not silently close an item.
   each product-v1 route; some reads also call `db` directly and authenticate
   through the in-memory users map. Cloudflare REST adaptation must map all
   three seams while preserving the same Cookie/API-key contract and DTOs.
+- `cloudflare/server` is a separate **local-only candidate** for the actual
+  Server Python Worker HTTP entry. `src/entry.py` routes only read-only
+  `/health` and raw-byte `POST /webhooks/creem` through Server-owned
+  `cloudflare_http_contract.py`; unported product routes return 404. Its
+  Wrangler config has no cron/public route, uses a synthetic `remote: false`
+  D1 ID, and must not be deployed. Sync exact Server modules into its ignored
+  `src/pullwise_server` before running. The local candidate passed a real
+  process restart and webhook replay; this does not validate remote runtime,
+  real secrets, session/API-key auth or the shared product-v1 REST.
 - D1 charges by rows written, including indexed writes. Keep scheduled D1
   commands bounded to changed rows; never refresh an entire waiting backlog
   on each wake. Inspect D1 `meta.rows_written` and per-query analytics before

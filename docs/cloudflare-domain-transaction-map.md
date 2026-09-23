@@ -73,6 +73,17 @@ can finish the refresh without applying payment twice. A synthetic local
 workerd HTTP route exercises this composition. The real Server HTTP route,
 configured secret and production account writes remain unconnected.
 
+An independent `cloudflare/server` Python Worker candidate now calls that
+composition through an actual `/webhooks/creem` HTTP handler. The entry
+retains raw bytes, validates length/signature before D1, returns the old
+`{"received": true}` ACK only after a durable outcome, and returns a generic
+503 on a retryable storage/settlement fault. `/health` is read-only and checks
+for the account table. No reset/probe route or product-v1 substitute is
+mounted. Local Wrangler 4.136.3 with the synthetic `remote: false` D1 verified
+signature rejection, acceptance, replay and real process restart; account
+revision remained 3 and projection clean. This is still not a remote Server
+deployment or CF2 pass.
+
 The finite local mapping now has `account_entitlement_authority` and
 `d1_claim_authority`. A previously accepted synthetic event updates the matching
 user entry and billingEvents entry, increments the owner revision, and marks the

@@ -1,0 +1,15 @@
+[project]
+name = "pullwise-server-local-candidate"
+version = "0.0.0"
+requires-python = ">=3.13,<3.15"
+dependencies = [
+  "typesafe-sdk==0.7.0",
+  "httpx2>=2.0.0,<3",
+]
+
+[dependency-groups]
+dev = [
+  "workers-py==1.17.4",
+  "uv==0.12.3",
+  "workers-runtime-sdk==1.9.0",
+]

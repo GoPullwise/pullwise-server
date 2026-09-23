@@ -4,6 +4,7 @@
 .env.*
 .venv/
 .venv*/
+.wrangler/
 .pytest_cache/
 .mypy_cache/
 .coverage
