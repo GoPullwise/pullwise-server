@@ -29,6 +29,12 @@ def webhook(path="webhook-receipt", *, raw=WEBHOOK_RAW, valid=True):
     return call(path, raw_body=raw, headers={"creem-signature": signature})
 
 
+def scheduled():
+    url = "http://127.0.0.1:8796/cdn-cgi/local/scheduled?format=json"
+    with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(url, timeout=90) as response:
+        return response.status
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--after-restart", action="store_true")
@@ -43,6 +49,14 @@ def main():
         assert call("publish")[0] == 409
         print("Server mapping restart/replay passed on local D1")
         return
+    assert call("reset")[0] == 200
+    assert call("schedule-enable")[0] == 200
+    assert scheduled() == 200
+    state = call("state", "GET")[1]
+    assert state["jobState"] == "running" and state["jobAttempt"] == 1, state
+    assert state["attempts"] == 1 and state["used"] == 0, state
+    assert scheduled() == 200
+    assert call("state", "GET")[1]["attempts"] == 1
     assert call("reset")[0] == 200
     with ThreadPoolExecutor(max_workers=2) as pool:
         statuses = list(pool.map(lambda _: call("claim")[0], range(2)))

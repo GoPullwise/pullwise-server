@@ -121,3 +121,17 @@ def test_async_enqueue_reports_cap_rejection_after_atomic_reservation_release(tm
     with closing(fixture.store.connect()) as db:
         assert db.execute("SELECT state FROM processing_usage_ledger WHERE charge_key='third'").fetchone()[0] == "released"
         assert db.execute("SELECT COUNT(*) FROM background_jobs").fetchone()[0] == 1
+
+
+def test_async_due_selection_obeys_persisted_retry_deadline(tmp_path):
+    fixture, job, _ = seed(tmp_path / "domain.db")
+    adapter = D1AnalysisTransactions(D1ShapedSQLite(fixture.store))
+    limits = dict(global_monthly_limit=10, owner_rolling_limit=6, global_rolling_limit=60)
+    claimed = asyncio.run(adapter.claim_due_analysis(now=fixture.now, token="due-one", **limits))
+    assert claimed == {"jobId": job["id"], "token": "due-one"}
+    assert asyncio.run(adapter.claim_due_analysis(now=fixture.now + 1, token="too-soon", **limits)) is None
+    asyncio.run(adapter.record_claim_failure(job_id=job["id"], token="due-one",
+        now=fixture.now + 2, retryable=True, next_attempt_at=fixture.now + 40))
+    assert asyncio.run(adapter.claim_due_analysis(now=fixture.now + 39, token="early", **limits)) is None
+    claimed = asyncio.run(adapter.claim_due_analysis(now=fixture.now + 40, token="due-two", **limits))
+    assert claimed == {"jobId": job["id"], "token": "due-two"}

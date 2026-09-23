@@ -999,6 +999,21 @@ REST/proxy cases on local Workers. Full source-result production orchestration,
 real provider quality/bounded-exit and live-ingestion readiness remain separate
 gates; P5b remains deferred.
 
+## D1 due-job wake continuation (2026-09-23)
+
+`D1AnalysisTransactions.claim_due_analysis` selects one due eligible Job from
+persisted D1 state using owner fairness and insertion order, then claims it
+through the existing guarded transaction. A local probe flag lets the Python
+Worker's actual `scheduled` handler exercise the path without calling Jev.
+The first wake created one attempt, a second wake created none, and state
+survived an actual process restart. A local test verifies retry_wait is not
+eligible before its persisted deadline. This is bounded selection for an
+eligible Job only: stale queued jobs are skipped, not yet terminally released;
+no real Server cron composition, provider execution or HTTP runtime is wired.
+Targeted mapping, adapter and billing-webhook verification after this change:
+**54 passed, 5 subtests**. Local workerd/D1 scheduled wake and actual process
+restart replay passed with the owned process stopped afterward.
+
 ## D1 signed receipt and first enqueue continuation (2026-09-23)
 
 The local Worker now reads raw HTTP request bytes and a signature header for
@@ -1017,8 +1032,9 @@ revisions in a queued job. Owner/global active caps are computed inside the
 same D1 batch. Cap denial creates no job and atomically releases the new
 reservation and marks the context throttled. Local SQLite and workerd/D1
 admission/denial plus restart replay passed. It does not handle existing
-logical-key generations, supersession, stale-admission release or due-job
-selection; the real scheduler remains unwired.
+logical-key generations, supersession or stale-admission release; the real
+scheduler remains unwired. The later due-job section above covers only one
+eligible candidate wake.
 
 Targeted Server verification for D1 mapping/adapters and billing contracts,
 routes and webhooks reported **145 passed, 15 subtests**. Server remote CI still

@@ -60,8 +60,13 @@ revision; pending or incomplete assessment must not silently close an item.
 - First-generation D1 analysis enqueue computes owner/global active caps in
   one batch. On cap rejection, it releases the new reservation and marks the
   source context throttled without creating a job. Existing-generation reuse,
-  supersession, stale-admission release and due-job selection still need
-  mapping before a real Cloudflare scheduler can run.
+  supersession, stale-admission release and complete due-job lifecycle still
+  need mapping before a real Cloudflare scheduler can run.
+- `cloudflare_analysis_adapter.claim_due_analysis` reads one due eligible Job
+  ordered by persisted owner fairness, then rechecks it in the claim batch.
+  The local probe's scheduled handler invokes it with a deterministic clock
+  and no model call. Ineligible/stale queued Jobs are currently skipped rather
+  than terminally invalidated, so this is not a complete scheduler.
 - The real Creem handler mutates in-memory users, billingEvents and pending
   updates under `STATE_LOCK`; `persist_state` later flushes them through
   `db.save_state` and `state_for_storage`. The probe event batch is not this

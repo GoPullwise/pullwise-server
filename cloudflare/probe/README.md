@@ -148,6 +148,11 @@ fabricating a signature inside the Worker. It uses a synthetic secret and
 normalized update, verifies a 64 KiB Content-Length bound, and proves the
 receipt/apply and first-generation queue-admission batches on local D1.
 Do not treat this route as a production Creem endpoint or Server scheduler.
+After `/server-map/schedule-enable`, the local Wrangler scheduled test URL
+invokes the Server async due-job selector once, then disables that probe flag.
+It claims one eligible synthetic Job with no model request; a second wake
+does not spend another attempt. This does not process stale jobs or integrate
+the real Server scheduler.
 
 The synthetic fixture generator now copies Server-owned D1 mapping, async
 batch/account adapter and pure entitlement-rule modules into an ignored local

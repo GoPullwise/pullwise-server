@@ -112,8 +112,17 @@ A first-generation enqueue command now freezes the current source/context
 revisions and trusted trigger into a queued job. It computes global and owner
 active queue caps inside the batch. A denied admission releases the new
 reservation and marks the context throttled in that same batch. Generation
-reuse, supersession, cancellation/revocation, stale eligibility and due-job
-selection still require target-runtime mapping.
+  reuse, supersession, cancellation/revocation and stale eligibility still
+  require target-runtime mapping.
+
+The Server async adapter now selects one due, currently eligible analysis Job
+by durable owner claim order and insertion order, then runs the guarded claim
+batch. The isolated Python Worker's actual `scheduled` handler can wake this
+path behind a local probe flag. Local D1 observed one attempt on the first
+wake, no duplicate attempt on a second wake, and state persistence after a
+real process restart. It never calls Jev. Stale jobs are filtered from this
+selection but not yet terminally invalidated/released; full scheduler fairness,
+batch bounds and response-loss execution remain CF2 work.
 
 The command builders now live in Server `cloudflare_d1_mapping.py`, with
 `cloudflare_account_adapter.py` providing async snapshot reads and one D1

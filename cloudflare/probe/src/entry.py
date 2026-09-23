@@ -37,6 +37,9 @@ ATTEMPT_SCHEMA = [
     "CREATE TABLE IF NOT EXISTS probe_attempt_guard (ok INTEGER CHECK(ok=1))",
 ]
 ATTEMPT_PERIOD = "strftime('%Y-%m',(SELECT now FROM probe_attempt_clock WHERE id=1),'unixepoch')"
+SERVER_SCHEDULE_SCHEMA = """CREATE TABLE IF NOT EXISTS probe_server_schedule_enabled(
+    id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL CHECK(enabled IN (0,1))
+)"""
 
 
 class Default(WorkerEntrypoint):
@@ -88,6 +91,9 @@ class Default(WorkerEntrypoint):
             await self.env.DB.batch([self.env.DB.prepare(sql) for sql in DATA['schemas']]
                 + [self.env.DB.prepare(sql) for sql, _ in mapping.schema()])
             commands = [('DELETE FROM ' + table, ()) for table in reversed(DATA['names'])] + DATA['inserts']
+            await self.env.DB.prepare(SERVER_SCHEDULE_SCHEMA).run()
+            await self.env.DB.prepare("""INSERT INTO probe_server_schedule_enabled(id,enabled)
+                VALUES (1,0) ON CONFLICT(id) DO UPDATE SET enabled=0""").run()
         elif name == 'claim-frozen':
             commands = mapping.claim(**DATA['claim'])
         elif name in {'claim', 'claim-current', 'claim-reconciled'}:
@@ -195,6 +201,8 @@ class Default(WorkerEntrypoint):
                 return Response.json({'committed': True, 'reservation': result})
             except Exception:
                 return Response.json({'committed': False}, status=409)
+        elif name == 'schedule-enable':
+            commands = [("UPDATE probe_server_schedule_enabled SET enabled=1 WHERE id=1", ())]
         elif name in {'webhook-receipt', 'webhook-bad', 'webhook-conflict'}:
             secret = 'synthetic-webhook-secret'
             try:
@@ -371,6 +379,20 @@ class Default(WorkerEntrypoint):
     async def scheduled(self, controller, env, ctx):
         await self.env.DB.prepare(SCHEMA[3]).run()
         await self.env.DB.prepare("INSERT INTO probe_clock VALUES (1,1) ON CONFLICT(id) DO UPDATE SET ticks=ticks+1").run()
+        try:
+            enabled = await self.env.DB.prepare("SELECT enabled FROM probe_server_schedule_enabled WHERE id=1").first()
+        except Exception:
+            return
+        if enabled and enabled['enabled']:
+            from server_fixture import DATA
+            from pullwise_server.cloudflare_analysis_adapter import D1AnalysisTransactions
+            args = DATA['claim']
+            await D1AnalysisTransactions(self.env.DB).claim_due_analysis(
+                now=args['now'], token='scheduled-claim',
+                global_monthly_limit=args['global_monthly_limit'],
+                owner_rolling_limit=args['owner_rolling_limit'],
+                global_rolling_limit=args['global_rolling_limit'])
+            await self.env.DB.prepare("UPDATE probe_server_schedule_enabled SET enabled=0 WHERE id=1").run()
 
     async def fetch(self, request):
         url = urlsplit(request.url)

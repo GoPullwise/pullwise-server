@@ -26,6 +26,12 @@ class Prepared:
             row = cursor.fetchone()
             return dict(zip((column[0] for column in cursor.description), row)) if row else None
 
+    async def all(self):
+        with closing(self.binding.store.connect()) as connection:
+            cursor = connection.execute(self.sql, self.params)
+            columns = [column[0] for column in cursor.description]
+            return type("Rows", (), {"results": [dict(zip(columns, row)) for row in cursor.fetchall()]})()
+
 
 class D1ShapedSQLite:
     def __init__(self, store):
