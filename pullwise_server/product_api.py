@@ -5,6 +5,7 @@ import json
 import time
 import uuid
 from http import HTTPStatus
+from http.client import HTTPMessage
 from typing import Mapping
 
 from . import db
@@ -16,7 +17,7 @@ from .product_store import ProductStore
 
 def _header(handler: object, name: str) -> str:
     headers = getattr(handler, "headers", {})
-    if not isinstance(headers, Mapping):
+    if not isinstance(headers, (Mapping, HTTPMessage)):
         return ""
     expected = name.casefold()
     for key, value in headers.items():
@@ -137,15 +138,27 @@ def _filter_sources(sources: list[dict], params: Mapping[str, object]) -> list[d
     module = _query_value(params, "module")
     repository_id = _query_value(params, "repositoryId")
     watch_id = _query_value(params, "watchId")
+    relevance = _query_value(params, "relevance")
+    signal = _query_value(params, "updateSignal")
+    processing = _query_value(params, "processingStatus")
+    if ((relevance or signal) and module != "updates"
+            or relevance and relevance not in {"relevant", "not_relevant", "unclear"}
+            or signal and signal not in {"migration_stated", "deprecation_stated", "breaking_change_stated", "security_fix_stated"}):
+        raise ValueError("INVALID_CONFIGURATION")
     result = []
     for source in sources:
         if module and _source_module(source) != module:
             continue
         if repository_id and source.get("repositoryId") != repository_id:
             continue
-        if watch_id and not any(context.get("watchId") == watch_id for context in source.get("contexts") or []):
+        contexts = [context for context in source.get("contexts") or []
+                    if (not watch_id or context.get("watchId") == watch_id)
+                    and (not relevance or context.get("relevance") == relevance)
+                    and (not signal or context.get("updateSignals", {}).get(signal) == "present")
+                    and (not processing or context.get("processingStatus") == processing)]
+        if not contexts:
             continue
-        result.append(source)
+        result.append({**source, "contexts": contexts})
     return result
 
 
@@ -156,14 +169,21 @@ def _apply_source_restrictions(sources: list[dict], restrictions: Mapping[str, o
         return sources
     allowed_repositories = set(repository_ids or ())
     allowed_watches = set(watch_ids or ())
-    return [
-        source
-        for source in sources
-        if (
-            source.get("repositoryId") in allowed_repositories
-            or any(context.get("watchId") in allowed_watches for context in source.get("contexts") or [])
-        )
-    ]
+    def allowed(source, context):
+        if not context.get("watchId"):
+            return source.get("repositoryId") in allowed_repositories
+        target = context.get("targetRepositoryId")
+        if target:
+            return ((repository_ids is None or target in allowed_repositories)
+                    and (watch_ids is None or context["watchId"] in allowed_watches))
+        return context["watchId"] in allowed_watches
+    result = []
+    for source in sources:
+        contexts = [context for context in source.get("contexts") or []
+                    if allowed(source, context)]
+        if contexts:
+            result.append({**source, "contexts": contexts})
+    return result
 
 
 def _apply_item_restrictions(items: list[dict], restrictions: Mapping[str, object]) -> list[dict]:
@@ -366,10 +386,17 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
         )
         return True
     restrictions = principal.get("restrictions") or {}
-    sources = _filter_sources(
-        _apply_source_restrictions(store.list_sources_for_billing_owner(user_id), restrictions),
-        params,
-    )
+    try:
+        sources = _filter_sources(
+            _apply_source_restrictions(store.list_sources_for_billing_owner(
+                user_id, include_content=len(segments) == 2 and segments[0] == "sources",
+                source_id=segments[1] if len(segments) == 2 and segments[0] == "sources" else None
+            ), restrictions),
+            params,
+        )
+    except ValueError:
+        _error(handler, HTTPStatus.UNPROCESSABLE_ENTITY, "INVALID_CONFIGURATION", "Invalid source filters.")
+        return True
     if segments == ["sources"]:
         handler.json(
             {
@@ -387,7 +414,10 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
         else:
             handler.json(source)
         return True
-    all_items = _apply_item_restrictions(store.list_items_for_billing_owner(user_id), restrictions)
+    all_items = _apply_item_restrictions(store.list_items_for_billing_owner(
+        user_id, include_history=len(segments) == 2 and segments[0] == "items" and segments[1] != "overview",
+        item_id=segments[1] if len(segments) == 2 and segments[0] == "items" and segments[1] != "overview" else None
+    ), restrictions)
     github_user_id = str(principal["user"].get("githubId") or "")
     resource_items = _filter_items(all_items, params, github_user_id, include_view=False)
     if segments == ["items", "overview"]:

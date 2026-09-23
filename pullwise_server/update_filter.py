@@ -1,7 +1,65 @@
 from __future__ import annotations
 
 import re
+import math
 from typing import Iterable
+
+from .product_domain import UpdateUnitAnswers, project_update_unit
+
+
+def project_saved_updates(assessment: dict, coverage: dict) -> dict | None:
+    """Project only complete saved v3 question groups; never classify source text.
+
+    The 0.8 confidence cutoff remains the offline candidate, not a quality gate.
+    Missing/invalid groups cannot supply a release-wide negative conclusion.
+    """
+    if assessment.get("questionVersion") != "updates-filter/v3":
+        return None
+    fields = ("relevance", "migration_stated", "deprecation_stated",
+              "breaking_change_stated", "security_fix_stated")
+    groups = {}
+    for key, answer in assessment.get("answers", {}).items():
+        binding = assessment.get("bindings", {}).get(key, {})
+        unit_id = binding.get("changeUnitId")
+        field = next((name for name in fields if re.fullmatch(r"u\d+_" + name, key)), None)
+        if not unit_id or field is None:
+            return None
+        group = groups.setdefault(unit_id, {"answers": {}, "evidenceIds": set()})
+        if field in group["answers"]:
+            return None
+        choice = answer.get("choice")
+        allowed = {"relevant", "not_relevant", "unclear"} if field == "relevance" else {"present", "absent", "unclear"}
+        if choice not in allowed:
+            return None
+        confidence = answer.get("confidence")
+        if (type(confidence) not in (float, int) or not math.isfinite(confidence)
+                or not 0.8 <= confidence <= 1):
+            choice = "unclear"
+        group["answers"][field] = choice
+        group["evidenceIds"].update(binding.get("evidenceIds", []))
+    if (not groups or len(groups) != coverage.get("selectedUnits")
+            or any(set(group["answers"]) != set(fields) for group in groups.values())):
+        return None
+    complete = coverage.get("state") == "complete" and coverage.get("rawSourcePartial") is False
+    projections, units = [], []
+    for unit_id, group in groups.items():
+        projection = project_update_unit(UpdateUnitAnswers(**group["answers"]), coverage_complete=True)
+        projections.append(projection)
+        units.append({"changeUnitId": unit_id, "evidenceIds": sorted(group["evidenceIds"]),
+                      "relevance": projection.release_relevance,
+                      "updateSignals": {field: projection.release_signal_states[field.removesuffix("_stated")]
+                                        for field in fields[1:]}})
+    relevance = ("relevant" if any(p.release_relevance == "relevant" for p in projections)
+                 else "not_relevant" if complete and all(p.release_relevance == "not_relevant" for p in projections)
+                 else "unclear")
+    signals = {}
+    for signal in fields[1:]:
+        values = [unit["updateSignals"][signal] for unit in units if unit["relevance"] == "relevant"]
+        uncertain = any(unit["relevance"] == "unclear" for unit in units)
+        signals[signal] = (None if relevance == "not_relevant" else "present" if "present" in values
+                           else "unclear" if not complete or uncertain or "unclear" in values
+                           else "absent" if values else None)
+    return {"relevance": relevance, "updateSignals": signals, "units": units}
 
 
 _HEADING = re.compile(r"(?m)^(?=#{1,6}[ \t]+\S)")

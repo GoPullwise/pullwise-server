@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Iterator, Mapping, Sequence
 
 from .product_domain import context_hash, validate_watch_interests, watch_scope_key
+from .update_filter import project_saved_updates
 
 
 _UNIT_TYPES = frozenset(
@@ -327,6 +328,26 @@ class ProductStore:
                         billing_owner_id, source_version_id, context_hash,
                         question_version, extractor_version, model, input_hash
                     ) WHERE status = 'succeeded';
+
+                CREATE TABLE IF NOT EXISTS source_assessment_publications (
+                    source_id TEXT NOT NULL,
+                    context_id TEXT NOT NULL,
+                    source_version_id TEXT NOT NULL,
+                    context_version INTEGER NOT NULL,
+                    authorization_revision INTEGER NOT NULL,
+                    billing_owner_id TEXT NOT NULL,
+                    assessment_json TEXT NOT NULL,
+                    evidence_json TEXT NOT NULL,
+                    sources_json TEXT NOT NULL,
+                    fences_json TEXT NOT NULL,
+                    coverage_json TEXT NOT NULL,
+                    PRIMARY KEY(source_id, context_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS pr_parent_checks (
+                    source_id TEXT PRIMARY KEY REFERENCES source_records(source_id),
+                    checked_at INTEGER NOT NULL
+                );
 
                 CREATE TABLE IF NOT EXISTS items (
                     id TEXT PRIMARY KEY,
@@ -1645,33 +1666,119 @@ class ProductStore:
             row = connection.execute("SELECT * FROM source_records WHERE source_id = ?", (source_id,)).fetchone()
         return self._source_record_dto(row, contexts=[])
 
-    def list_sources_for_billing_owner(self, billing_owner_id: str) -> list[dict]:
+    def next_open_pr_for_reconciliation(self, target: Mapping[str, object]) -> dict | None:
+        """Rotate through known open parents; absence from GitHub lists proves nothing."""
+        if target.get("module") != "pr":
+            raise ValueError("GITHUB_PR_BINDING_INVALID")
+        repository_id = _identifier(target.get("repository_id"), "repository_id")
+        context_id = _identifier(target.get("context_id"), "context_id")
+        with self._read() as connection:
+            row = connection.execute(
+                """SELECT sr.source_id, json_extract(sr.source_facts_json,'$.pullNumber') AS number
+                   FROM source_records sr
+                   JOIN source_contexts sc ON sc.source_id=sr.source_id
+                   LEFT JOIN pr_parent_checks pc ON pc.source_id=sr.source_id
+                   WHERE sr.repository_id=? AND sr.source_type='pr_state'
+                     AND sr.lifecycle='active' AND sc.context_id=? AND sc.accessible=1
+                     AND sc.authorization_valid_until>=?
+                     AND json_type(sr.source_facts_json,'$.pullNumber')='integer'
+                     AND json_extract(sr.source_facts_json,'$.pullNumber')>0
+                   ORDER BY pc.checked_at IS NOT NULL, pc.checked_at, sr.source_id LIMIT 1""",
+                (repository_id, context_id, _now()),
+            ).fetchone()
+        return {"sourceId": row["source_id"], "pullNumber": int(row["number"])} if row else None
+
+    def mark_pr_reconciled(self, source_id: str, *, observed_at: int) -> None:
+        source_id = _identifier(source_id, "source_id")
+        if type(observed_at) is not int or observed_at < 0:
+            raise ValueError("observed_at must be a non-negative integer")
+        with self._immediate() as connection:
+            row = connection.execute("SELECT source_type FROM source_records WHERE source_id=?", (source_id,)).fetchone()
+            if row is None or row["source_type"] != "pr_state":
+                raise ValueError("PR_RECONCILIATION_BINDING_MISMATCH")
+            connection.execute(
+                """INSERT INTO pr_parent_checks(source_id, checked_at) VALUES (?,?)
+                   ON CONFLICT(source_id) DO UPDATE SET checked_at=excluded.checked_at""",
+                (source_id, observed_at),
+            )
+
+    def list_sources_for_billing_owner(self, billing_owner_id: str, *, include_content: bool = False, source_id: str | None = None) -> list[dict]:
         owner_id = _identifier(billing_owner_id, "billing_owner_id")
         timestamp = _now()
         with self._read() as connection:
+            if self._connection is None:
+                connection.execute("BEGIN")
             rows = connection.execute(
                 """
                 SELECT sr.*, sc.context_id, sc.watch_id, sc.item_id,
+                       uw.target_repository_id,
                        sc.context_version, sc.processing_status, sc.analysis_enabled,
-                       sc.context_stale, sc.coverage_json
+                       sc.context_stale, sc.coverage_json, CASE WHEN ? THEN sv.content_json END AS content_json
                 FROM source_records sr
+                JOIN source_versions sv ON sv.id = sr.latest_version
                 JOIN source_contexts sc ON sc.source_id = sr.source_id
+                LEFT JOIN update_watches uw ON uw.id = sc.watch_id
                 WHERE sc.billing_owner_id = ? AND sc.accessible = 1
+                  AND (? IS NULL OR sr.source_id = ?)
                   AND sc.authorization_valid_until >= ?
                 ORDER BY sr.updated_at DESC, sr.source_id, sc.context_id
                 """,
-                (owner_id, timestamp),
+                (include_content, owner_id, source_id, source_id, timestamp),
             ).fetchall()
-        grouped: dict[str, tuple[sqlite3.Row, list[dict]]] = {}
-        for row in rows:
-            entry = grouped.setdefault(row["source_id"], (row, []))
-            entry[1].append(self._source_context_dto(row))
-        return [self._source_record_dto(row, contexts) for row, contexts in grouped.values()]
+            grouped: dict[str, tuple[sqlite3.Row, list[dict]]] = {}
+            for row in rows:
+                entry = grouped.setdefault(row["source_id"], (row, []))
+                context = self._source_context_dto(row)
+                publication = connection.execute(
+                    "SELECT * FROM source_assessment_publications WHERE source_id=? AND context_id=?",
+                    (row["source_id"], row["context_id"]),
+                ).fetchone()
+                current = publication is not None and not context["contextStale"]
+                if current:
+                    for source in json.loads(publication["sources_json"]):
+                        stored = connection.execute(
+                            "SELECT latest_version, source_revision FROM source_records WHERE source_id=?",
+                            (source["sourceId"],),
+                        ).fetchone()
+                        if (stored is None or stored["latest_version"] != source["sourceVersion"]
+                                or stored["source_revision"] != source["sourceRevision"]):
+                            current = False
+                    for fence in json.loads(publication["fences_json"]):
+                        stored = connection.execute(
+                            "SELECT * FROM source_contexts WHERE source_id=? AND context_id=?",
+                            (fence["sourceId"], fence["contextId"]),
+                        ).fetchone()
+                        if (stored is None or not stored["accessible"] or stored["context_stale"]
+                                or stored["authorization_valid_until"] < timestamp
+                                or stored["billing_owner_id"] != owner_id
+                                or stored["context_version"] != fence["contextVersion"]
+                                or stored["authorization_revision"] != fence["authorizationRevision"]):
+                            current = False
+                public_assessment = json.loads(publication["assessment_json"]) if current else None
+                if current:
+                    context["coverage"] = json.loads(publication["coverage_json"])
+                if row["source_type"] == "release":
+                    projection = project_saved_updates(public_assessment, context["coverage"]) if public_assessment else None
+                    context["relevance"] = projection["relevance"] if projection else None
+                    context["updateSignals"] = projection["updateSignals"] if projection else {}
+                if include_content:
+                    context["assessments"] = [json.loads(publication["assessment_json"])] if current else []
+                    context["evidence"] = json.loads(publication["evidence_json"]) if current else []
+                entry[1].append(context)
+        result = []
+        for row, contexts in grouped.values():
+            source = self._source_record_dto(row, contexts)
+            if include_content:
+                source["content"] = json.loads(row["content_json"])
+            result.append(source)
+        return result
 
-    def list_items_for_billing_owner(self, billing_owner_id: str) -> list[dict]:
+    def list_items_for_billing_owner(self, billing_owner_id: str, *, include_history: bool = False, item_id: str | None = None) -> list[dict]:
         owner_id = _identifier(billing_owner_id, "billing_owner_id")
         timestamp = _now()
         with self._read() as connection:
+            if self._connection is None:
+                connection.execute("BEGIN")  # Item, authority and history share one read snapshot.
             rows = connection.execute(
                 """
                 SELECT i.*, iv.sources_json, iv.snapshot_json, iv.observed_at
@@ -1683,9 +1790,10 @@ class ProductStore:
                     WHERE sc.context_id = i.context_id AND sc.billing_owner_id = ?
                       AND sc.accessible = 1 AND sc.authorization_valid_until >= ?
                 )
+                AND (? IS NULL OR i.id = ?)
                 ORDER BY i.updated_at DESC, i.id
                 """,
-                (owner_id, timestamp),
+                (owner_id, timestamp, item_id, item_id),
             ).fetchall()
             readable_sources = connection.execute(
                     """
@@ -1706,9 +1814,15 @@ class ProductStore:
                     FROM item_handling_events GROUP BY item_id
                 ) latest ON latest.item_id = h.item_id
                   AND h.rowid = latest.ordering
-                """
+                """ if not include_history else
+                "SELECT * FROM item_handling_events WHERE (? IS NULL OR item_id=?) ORDER BY rowid",
+                (item_id, item_id) if include_history else (),
             ).fetchall()
         handling = {row["item_id"]: row for row in handling_rows}
+        history: dict[str, list[dict]] = {}
+        if include_history:
+            for event in handling_rows:
+                history.setdefault(event["item_id"], []).append(self._handling_event_dto(event))
         result: list[dict] = []
         for row in rows:
             sources = json.loads(row["sources_json"])
@@ -1717,6 +1831,8 @@ class ProductStore:
             snapshot = json.loads(row["snapshot_json"])
             event = handling.get(row["id"])
             item = self._item_read_dto(row, sources, snapshot, event)
+            if include_history:
+                item["handlingHistory"] = history.get(row["id"], [])
             synced = [sync_times[(source["sourceId"], row["context_id"])] for source in sources]
             if synced and all(value is not None for value in synced):
                 item["lastSyncedAt"] = _iso_timestamp(min(synced))
@@ -1977,8 +2093,8 @@ class ProductStore:
         *,
         reservation_id: str,
         assessment: Mapping[str, object],
-        item_id: str,
-        expected_item_revision: int,
+        item_id: str | None,
+        expected_item_revision: int | None,
         sources: Sequence[Mapping[str, object]],
         context_fences: Sequence[Mapping[str, object]],
         snapshot: Mapping[str, object],
@@ -1987,8 +2103,11 @@ class ProductStore:
         claim_token: str | None = None,
     ) -> dict:
         reservation_id = _identifier(reservation_id, "reservation_id")
-        item_id = _identifier(item_id, "item_id")
-        if (
+        if item_id is not None:
+            item_id = _identifier(item_id, "item_id")
+        elif expected_item_revision is not None or snapshot.get("actionTypes"):
+            raise ValueError("SOURCE_ONLY_PUBLICATION_HAS_ITEM_ACTION")
+        if item_id is not None and (
             isinstance(expected_item_revision, bool)
             or not isinstance(expected_item_revision, int)
             or expected_item_revision < 1
@@ -2118,6 +2237,16 @@ class ProductStore:
             claim_token = _identifier(claim_token, "claim_token")
         with self._immediate() as connection:
             claimed_job = None
+            semantic_thread = False
+            if assessment_fields["questionVersion"] == "pr-followup/v3":
+                primary = connection.execute(
+                    "SELECT source_type FROM source_records WHERE latest_version=? AND source_id IN (%s)"
+                    % ",".join("?" for _ in canonical_sources),
+                    (assessment_fields["sourceVersionId"], *(s["sourceId"] for s in canonical_sources)),
+                ).fetchone()
+                semantic_thread = primary is not None and primary["source_type"] == "pr_review_comment"
+                if semantic_thread and any(dependency not in canonical_sources for dependency in dependencies):
+                    raise ValueError("ASSESSMENT_DEPENDENCY_BINDING_MISMATCH")
             if job_id is not None:
                 claimed_job = connection.execute(
                     "SELECT * FROM background_jobs WHERE id = ?",
@@ -2168,7 +2297,7 @@ class ProductStore:
                     != int(claimed_job["configuration_revision"])
                 ):
                     raise ValueError("STALE_CONTEXT")
-                if current_context["item_id"] != item_id:
+                if current_context["item_id"] != item_id and not semantic_thread:
                     raise ValueError("STALE_CONTEXT")
                 primary_source = next(
                     (source for source in canonical_sources if source["sourceId"] == claimed_job["source_id"]),
@@ -2210,10 +2339,13 @@ class ProductStore:
             if snapshot.get("module") != ledger["module"]:
                 raise ValueError("RESERVATION_MODULE_MISMATCH")
             item = connection.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
-            if item is None:
+            if item_id is not None and item is None:
                 raise ValueError("NOT_FOUND")
-            if int(item["revision"]) != expected_item_revision:
+            if item is not None and int(item["revision"]) != expected_item_revision:
                 raise ValueError("REVISION_MISMATCH")
+            if ({fence["sourceId"] for fence in canonical_fences} != source_ids
+                    or len({fence["contextId"] for fence in canonical_fences}) != 1):
+                raise ValueError("ASSESSMENT_CONTEXT_BINDING_MISMATCH")
             for source in canonical_sources:
                 current = connection.execute(
                     "SELECT * FROM source_records WHERE source_id = ?",
@@ -2232,6 +2364,12 @@ class ProductStore:
                 ).fetchone()
                 if current is None:
                     raise ValueError("STALE_AUTHORIZATION")
+                if current["billing_owner_id"] != ledger["billing_owner_id"]:
+                    raise ValueError("RESERVATION_OWNER_MISMATCH")
+                if not bool(current["analysis_enabled"]):
+                    raise ValueError("ANALYSIS_DISABLED")
+                if item_id is None and current["item_id"] is not None and not semantic_thread:
+                    raise ValueError("STALE_CONTEXT")
                 if (
                     int(current["authorization_revision"]) != fence["authorizationRevision"]
                     or not bool(current["accessible"])
@@ -2337,59 +2475,93 @@ class ProductStore:
                 "usage": assessment_dto["usage"],
                 "status": assessment_dto["status"],
             }
-            next_snapshot = dict(snapshot)
-            next_snapshot["assessments"] = [public_assessment]
-            sources_json = _json(canonical_sources)
-            fences_json = _json(canonical_fences)
-            snapshot_json = _json(next_snapshot)
-            snapshot_hash = hashlib.sha256(
-                f"{sources_json}\n{fences_json}\n{snapshot_json}".encode("utf-8")
-            ).hexdigest()
-            item_version = int(item["current_item_version"]) + 1
             connection.execute(
-                """
-                INSERT INTO item_versions(
-                    item_id, item_version, snapshot_hash, sources_json,
-                    context_fences_json, snapshot_json, observed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (item_id, item_version, snapshot_hash, sources_json, fences_json, snapshot_json, observed_at),
+                """INSERT INTO source_assessment_publications(
+                    source_id, context_id, source_version_id, context_version,
+                    authorization_revision, billing_owner_id, assessment_json, evidence_json,
+                    sources_json, fences_json, coverage_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(source_id, context_id) DO UPDATE SET
+                    source_version_id=excluded.source_version_id,
+                    context_version=excluded.context_version,
+                    authorization_revision=excluded.authorization_revision,
+                    billing_owner_id=excluded.billing_owner_id,
+                    assessment_json=excluded.assessment_json, evidence_json=excluded.evidence_json,
+                    sources_json=excluded.sources_json, fences_json=excluded.fences_json,
+                    coverage_json=excluded.coverage_json""",
+                (primary_source["sourceId"], primary_fence["contextId"],
+                 primary_source["sourceVersion"], primary_fence["contextVersion"],
+                 primary_fence["authorizationRevision"], ledger["billing_owner_id"],
+                 _json(public_assessment), _json(snapshot_evidence),
+                 _json(canonical_sources), _json(canonical_fences),
+                 connection.execute("SELECT coverage_json FROM source_contexts WHERE source_id=? AND context_id=?",
+                                    (primary_source["sourceId"], primary_fence["contextId"])).fetchone()[0]),
             )
-            cursor = connection.execute(
-                """
-                UPDATE items SET current_item_version = ?, current_snapshot_hash = ?,
-                    revision = revision + 1, updated_at = ?
-                WHERE id = ? AND revision = ?
-                """,
-                (item_version, snapshot_hash, observed_at, item_id, expected_item_revision),
+            connection.execute(
+                """UPDATE source_contexts SET processing_status='assessed', updated_at=?
+                   WHERE source_id=? AND context_id=?""",
+                (observed_at, primary_source["sourceId"], primary_fence["contextId"]),
             )
-            if cursor.rowcount != 1:
-                raise ValueError("REVISION_MISMATCH")
-            if existing_assessment is not None:
-                previous_handling = connection.execute(
+            if item is not None and not semantic_thread:
+                next_snapshot = dict(snapshot)
+                next_snapshot["assessments"] = [public_assessment]
+                sources_json = _json(canonical_sources)
+                fences_json = _json(canonical_fences)
+                snapshot_json = _json(next_snapshot)
+                snapshot_hash = hashlib.sha256(
+                    f"{sources_json}\n{fences_json}\n{snapshot_json}".encode("utf-8")
+                ).hexdigest()
+                item_version = int(item["current_item_version"]) + 1
+                connection.execute(
                     """
-                    SELECT * FROM item_handling_events
-                    WHERE item_id = ? ORDER BY rowid DESC LIMIT 1
+                    INSERT INTO item_versions(
+                        item_id, item_version, snapshot_hash, sources_json,
+                        context_fences_json, snapshot_json, observed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (item_id,),
-                ).fetchone()
-                if previous_handling is not None and (
-                    previous_handling["disposition"] != "open"
-                    or previous_handling["assignee_id"] is not None
-                    or previous_handling["note"] is not None
-                    or previous_handling["feedback"] is not None
-                ):
-                    connection.execute(
+                    (item_id, item_version, snapshot_hash, sources_json, fences_json, snapshot_json, observed_at),
+                )
+                cursor = connection.execute(
+                    """
+                    UPDATE items SET current_item_version = ?, current_snapshot_hash = ?,
+                        revision = revision + 1, updated_at = ?
+                    WHERE id = ? AND revision = ?
+                    """,
+                    (item_version, snapshot_hash, observed_at, item_id, expected_item_revision),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError("REVISION_MISMATCH")
+                if existing_assessment is not None:
+                    previous_handling = connection.execute(
                         """
-                        INSERT INTO item_handling_events(
-                            id, item_id, item_version, actor_id, disposition,
-                            assignee_id, note, feedback, event_kind,
-                            carried_from_item_version, created_at
-                        ) VALUES (?, ?, ?, 'system', 'open', NULL, NULL, NULL,
-                                  'assessment_rebound', NULL, ?)
+                        SELECT * FROM item_handling_events
+                        WHERE item_id = ? ORDER BY rowid DESC LIMIT 1
                         """,
-                        (f"handling_{uuid.uuid4().hex}", item_id, item_version, observed_at),
-                    )
+                        (item_id,),
+                    ).fetchone()
+                    if previous_handling is not None and (
+                        previous_handling["disposition"] != "open"
+                        or previous_handling["assignee_id"] is not None
+                        or previous_handling["note"] is not None
+                        or previous_handling["feedback"] is not None
+                    ):
+                        connection.execute(
+                            """
+                            INSERT INTO item_handling_events(
+                                id, item_id, item_version, actor_id, disposition,
+                                assignee_id, note, feedback, event_kind,
+                                carried_from_item_version, created_at
+                            ) VALUES (?, ?, ?, 'system', 'open', NULL, NULL, NULL,
+                                      'assessment_rebound', NULL, ?)
+                            """,
+                            (f"handling_{uuid.uuid4().hex}", item_id, item_version, observed_at),
+                        )
+            if semantic_thread:
+                from .pr_followup import reconcile_thread
+                projected = reconcile_thread(ProductStore(self.database_path, _connection=connection),
+                    source_id=primary_source["sourceId"], context_id=primary_fence["contextId"], now=observed_at)
+                if projected is not None:
+                    item_id = projected["id"]
             bucket = connection.execute(
                 """
                 UPDATE processing_usage_buckets
@@ -2431,7 +2603,7 @@ class ProductStore:
                     (observed_at, claimed_job["source_id"], claimed_job["context_id"]),
                 )
             updated_item = connection.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
-        return {"assessment": public_assessment, "item": self._item_dto(updated_item)}
+        return {"assessment": public_assessment, "item": self._item_dto(updated_item) if updated_item is not None else None}
 
     def patch_item_handling(
         self,
@@ -2531,22 +2703,23 @@ class ProductStore:
                 """,
                 (_identifier(item_id, "item_id"),),
             ).fetchall()
-        return [
-            {
-                "id": row["id"],
-                "itemId": row["item_id"],
-                "itemVersion": int(row["item_version"]),
-                "actorId": row["actor_id"],
-                "disposition": row["disposition"],
-                "assigneeId": row["assignee_id"],
-                "note": row["note"],
-                "feedback": row["feedback"],
-                "eventKind": row["event_kind"],
-                "carriedFromItemVersion": row["carried_from_item_version"],
-                "createdAt": int(row["created_at"]),
-            }
-            for row in rows
-        ]
+        return [self._handling_event_dto(row) for row in rows]
+
+    @staticmethod
+    def _handling_event_dto(row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "itemId": row["item_id"],
+            "itemVersion": int(row["item_version"]),
+            "actorId": row["actor_id"],
+            "disposition": row["disposition"],
+            "assigneeId": row["assignee_id"],
+            "note": row["note"],
+            "feedback": row["feedback"],
+            "eventKind": row["event_kind"],
+            "carriedFromItemVersion": row["carried_from_item_version"],
+            "createdAt": int(row["created_at"]),
+        }
 
     def admit_provider_attempt(
         self,
@@ -3537,6 +3710,7 @@ class ProductStore:
         return {
             "id": row["context_id"],
             "watchId": row["watch_id"],
+            "targetRepositoryId": row["target_repository_id"],
             "itemId": row["item_id"],
             "contextVersion": int(row["context_version"]),
             "processingStatus": row["processing_status"],

@@ -644,12 +644,13 @@ Jev call, deployment or remote publication was used.
 1. Complete the blocked P0 visual baselines when browser tooling is authorized.
 2. Finish RepositoryService and watch mutation/idempotency endpoints, source
    assessment persistence, and the scheduled eligibility/cooldown state machine.
-3. Finish P3 coverage after the rule-Item/evidence slice: persistent GraphQL
-   scan and effective-review verification, missed-close discovery, thread-level
+3. Finish P3 coverage after the persisted GraphQL continuation slice:
+   effective-review verification, missed-close discovery, thread-level
    semantic projection, hard-bounded live log transport, credential lifecycle/
    rate coordination and actual field/permission coverage. Advance Cloudflare
    CF1/CF2 alongside P5a, using appendix 08; keep Jev production disabled.
-4. Replace Dashboard with P5a list/evidence/handling views using product-v1.
+4. Complete P5a source-assessment/release-label persistence and live Server/Web
+   integration on top of the product-v1 Dashboard delivered below.
 5. Remove the entire old scan/finding/fix/Reviewer/Worker/Gateway/Agent-first
    dependency closure and its tests/config/routes. Old physical scan tables may
    exist only for settlement/backup dry-run and must not be read by the new
@@ -657,3 +658,343 @@ Jev call, deployment or remote publication was used.
 6. After Server/Web no longer depend on them, remove local Admin and Worker
    directories using the recorded recovery commits. Remote deletion remains a
    manual user action.
+
+## P5a Web, persisted thread continuation and local CF1 probe (2026-09-23)
+
+Dashboard now consumes the shared product-v1 list/overview/detail/handling
+contract. PR, CI and Updates share module/scope/view/attention controls, distinct
+Server counts, evidence drawers, optional-note handling, GitHub-ID assignment
+and classification feedback. Updates additionally shows all discovered sources
+by watch context, including sources without Items; it displays partial coverage
+without deriving negative labels. Actual saved release relevance/signal
+projection still requires source-assessment persistence; it is not invented in
+the browser. P5b matrices/full timelines remain deferred.
+
+The new Web client retains nested product errors and uses If-Match plus the
+displayed itemVersion. 409/412 disables mutation until an explicit reload;
+no write is automatically replayed. A synchronous lock prevents duplicate
+submissions. Read keys isolate filters/pages, stale requests abort, old results
+are discarded, failed counts never become zero, and access loss clears rows
+and evidence. The modal traps focus, Escape restores the opener, and expired
+evidence text/unsafe source URLs are not displayed. Dashboard no longer issues
+old scan/finding requests or opens the old issue search. Existing non-Dashboard
+routes are not claimed to be fully migrated.
+
+Server details now return saved Source content and append-only Item
+handlingHistory. Lists omit these heavy fields. Authority is checked before
+return, and Item/current handling/history share one database read snapshot.
+Both additions are documented in product-v1 OpenAPI and tested through session
+and API-key routes.
+
+Thread-enabled scheduled PR reads now persist the nested GraphQL cursor plus
+bounded matched-comment IDs in discovery checkpoints. They drain that cursor
+before advancing the REST inline-comment page and avoid overwriting earlier
+verified matches with unknown fields. Tests rebuild the reader, scheduler and
+ProductStore between ticks and prove continuation survives restart without model
+work or usage. Scope changes reject old REST-only cursors. This is still
+incremental: GraphQL may be revisited per REST page; a completed traversal is not
+an atomic snapshot or deletion proof. Direct-event enrichment remains bounded
+to one page. Effective formal reviews, missed-close discovery and semantic
+thread aggregation remain open.
+
+With explicit user approval, dependencies were installed only for
+cloudflare/probe; Server/Web main manifests and locks remain unchanged. Local
+workerd (Python 3.14.2) imported typesafe-sdk 0.7.0. The local D1 probe passed
+SQL-error rollback, zero-row guard rollback, two-owner/global-slot contention,
+scheduled writes and persistence after an actual runtime stop/restart.
+See cloudflare/probe/README.md for pinned tools, commands and limitations.
+No full CF1/CF2 or remote-platform validation claim is made.
+
+The SDK CPython loopback probe observed a successful synthetic normal response,
+a timeout for slow headers, and no total exit within 2s for a continuously slow
+body despite a 100ms timeout. The parent killed/reaped the test child. This is
+not Workers network validation and does not pass the hard-exit gate. No real
+GitHub/Jev credential or model service was used; production Jev stays disabled.
+
+Verification:
+
+- Test-first failures: missing Web product client/old Dashboard; absent detail
+  history/content; missing nested persistent thread continuation.
+- Web npm run check: **47 files, 612 tests passed**, lint and Vite build passed.
+  Worker and worker-entry syntax checks passed.
+- Server current-target selection: **536 passed, 95 subtests passed** (product*
+  suites, github*contracts suites, CI persistence/triage, PR delivery, shared
+  watch authorization, fixed SDK, Updates, question and legacy-inventory suites).
+  This is a selected regression, not the prior 706-test command.
+- Final directly affected seven-suite regression: **157 passed, 5 subtests
+  passed**. Changed Python modules/tests and isolated probe scripts compiled.
+- Browser fixture checks: 1440px light, dark detail, 390px list/Updates/detail;
+  document scrollWidth/clientWidth both 390px; Escape/focus return; zero browser
+  console errors. Screenshots are under Web output/playwright. This was a local
+  fixture, not authenticated live Server/Cloudflare end-to-end traffic.
+- git diff --check passed (existing line-ending warnings only).
+
+Remote checks were reviewed again, not assumed from the previous baseline.
+Server run 35808171823 on 2eeccb6 fails while checking out the retired Worker,
+before tests run. Web's workflow-run API returned an empty list, so no remote
+passing result is claimed. Local changes remain unpublished.
+
+Read-only Cloudflare inspection confirmed the existing pullwise-web deployment
+on pull-wise.com and www.pull-wise.com (2026-09-08 version
+bc3fa061-c928-4314-bd47-6caa8f0416f9 at 100%) and matching API origin
+https://api.pull-wise.com. No pullwise-server Worker appeared. No deployment,
+DNS, secret, payment configuration or production activation was changed.
+
+## Source assessment persistence and domain D1 probe (2026-09-23)
+
+Continued from the dirty two-project workspace; all earlier changes remain.
+`publish_assessment_result` now supports source-only results with no Item,
+keeping the public assessment/evidence, frozen coverage and dependency fences
+in `source_assessment_publications`. Cache insertion, optional ItemVersion,
+processing consumption and claimed-job completion remain one transaction.
+Configuration/auth/owner/analysis changes reject publication. Source detail
+checks all dependencies in one read snapshot; changing source/context removes
+the current assessment, while disabling analysis alone preserves valid results.
+Repeated stale-claim publication cannot consume twice.
+
+Source lists project saved complete updates-filter/v3 question groups with
+the provisional 0.8 confidence threshold. Unknown/incomplete groups never
+become negative classifications. Release relevance and signals follow the
+same-unit joint table: partial negative evidence stays unclear; entirely
+irrelevant releases have null signals; conflicting unrelated signals cannot
+be borrowed by another relevant unit. No text keyword or Item-label inference
+was added. Current raw answers/evidence are detail-only and context-scoped.
+Coverage is frozen with the assessment so later fact coverage cannot expand
+what the model actually saw. This does not pass the real quality gate.
+
+The shared REST source path now filters relevance/updateSignal in one context
+and trims other contexts from restricted API-key results. Shared watches use
+their targetRepositoryId, not upstream identity, for repository restrictions.
+Web renders these saved source labels and the clicked context's assessments,
+including releases without Items. OpenAPI and both project AGENTS were updated.
+
+The new optional Web contract test invokes `tests/export_source_contract.py`
+against a fresh real SQLite store and shared product REST handler, verifies
+Cookie/API-key DTO equality and zero GET usage/job changes, then renders the
+returned DTO in Web. It is process/DTO integration, not HTTP/proxy/browser
+end-to-end, real GitHub/Jev, or Cloudflare validation. Set
+`PULLWISE_CONTRACT_PYTHON=D:/Python313/python.exe` for the local check; Web-only
+CI explicitly skips this sibling-project test when the variable is absent.
+
+Cloudflare: extended the existing isolated local probe with concurrent claims,
+lease expiry/successor fencing, config/auth cancellation, retry deadlines,
+atomic result/usage/job publication, final-guard rollback, and response replay.
+`verify_domain.py` passed on local workerd; an actual stop/restart followed by
+`verify_domain.py --after-restart` preserved the retry deadline. Deterministic
+clock and synthetic single-job SQL protocol only; not ProductStore adaptation.
+Discarding a completed response tests replay but does not inject network loss.
+The existing `verify_local.py` import/budget/rollback/scheduled checks also passed.
+No installation, dependency upgrade, deployment, credential or payment change.
+
+Test-first evidence: source-only publication rejected None item_id; missing
+release projection import/fields; context restrictions leaked sibling contexts;
+Web lacked source labels; CF domain routes returned 404; missing final-reservation
+fault injection. Each targeted failure was rerun after implementation.
+
+Verification (existing Python 3.13; TEMP/TMP=F:/Pullwise/.test-tmp/discovery):
+
+- Direct Server seven-suite regression: 98 passed. Final source persistence
+  suite after one additional invalidation test: 11 passed.
+- Broader selected regression: 531 passed, 69 subtests passed. Selection was
+  `test_product*.py`, `test_source*.py`, `test_saved_updates_projection.py`,
+  `test_update_filter_contracts.py`, `test_github*contracts.py`,
+  `test_pr_delivery_contracts.py`, `test_shared_watch_authorization.py`,
+  `test_ci*contracts.py`, `test_jev*contracts.py` as matched by rg --files.
+  This differs from prior 536/706 commands and is not a full legacy suite.
+- Web npm run check with the cross-project test enabled: 48 files, 614 tests
+  passed; lint and build passed. After adding API-key parity to the exporter,
+  its cross-project test separately passed again.
+- Changed Python files compiled; git diff --check passed (line-ending notices).
+- Remote status rechecked: Server 35808171823 still failed at retired Worker
+  checkout before tests; Web run list empty. No remote passing CI claim.
+- No new real-browser visual pass in this continuation; prior screenshots
+  remain the earlier fixture baseline, not evidence for these new labels.
+- Both Web hosting entry files passed node --check. Local workerd was stopped;
+  port 8794 had no remaining listener at the end of this increment.
+
+Remaining: PR effective-review verification, missed-close discovery and thread
+semantic aggregation; full source-result production orchestration and broader
+HTTP/proxy integration; D1 monthly/rolling budgets and full multi-source/account/
+Creem mapping; fixed SDK target-runtime bounded network exit. Jev production
+remains disabled. P5b and production operations remain outside this increment.
+
+## Known PR close reconciliation, formal-review proof, and local CF bounds (2026-09-23 continuation)
+
+Scheduled PR discovery now refetches one persisted open parent by number before
+the normal open-list page. `pr_parent_checks` rotates candidates across restarts;
+its timestamp advances only with the permission/config/generation-fenced fact
+write. A real SQLite/scheduler rebuild fixture closes an existing empty-body
+Request changes Item after a missed PR-close webhook, without model work. The
+manual fact-sync path neither queries nor advances this checkpoint. GitHub
+list omission still proves nothing; unseen closed PRs and an atomic full
+snapshot remain outside this bounded compensation.
+The reader scope changed; older saved PR discovery cursors require an explicit
+transition before live rollout. This run did not silently reset checkpoints.
+
+An injected `GitHubPRReviewReader` checks GitHub GraphQL
+`latestOpinionatedReviews` against REST review/reviewer IDs, repository and PR
+identity. A matching current CHANGES_REQUESTED confirms its formal rule;
+later opinionated review marks the older one superseded. Missing reviewer,
+partial page, uncertain transport or changed parent during the REST/GraphQL
+reads cannot confirm an action. A directly refetched DISMISSED review is
+conclusive for its own formal state. Empty-body formal Items close under a
+verified supersession/dismissal; nonempty text remains pending because its
+request meaning is independent. ItemVersion stays monotonic. The GraphQL
+reader uses an injected read-only callback. When the already injected PR
+thread reader exposes that callback, normal composition enables this proof;
+no live GitHub credential or production reader was activated. GitHub's
+[GraphQL PullRequest fields](https://docs.github.com/en/graphql/reference/pulls)
+and [REST review list](https://docs.github.com/en/rest/pulls/reviews) were
+checked for the field and list semantics. Thread-level semantic aggregation
+remains unimplemented.
+
+The isolated local Python Worker/D1 probe now also tests owner/global monthly
+and 60-second rolling attempt budgets with one D1 batch and a real UTC month
+boundary. A denied attempt rolls both scopes and the event back. A real
+workerd stop/restart kept prior-month attempts in the rolling window. It is
+still separate from the job lease/claim batch, not a Server store adapter.
+The domain probe additionally sent a request then closed the local client
+socket before its response; retry settled exactly one assessment and usage
+unit. This does not simulate losing an upstream Jev response.
+
+The fixed SDK 0.7.0 ran inside local Python workerd against a fake local
+provider. A baseline plain transport took 5.173 s for bytes arriving every
+25 ms despite a 100 ms timeout. The probe's injected public httpx2
+`BaseTransport` bounds decoded body size at 1 MiB and checks a synthetic
+2-second total deadline. Normal response succeeded; slow headers timed out;
+continuous slow body exited at ~2 seconds and the local peer observed the
+disconnect; a 2 MiB body was rejected at ~0.1 seconds. The same Worker
+responded normally after each failure. This is a local mechanism test only:
+90-second production setup, real provider behavior, model quality, remote
+Cloudflare runtime and Server/Creem integration have not passed. Jev production
+remains disabled.
+
+Test-first failures included missing `FactPage.reconciled_source_id`, absent
+durable rotation, missing GraphQL review reader and formal-rule withdrawal,
+404 budget/SDK probe routes, and the plain Worker slow stream exceeding the
+test deadline. After implementation, PR/review/rule targeted suites passed,
+then a broader Server selection reported **551 passed, 69 subtests passed**.
+The selection used `test_product*.py`, `test_source*.py`,
+`test_saved_updates_projection.py`, `test_update_filter_contracts.py`,
+`test_github*contracts.py`, `test_github_pr_review_verification.py`,
+`test_pr_delivery_contracts.py`, `test_shared_watch_authorization.py`,
+`test_ci*contracts.py`, and `test_jev*contracts.py`. This is not a full legacy
+suite. Web code did not change in this continuation; its previous `npm run
+check` result remains 48 files/614 tests with lint/build passed. All work is
+local and unpublished.
+
+## PR thread semantics, real Web/HTTP contract and Server-table D1 mapping (2026-09-23)
+
+Continued in both dirty repositories and preserved the pre-existing work. The
+new `pr_followup.reconcile_thread` publishes one stable `pr_thread` Item per
+verified thread/context from saved per-comment pr-followup/v3 answers. Multiple
+labels and source/assessment references are retained; processing remains per
+source. Result publication invokes aggregation inside the same transaction as
+assessment persistence, usage consumption and claimed-job completion. Fact
+sync invokes the same projection without scheduling models or consuming usage.
+
+Replies require a verified same-thread parent and a frozen parent dependency.
+Declaring a dependency without its publication fence is rejected atomically.
+Parent edits invalidate dependent answers even when the child body is unchanged.
+The inline reader now carries the authoritative PR author and complete observed
+GraphQL comment roster; missing bodies/roster, partial traversal, unknown answers
+and lost thread proof remain pending. These changes retain the existing bounded
+thread continuation and do not claim an atomic GitHub snapshot.
+
+Complete unchanged action evidence may inherit only adjacent current handling,
+with a system `handling_carried` audit. No-action progress does not advance
+attention time; new action material and A→B→A cannot revive historical done.
+Uncertain/incomplete transitions deliberately do not inherit completion. PR
+closure and thread resolution remain GitHub facts; comment deletion removes
+only its own contribution and an entirely deleted thread keeps source_deleted.
+Multiple unresolved roles remain visible rather than inferring a handoff from
+completion language. Pure claims/thanks or unknown thread identity create no
+new Item. The candidate 0.8 threshold remains unvalidated by real model data.
+
+Completion claims are model-derived `evidence.progressType=completion_claim`,
+not GitHub facts or action labels. Web displays a neutral explicit distinction
+from verified completion and does not close/reassign on a claim. Existing layout
+and styling remain intact. OpenAPI documents this optional evidence field and
+the existing Item title/facts/actors/timestamps which were missing despite
+`additionalProperties:false`; a real generated Item now validates locally.
+
+`product-http-contract.test.jsx` starts a fresh loopback CPython HTTP server via
+`tests/serve_product_contract.py`. It runs the actual Web client and existing
+Worker proxy function, renders the actual Item DTO, handles it, checks stale
+revision rejection, compares Cookie/API-key GETs, verifies SameSite=None Origin
+rejection, reads a no-Item release and submits manual sync. Successful usage is
+unchanged and no analyze_source jobs appear. It uses a synthetic cookie jar/key
+and Node/React test environment: not real-browser or Cloudflare HTTP execution.
+
+That HTTP test exposed a real defect: `product_api._header` rejected stdlib
+HTTPMessage because it only accepted Mapping, losing If-Match and idempotency
+headers. The minimal HTTPMessage test failed first and now passes. The existing
+source exporter test exceeded Vitest's default 5 seconds during concurrent full
+regression; its test deadline is now 30 seconds, while the subprocess still has
+its own 20-second cap. Both cross-project tests run when
+PULLWISE_CONTRACT_PYTHON is set and explicitly skip in a Web-only environment.
+
+The D1 work is an executable mapping, not a Server migration. See
+`docs/cloudflare-domain-transaction-map.md`. A generated synthetic fixture uses
+actual ProductStore tables and column definitions, then
+`cloudflare/probe/src/server_mapping.py` executes finite claim/admission and
+publication batches. Local workerd/D1 passed competing claims, combined two-scope
+attempt admission, secondary-source and persisted-account CAS, final-reservation
+rollback, atomic assessment/ItemVersion/usage/job writes, preserved synthetic
+billingEvents and replay rejection. An actual stop/restart using
+`.wrangler/server-map-state` retained one attempt/result/used unit. Probe ran on
+loopback port 8796 and was stopped afterward.
+
+The account guard compares a frozen persisted users entry; it does not implement
+monotonic entitlement revisions, paid-period expiry or Creem event writes.
+No payment/credential configuration changed. Existing account encryption,
+OAuth/session, Creem signature/dedup/late/pending behavior must still be adapted
+and validated in the target runtime. The mapped publication is a first-result,
+one-Item case: cached/source-only publication, full thread membership CAS and
+handling, revocation/retry release, reads and scheduler remain CF2 work. No remote
+Cloudflare validation, real GitHub/Jev calls, deployment or production migration
+was performed. Production Jev remains disabled.
+
+Test-first evidence included zero Items for two classified thread comments,
+incorrect handling reset after harmless progress, stale visibility after lost
+thread proof, absent pullAuthor/roster, unfenced parent dependency acceptance,
+wrong entire-deletion closure reason, missing real HTTP headers, completion
+claims rendered under GitHub facts, missing Item schema fields, and absent D1
+mapping commands. Each targeted behavior was rerun after implementation.
+
+Local verification used D:/Python313/python.exe and
+TEMP=TMP=F:/Pullwise/.test-tmp/discovery:
+
+- Broader selected Server regression: **578 passed, 69 subtests**. Selection:
+  `rg --files tests -g 'test_product*.py' -g 'test_source*.py'
+  -g 'test_saved_updates_projection.py' -g 'test_update_filter_contracts.py'
+  -g 'test_github*contracts.py' -g 'test_github_pr_review_verification.py'
+  -g 'test_pr*.py' -g 'test_shared_watch_authorization.py'
+  -g 'test_ci*contracts.py' -g 'test_jev*contracts.py'
+  -g 'test_cloudflare_server_mapping.py'`, passed to `python -m pytest ... -q`.
+  This is not the full legacy suite.
+- After the final deletion-reason regression and OpenAPI additions,
+  `python -m pytest tests/test_pr_thread_semantics.py
+  tests/test_product_openapi_contract.py -q`: **24 passed** (18 thread tests).
+- Separate `tests/test_pr_thread_semantics.py tests/test_billing_contracts.py
+  tests/test_billing_routes.py tests/test_billing_webhooks.py
+  tests/test_cookie_contracts.py`: **128 passed, 15 subtests** at that checkpoint.
+  Payment code was unchanged afterward; this overlaps the thread selection.
+- `tests/validate_thread_contract.py`: actual thread Item conforms to OpenAPI,
+  using existing local PyYAML/jsonschema. It is an optional local check, not a
+  newly installed dependency or a claim about remote CI dependencies.
+- Web `npm run check` with PULLWISE_CONTRACT_PYTHON=D:/Python313/python.exe:
+  **49 files / 615 tests passed**, lint and build passed, including both sibling
+  contract tests. No new real-browser visual pass was performed.
+- `verify_server_mapping.py` and `--after-restart`: passed on local workerd/D1;
+  eight actual-schema SQLite mapping tests also passed. Remote platform gates
+  and real model quality remain unpassed.
+- Remote CI rechecked through gh: Server run 35808171823 remains failed at
+  “Check out the Worker used by Gateway integration”; tests were skipped.
+  Web Actions list is empty. No passing remote CI claim or old Worker restoration.
+
+Next boundary: turn the proven finite persistence commands into an async Server
+adapter with account/entitlement revision and Creem protection, then run the same
+REST/proxy cases on local Workers. Full source-result production orchestration,
+real provider quality/bounded-exit and live-ingestion readiness remain separate
+gates; P5b remains deferred.

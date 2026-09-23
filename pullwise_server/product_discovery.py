@@ -28,6 +28,7 @@ class FactPage:
     next_cursor: str | None
     high_watermark: str
     run_states: tuple[Mapping[str, object], ...] = ()
+    reconciled_source_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -197,9 +198,11 @@ class GitHubWebhookReceiver:
 class ProductFactSync(GitHubWebhookReceiver):
     def __init__(self, store: ProductStore, *, read_page: Callable, processing_budget: Callable,
                  app_id: str, webhook_secret: str, global_active_limit: int = 1000,
-                 owner_active_limit: int = 100, refresh_authorization: Callable | None = None):
+                 owner_active_limit: int = 100, refresh_authorization: Callable | None = None,
+                 read_scheduled_page: Callable | None = None):
         super().__init__(store, app_id=app_id, webhook_secret=webhook_secret)
         self.read_page = read_page
+        self.read_scheduled_page = read_scheduled_page or read_page
         self.processing_budget = processing_budget
         self.global_active_limit = global_active_limit
         self.owner_active_limit = owner_active_limit
@@ -363,7 +366,8 @@ class ProductFactSync(GitHubWebhookReceiver):
             connection.execute("INSERT INTO fact_sync_generations VALUES (?, 1) ON CONFLICT(parent_key) DO UPDATE SET generation=generation+1", (parent,))
             generation = connection.execute("SELECT generation FROM fact_sync_generations WHERE parent_key=?", (parent,)).fetchone()[0]
         try:
-            page = self.read_page(target=target, cursor=checkpoint["discovery_cursor"] if checkpoint and event is None else None,
+            read = self.read_scheduled_page if trigger == TrustedTrigger.SCHEDULED_DISCOVERY else self.read_page
+            page = read(target=target, cursor=checkpoint["discovery_cursor"] if checkpoint and event is None else None,
                                   high_watermark=checkpoint["high_watermark"] if checkpoint and event is None else None,
                                   event=event)
         except GitHubUnavailable as error:
@@ -424,6 +428,13 @@ class ProductFactSync(GitHubWebhookReceiver):
                     coverage=json.loads(old_context["coverage_json"]) if old_context else {})
                 persisted.append((source, record, changed_at))
                 publish_rule_items(store, source=source, record=record, target=target, now=now)
+            if page.reconciled_source_id is not None:
+                if (trigger != TrustedTrigger.SCHEDULED_DISCOVERY or target["module"] != "pr"
+                        or len(persisted) != 1
+                        or persisted[0][0]["sourceId"] != page.reconciled_source_id
+                        or persisted[0][0]["sourceType"] != "pr_state"):
+                    raise ValueError("PR_RECONCILIATION_BINDING_MISMATCH")
+                store.mark_pr_reconciled(page.reconciled_source_id, observed_at=now)
             reconcile_pr_items(store, target=target, now=now)
         # Facts are committed before eligibility, quotas, checkpoints or job admission.
         if trigger is None:

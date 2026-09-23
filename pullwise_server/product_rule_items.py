@@ -80,6 +80,10 @@ def reconcile_pr_items(store, *, target, now):
 def publish_rule_items(store, *, source, record, target, now):
     """Compose with fact persistence; never perform model/network/usage work."""
     with store.atomic() as store, store._immediate() as db:
+        if source['sourceType'] == 'pr_review_comment':
+            from .pr_followup import reconcile_thread
+            reconcile_thread(store, source_id=record['id'], context_id=target['context_id'], now=now)
+            return
         context = target['context_id']
         source_id = record['id']
         current_source = dict(sourceId=source_id, sourceVersion=record['sourceVersion'],
@@ -110,6 +114,21 @@ def publish_rule_items(store, *, source, record, target, now):
                                 lifecycle='source_closed', attentionState='closed', closureReason='source_closed')
                 signature = 'withdrawn:' + row['unit_key']
                 projections.append(RuleItemProjection(row['unit_type'], row['unit_key'], snapshot, signature, True))
+        if (source['sourceType'] == 'pr_review_body'
+                and facts.get('reviewState') in {'CHANGES_REQUESTED', 'DISMISSED'}
+                and facts.get('formalReviewStatus') in {'superseded', 'dismissed'}
+                and source.get('content', {}).get('body') == ''):
+            for row in existing:
+                if row['unit_type'] != 'pr_review_body' or row['unit_key'] != source['externalKey']:
+                    continue
+                if source_id not in {ref['sourceId'] for ref in json.loads(row['sources_json'])}:
+                    continue
+                snapshot = deepcopy(json.loads(row['snapshot_json']))
+                snapshot.update(sourceFacts=dict(deepcopy(facts), ruleClosureDetail='formal_review_withdrawn'),
+                                actionTypes=[], evidence=[], assessments=[], nextActors=[],
+                                lifecycle='superseded', attentionState='closed', closureReason='superseded')
+                projections.append(RuleItemProjection('pr_review_body', row['unit_key'], snapshot,
+                    'formal-review-withdrawn:' + facts['formalReviewStatus'], True))
         projected = {(p.unit_type, p.unit_key) for p in projections}
         # Missing semantic conclusions leave existing actions explicitly unconfirmed.
         # PR request-list omissions have their own conservative reconciliation above.

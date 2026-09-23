@@ -22,6 +22,28 @@ revision; pending or incomplete assessment must not silently close an item.
 
 ## Current product-v1 implementation invariants
 
+- `pr_followup.reconcile_thread` aggregates saved pr-followup/v3 answers inside
+  the fact/result transaction. One verified thread/context has one Item; source
+  publication and processing consumption still occur per comment. All six
+  question bindings, reply dependencies and observed thread roster are required
+  for reliable negatives and adjacent handling inheritance. Missing identities,
+  partial material and stale parent dependencies cannot withdraw a request.
+- Inline reader facts carry pullAuthor and the complete observed GraphQL
+  threadCommentIds roster. A complete GraphQL identity page does not prove that
+  every comment body has been fetched. Aggregation checks both; incremental
+  traversal is not an atomic GitHub snapshot.
+- Product API header handling must accept stdlib HTTPMessage as well as Mapping;
+  dictionary-only route harnesses miss real HTTP If-Match/Idempotency-Key loss.
+- Completion claims belong to model-derived evidence.progressType, never the
+  GitHub sourceFacts block. They cannot close or hand off an Item. Unknown or
+  conflicting thread facts remain null; incomplete membership cannot prove
+  reliable negatives. Optional local validate_thread_contract.py checks actual
+  DTOs against OpenAPI with the already available PyYAML/jsonschema environment.
+- `docs/cloudflare-domain-transaction-map.md` maps actual domain tables to finite
+  local D1 batches. The synthetic account CAS/payment-fact preservation tests
+  are not a Creem runtime adapter or a CF2 pass; account entitlement revisions,
+  effective-period expiry and all production migration gates remain required.
+
 - Server and Web both target Cloudflare; follow deployment appendix 08 alongside
   the PR/CI/Updates product design. P3 adapters and P5a continue in parallel with
   runtime/storage validation. CPython fixtures are not Workers compatibility or
@@ -61,9 +83,17 @@ revision; pending or incomplete assessment must not silently close an item.
   legitimate scheduled reads. Do not weaken permission fields to avoid this.
 - PR receipts persist a validated `pull_number` locator only; review/comment
   bodies and state still come from authoritative refetch. `pr_state.updatedAt`
-  fences stale PR snapshots. REST review pages do not prove an effective formal
-  review or thread resolution: retain raw state and explicit unknown coverage.
-  The open-PR scan does not yet compensate for all missed close events.
+  fences stale PR snapshots. REST review pages alone do not prove an effective
+  formal review or thread resolution. When a bounded GraphQL review reader is
+  injected, use latestOpinionatedReviews with review/reviewer IDs and bracket
+  it with the same PR snapshot; missing/partial evidence stays unknown. Direct
+  dismissed review state removes only the formal rule. Preserve text requests.
+  Scheduled discovery rotates through persisted open parents and refetches one
+  PR detail before the open list. Mark the check only in the fenced fact write;
+  manual sync never reads/advances that checkpoint. This compensates for missed
+  closes of known PRs, not unseen closed PRs or atomic snapshot coverage.
+  The reader scope changed; pre-reconciliation discovery cursors need an
+  explicit checkpoint transition before live rollout, never a silent reset.
 - CI `FactPage.run_states` persist separately in `github_run_states`, under the
   fact transaction's permission/config/generation fence. Retain each attempt;
   older timestamps and terminal-to-nonterminal observations cannot regress it.
@@ -96,7 +126,8 @@ revision; pending or incomplete assessment must not silently close an item.
   repo/PR/thread/comment/reply identity. Each call advances bounded thread or
   comment pagination. Optional REST enrichment only joins matching returned
   comments; missing/partial pages leave unknown, never deleted/resolved.
-  Its continuation cursor is not yet part of the REST scan's persisted cursor.
+  Scheduled reads persist its continuation in the REST discovery cursor;
+  repeated traversal remains incremental, not an atomic complete snapshot.
 - `github_ci_logs` has no default network transport. Its callback must enforce
   public peers/TLS and a hard deadline; late-result checks alone are not proof
   of bounded exit. Keep auth only on the GitHub API hop, redact before storage,
@@ -1482,3 +1513,59 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
 
 - The five verification context APIs accept supplied immutable direct documents and exact canonical refs/digests. They cannot prove live CAS presence, current lease/fence/authorization/model use, in-flight tools, or future source stability. Proposal/work lack transitive cryptographic manifest closure, and the final observation manifest lacks `created_at`.
 - With `oneOf` object roots and `additionalProperties: false`, declare the union of branch properties at the root while keeping every branch closed.
+
+## P5a detail reads and incremental thread continuation
+
+- `publish_assessment_result` also accepts `item_id=None` with no Item revision
+  or action labels. Source-context publication, frozen coverage/evidence,
+  assessment cache, reservation consumption and claimed-job completion remain
+  one transaction; never create an Item solely to persist an irrelevant result.
+- Source detail exposes assessments/evidence inside each authorized context.
+  Source lists expose only relevance/updateSignals; never infer them from Items.
+  Recheck every saved source and authorization/context dependency in one read
+  snapshot. Analysis disable alone preserves unchanged published results.
+- Updates release projection uses complete v3 question groups and the existing
+  offline candidate threshold (0.8), not a validated model-quality claim.
+  Entirely irrelevant releases have null signals; partial coverage cannot give
+  negative release conclusions. Freeze coverage with the published assessment.
+- Restrict and filter Sources at context granularity. A watch restriction must
+  not expose sibling watch assessments. Shared contexts use targetRepositoryId
+  and satisfy both target and watch restrictions when supplied.
+- `tests/export_source_contract.py` emits fresh SQLite/shared-handler DTOs for
+  the sibling Web test. This is local contract integration, not HTTP/Cloudflare
+  end-to-end or a real model evaluation. Use the existing Python test environment.
+- The CF probe's `/domain/*` routes use a deterministic clock and synthetic
+  single-job protocol. Its local D1 lease/fencing/publication/retry checks are
+  not a production ProductStore mapping or upstream provider response-loss
+  injection. The protocol domains remain separate.
+- The isolated `/attempt/*` D1 probe validates UTC month rollover plus
+  owner/global monthly and rolling admission after actual local workerd restart.
+  Its counters are separate from the domain-job probe, so full production
+  admission and D1 mapping remain unproved.
+- A public httpx2 BaseTransport injected into fixed SDK 0.7.0 locally bounded
+  decoded response bytes and slow-body wall time in the Python Worker. Local
+  loopback showed connection close and a successful next request. This uses a
+  synthetic 2-second limit and does not pass the production 90-second,
+  real-model-quality, account/payment, or remote-platform gates.
+
+- Product-v1 Source detail exposes the current saved content; Source lists do
+  not load/return bodies. Item detail exposes handlingHistory in insertion
+  order; lists omit it. Filter current authority before returning either.
+  Item/current handling/history reads share one SQLite read snapshot.
+- GitHubPRReader thread-enabled scheduled scans persist nested GraphQL
+  continuation and bounded matched-comment IDs in the normal discovery cursor.
+  Drain the GraphQL connection before advancing that REST inline-comment page.
+  Do not republish unknown state over already-matched comments on later pages.
+  GraphQL unavailability preserves the checkpoint and Retry-After.
+- Thread-enabled cursor scope differs from REST-only scope; never reuse or
+  silently reset a live checkpoint when toggling the adapter. This remains
+  incremental coverage, with GraphQL read amplification per REST page, not an
+  atomic full snapshot, deletion proof, formal-review history, or semantic
+  thread aggregation.
+- cloudflare/probe is an isolated, approved local experiment, not an application
+  entrypoint. Keep its venvs/runtime/vendor/cache ignored and main dependency
+  manifests unchanged. It proves local workerd imports, a small D1 two-scope
+  admission/rollback case, scheduled ticks and restart persistence only.
+- Fixed SDK 0.7.0 passed imports on local Python Workers; its CPython loopback
+  100ms inactivity timeout did not stop a continuous slow body within 2s.
+  Preserve the separate target-runtime hard-exit gate and keep Jev disabled.

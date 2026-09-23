@@ -1,0 +1,12 @@
+.venv/
+node_modules/
+.wrangler/
+.uv-cache/
+.dev.vars
+.env
+.venv-workers/
+.python/
+python_modules/
+__pycache__/
+*.pyc
+src/server_fixture.py

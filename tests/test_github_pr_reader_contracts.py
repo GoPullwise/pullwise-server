@@ -5,6 +5,7 @@ import pytest
 
 from pullwise_server.github_pr_reader import GitHubPRReader
 from pullwise_server.github_transport import GitHubResponse, GitHubUnavailable
+from pullwise_server.github_pr_reviews import PRReviewPage
 
 
 TARGET = {"module": "pr", "control_key": "repo:42:pr", "repository_id": "github:42", "github_repository_id": "42"}
@@ -26,7 +27,7 @@ INLINE = dict(COMMENT, id=10, pull_request_url=REVIEW["pull_request_url"],
               path="a.py", diff_hunk="@@ -1 +1 @@", in_reply_to_id=6)
 
 
-def reader(*, replacement=None, link=None, page_size=100, thread_reader=None):
+def reader(*, replacement=None, link=None, page_size=100, thread_reader=None, review_reader=None):
     calls = []
     def get(path, *, token):
         calls.append(path)
@@ -45,11 +46,12 @@ def reader(*, replacement=None, link=None, page_size=100, thread_reader=None):
         result = GitHubResponse(200, copy.deepcopy(payload), {"link": link} if link and "reviews?" in path and path.endswith("page=1") else {})
         return replacement(path, result) if replacement else result
     return GitHubPRReader(get_json=get, token_for_target=lambda _: "secret", page_size=page_size,
-                         thread_reader=thread_reader), calls
+                          thread_reader=thread_reader, review_reader=review_reader), calls
 
 
 def read(adapter, cursor=None, high_watermark=None, event=None, target=TARGET):
-    return adapter.read_page(target=target, cursor=cursor, high_watermark=high_watermark, event=event)
+    return adapter.read_page(target=target, cursor=cursor, high_watermark=high_watermark, event=event,
+                             reconcile=cursor is None and event is None and getattr(adapter, "known_open_pull", None) is not None)
 
 
 def advance(adapter, page):
@@ -78,6 +80,92 @@ def test_scan_maps_four_sources_without_inventing_thread_state():
     assert pages[-1].next_cursor is None
     assert all(len(page.sources) <= 100 for page in pages)
     assert len(calls) == 15
+
+
+def test_known_open_parent_is_refetched_before_open_list_and_closed_from_detail_only():
+    def closed_detail(path, response):
+        if path == "/repos/owner/project/pulls/7":
+            return GitHubResponse(200, dict(PR, state="closed", updated_at="2026-09-22T00:00:00Z"), {})
+        return response
+    adapter, calls = reader(replacement=closed_detail)
+    adapter.known_open_pull = lambda target: {"sourceId": "source_pr_state_700", "pullNumber": 7}
+    page = read(adapter)
+    assert page.reconciled_source_id == "source_pr_state_700"
+    assert [(source["sourceType"], source["lifecycle"]) for source in page.sources] == [("pr_state", "source_closed")]
+    assert "/repos/owner/project/pulls/7" in calls
+    assert not any("/pulls?" in path for path in calls)
+    next_page = advance(adapter, page)
+    assert next_page.reconciled_source_id is None
+    assert any("/pulls?" in path for path in calls)
+
+
+def test_known_open_parent_requires_matching_saved_identity_and_valid_cursor():
+    adapter, calls = reader()
+    adapter.known_open_pull = lambda target: {"sourceId": "wrong", "pullNumber": 7}
+    with pytest.raises(ValueError, match="GITHUB_PR_BINDING_INVALID"):
+        read(adapter)
+    adapter.known_open_pull = lambda target: {"sourceId": "source_pr_state_700", "pullNumber": 7}
+    # A forged or old-scope cursor cannot skip the parent check.
+    old_adapter, _ = reader()
+    old_page = read(old_adapter)
+    with pytest.raises(ValueError, match="CURSOR_INVALID"):
+        read(adapter, old_page.next_cursor, old_page.high_watermark)
+
+
+def test_manual_pr_read_does_not_consult_reconciliation_checkpoint():
+    adapter, calls = reader()
+    adapter.known_open_pull = lambda target: pytest.fail("manual read touched durable reconciliation")
+    page = adapter.read_page(target=TARGET, cursor=None, high_watermark=None, event=None)
+    assert page.reconciled_source_id is None
+    assert any("/pulls?" in path for path in calls)
+
+
+def test_formal_review_rule_requires_latest_opinionated_proof():
+    class ReviewProof:
+        def read(self, **kwargs):
+            return PRReviewPage({"2": ("8", "CHANGES_REQUESTED")}, "complete")
+    adapter, _ = reader(review_reader=ReviewProof())
+    review_page = advance(adapter, read(adapter))
+    review = review_page.sources[0]
+    assert review["sourceFacts"]["formalReviewStatus"] == "effective"
+    assert review["sourceFacts"]["pullAuthor"]["githubId"] == "1"
+    assert review["ruleActions"] == ["change_requested"]
+
+
+def test_later_formal_approval_supersedes_rule_without_guessing_text_state():
+    class ReviewProof:
+        def read(self, **kwargs):
+            return PRReviewPage({"2": ("9", "APPROVED")}, "complete")
+    adapter, _ = reader(review_reader=ReviewProof())
+    review = advance(adapter, read(adapter)).sources[0]
+    assert review["sourceFacts"]["formalReviewStatus"] == "superseded"
+    assert review["ruleActions"] == []
+
+
+def test_dismissed_review_from_authoritative_detail_withdraws_formal_rule():
+    adapter, _ = reader(replacement=lambda path, result:
+        GitHubResponse(200, [dict(REVIEW, state="DISMISSED")] if "/reviews?" in path else result.payload, result.headers))
+    review = advance(adapter, read(adapter)).sources[0]
+    assert review["sourceFacts"]["reviewState"] == "DISMISSED"
+    assert review["sourceFacts"]["formalReviewStatus"] == "dismissed"
+    assert review["ruleActions"] == []
+
+
+def test_formal_review_proof_rejects_parent_change_during_graphql_read():
+    class ReviewProof:
+        def read(self, **kwargs):
+            return PRReviewPage({"2": ("8", "CHANGES_REQUESTED")}, "complete")
+    detail_reads = 0
+    def changed_parent(path, result):
+        nonlocal detail_reads
+        if path == "/repos/owner/project/pulls/7":
+            detail_reads += 1
+            if detail_reads == 2:
+                return GitHubResponse(200, dict(PR, body="Changed while checking review"), {})
+        return result
+    adapter, _ = reader(review_reader=ReviewProof(), replacement=changed_parent)
+    with pytest.raises(GitHubUnavailable, match="SNAPSHOT_CHANGED"):
+        advance(adapter, read(adapter))
 
 
 def test_cursor_rejects_other_scope_watermark_and_stage_before_io():
@@ -228,6 +316,16 @@ def test_optional_threads_enrich_matching_partial_inline_page_once():
     assert page.sources[0]["completeness"] == "partial"
 
 
+def test_complete_thread_proof_preserves_roster_and_pull_author_for_semantic_aggregation():
+    from pullwise_server.github_pr_threads import GitHubPRThreadReader
+    adapter, _ = reader(thread_reader=GitHubPRThreadReader(query_json=lambda *a, **k:
+        GitHubResponse(200, thread_payload(more=False))))
+    source = inline_event(adapter).sources[0]
+    assert source["sourceFacts"]["pullAuthor"]["githubId"] == "1"
+    assert source["sourceFacts"]["threadCommentIds"] == ["10"]
+    assert source["completeness"] == "complete"
+
+
 @pytest.mark.parametrize("patch", [{"repository": 99}, {"number": 8}, {"cid": "99"}])
 def test_unmatched_or_wrong_scope_graphql_does_not_change_comment(patch):
     from pullwise_server.github_pr_threads import GitHubPRThreadReader
@@ -272,3 +370,130 @@ def test_mismatched_bound_page_is_not_applied():
     adapter, _ = reader(thread_reader=Threads())
     facts = inline_event(adapter).sources[0]["sourceFacts"]
     assert facts["threadId"] is None and facts["isResolved"] is None
+
+
+def test_thread_scan_persists_nested_cursor_and_restarts_before_advancing_rest():
+    from pullwise_server.github_pr_threads import PRThreadPage
+    seen = []
+    class Threads:
+        def read(self, **kwargs):
+            seen.append(kwargs["after"])
+            if kwargs["after"] is None:
+                return PRThreadPage({}, (), "opaque-nested", "partial", "42", 7)
+            return PRThreadPage({"10": {"threadId": "thread-later", "isResolved": True,
+                "isOutdated": False, "inReplyToId": "6", "threadCoverage": "partial",
+                "associationVerified": True}}, (), None, "complete", "42", 7)
+    adapter, _ = reader(thread_reader=Threads())
+    page = read(adapter)
+    for _ in range(3):
+        page = advance(adapter, page)
+    assert page.next_cursor is not None
+    assert page.sources == ()  # Do not overwrite an earlier verified thread with unknown.
+    assert "secret" not in page.next_cursor
+    restarted, _ = reader(thread_reader=Threads())
+    page = advance(restarted, page)
+    assert seen == [None, "opaque-nested"]
+    assert page.next_cursor is None
+    assert page.sources[0]["sourceFacts"]["threadId"] == "thread-later"
+    assert page.sources[0]["sourceFacts"]["isResolved"] is True
+
+
+def test_thread_scan_does_not_republish_unknown_over_an_already_matched_comment():
+    from pullwise_server.github_pr_threads import PRThreadPage
+    class Threads:
+        def read(self, **kwargs):
+            facts = {"10": {"threadId": "t", "isResolved": True, "isOutdated": False,
+                "inReplyToId": "6", "threadCoverage": "partial", "associationVerified": True}}
+            return PRThreadPage(facts if kwargs["after"] is None else {}, (),
+                "next" if kwargs["after"] is None else None,
+                "partial" if kwargs["after"] is None else "complete", "42", 7)
+    adapter, _ = reader(thread_reader=Threads())
+    page = read(adapter)
+    for _ in range(3):
+        page = advance(adapter, page)
+    assert page.next_cursor
+    assert page.sources[0]["sourceFacts"]["threadId"] == "t"
+    page = advance(adapter, page)
+    assert page.next_cursor is None and page.sources == ()
+
+
+def test_thread_scan_unavailable_is_retryable_not_silent_cursor_completion():
+    class Threads:
+        def read(self, **kwargs):
+            raise GitHubUnavailable(retry_at=12345)
+    adapter, _ = reader(thread_reader=Threads())
+    page = read(adapter)
+    for _ in range(2):
+        page = advance(adapter, page)
+    with pytest.raises(GitHubUnavailable) as error:
+        advance(adapter, page)
+    assert error.value.retry_at == 12345
+
+
+def test_rest_only_cursor_is_not_reused_when_thread_scanning_is_enabled():
+    adapter, _ = reader()
+    first = read(adapter)
+    with_threads, calls = reader(thread_reader=object())
+    with pytest.raises(ValueError, match="CURSOR_INVALID"):
+        advance(with_threads, first)
+    assert calls == []
+
+
+@pytest.mark.parametrize("field,value", [
+    ("threadAfter", 1), ("threadSeen", ["secret"]), ("threadSeen", ["10", "10"]),
+])
+def test_invalid_thread_scan_cursor_fails_before_io(field, value):
+    adapter, calls = reader(thread_reader=object())
+    page = read(adapter)
+    cursor = json.loads(page.next_cursor)
+    cursor[field] = value
+    calls.clear()
+    with pytest.raises(ValueError, match="CURSOR_INVALID"):
+        read(adapter, json.dumps(cursor), page.high_watermark)
+    assert calls == []
+
+
+
+def test_thread_cursor_survives_real_store_and_scheduler_restart(tmp_path, monkeypatch):
+    from pullwise_server.product_store import ProductStore
+    from pullwise_server.product_discovery import ProductFactSync
+    from pullwise_server.github_pr_threads import PRThreadPage
+    now = [1800000000]
+    monkeypatch.setattr("pullwise_server.product_store._now", lambda: now[0])
+    path = tmp_path / "thread-checkpoint.sqlite3"
+    store = ProductStore(path)
+    store.initialize()
+    store.put_repository_service(repository_id="github:42", installation_id="11", billing_owner_id="u",
+        expected_revision=0, enabled=True, modules={"pr": True, "ci": False},
+        analysis_enabled={"pr": False, "ci": False}, allow_member_sync=False,
+        default_assignee_id=None, priority_order=0)
+    calls = []
+    class Threads:
+        def read(self, **kwargs):
+            calls.append(kwargs["after"])
+            facts = {"10": {"threadId": "thread-persisted", "isResolved": True, "isOutdated": False,
+                "inReplyToId": "6", "threadCoverage": "partial", "associationVerified": True}}
+            return PRThreadPage(facts if kwargs["after"] else {}, (),
+                None if kwargs["after"] else "nested-page", "complete" if kwargs["after"] else "partial", "42", 7)
+    for index in range(5):
+        # Reconstruct everything each tick. No in-memory cursor survives.
+        store = ProductStore(path)
+        key = store.set_discovery_authorization(resource_kind="repository", resource_id="github:42",
+            module="pr", github_repository_id="42", installation_id="11", app_id="7",
+            authorization_revision=1, accessible=True, valid_until=now[0] + 300, observed_at=now[0])
+        adapter, _ = reader(thread_reader=Threads())
+        sync = ProductFactSync(store, read_page=adapter.read_page, processing_budget=lambda *args: ("fixture", 10),
+            app_id="7", webhook_secret="fixture")
+        assert sync.run_scheduled(key, now=now[0])["status"] == "completed"
+        if index == 3:
+            with store._read() as connection:
+                saved = connection.execute("SELECT discovery_cursor FROM processing_controls WHERE control_key=?", (key,)).fetchone()[0]
+            assert json.loads(saved)["threadAfter"] == "nested-page"
+        now[0] += 900
+    with store._read() as connection:
+        facts = json.loads(connection.execute("SELECT source_facts_json FROM source_records WHERE source_type='pr_review_comment'").fetchone()[0])
+        assert connection.execute("SELECT COUNT(*) FROM processing_usage_ledger").fetchone()[0] == 0
+        assert connection.execute("SELECT discovery_cursor FROM processing_controls WHERE control_key=?", (key,)).fetchone()[0] is None
+    assert facts["threadId"] == "thread-persisted"
+    assert calls == [None, "nested-page"]
+    assert store.count_jobs(job_type="analyze_source") == 0

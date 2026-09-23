@@ -47,6 +47,14 @@ paths:
         - $ref: '#/components/parameters/RepositoryId'
         - $ref: '#/components/parameters/WatchId'
         - $ref: '#/components/parameters/Cursor'
+        - name: relevance
+          in: query
+          schema: { type: string, enum: [relevant, not_relevant, unclear] }
+          description: Updates only; matches the current watch-context projection.
+        - name: updateSignal
+          in: query
+          schema: { type: string, enum: [migration_stated, deprecation_stated, breaking_change_stated, security_fix_stated] }
+          description: Updates only; requires a present signal in the same relevant change unit.
       responses:
         '200':
           description: Authorized source records, including Updates records without Items.
@@ -347,6 +355,7 @@ components:
       properties:
         id: { type: string }
         watchId: { type: [string, 'null'] }
+        targetRepositoryId: { type: [string, 'null'], description: Shared watch target; never the upstream repository. }
         itemId: { type: [string, 'null'] }
         contextVersion: { type: integer, minimum: 1 }
         processingStatus:
@@ -356,6 +365,17 @@ components:
         analysisEnabled: { type: boolean }
         contextStale: { type: boolean }
         coverage: { $ref: '#/components/schemas/Coverage' }
+        relevance: { type: [string, 'null'], enum: [relevant, not_relevant, unclear, null] }
+        updateSignals:
+          type: object
+          additionalProperties: false
+          properties:
+            migration_stated: { type: [string, 'null'], enum: [present, absent, unclear, null] }
+            deprecation_stated: { type: [string, 'null'], enum: [present, absent, unclear, null] }
+            breaking_change_stated: { type: [string, 'null'], enum: [present, absent, unclear, null] }
+            security_fix_stated: { type: [string, 'null'], enum: [present, absent, unclear, null] }
+        assessments: { type: array, items: { $ref: '#/components/schemas/Assessment' }, description: Current context-bound saved results; detail only. }
+        evidence: { type: array, items: { $ref: '#/components/schemas/Evidence' }, description: Current assessment evidence; detail only. }
     Source:
       type: object
       additionalProperties: false
@@ -364,6 +384,7 @@ components:
         id: { type: string }
         type: { type: string, enum: [pr_state, pr_review_body, pr_review_comment, pr_comment, ci_failure, release] }
         repositoryId: { type: [string, 'null'] }
+        content: { type: object, description: Current saved source material; detail only. }
         sourceVersion: { type: string }
         sourceRevision: { type: integer, minimum: 1 }
         processingMode: { type: string, enum: [rules_only, model] }
@@ -387,6 +408,10 @@ components:
         text: { type: [string, 'null'] }
         segmentAnchor: { type: [string, 'null'] }
         actionTypes: { type: array, items: { type: string } }
+        progressType:
+          type: string
+          enum: [completion_claim]
+          description: Saved model classification of progress; never technical completion or an action label.
     AssessmentBinding:
       type: object
       required: [evidenceIds]
@@ -430,6 +455,21 @@ components:
         module: { type: string, enum: [pr, ci, updates] }
         repositoryId: { type: [string, 'null'] }
         watchId: { type: [string, 'null'] }
+        title: { type: string }
+        sourceUrl: { type: [string, 'null'], format: uri }
+        sourceFacts: { type: object, description: Saved GitHub facts for the handling unit. }
+        nextActors:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [kind, githubId]
+            properties:
+              kind: { type: string, enum: [user, team] }
+              githubId: { type: string }
+        attentionUpdatedAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        lastSyncedAt: { type: string, format: date-time }
         unit:
           type: object
           additionalProperties: false
@@ -446,8 +486,25 @@ components:
         attentionState: { type: string, enum: [needs_action, waiting, optional, needs_confirmation, closed] }
         recoveryStatus: { type: string, enum: [unknown, not_observed, verified] }
         closureReason: { type: [string, 'null'] }
+        handlingHistory: { type: array, description: Append-only records in insertion order; detail only., items: { $ref: '#/components/schemas/HandlingEvent' } }
         handling: { $ref: '#/components/schemas/Handling' }
         revision: { type: integer, minimum: 1 }
+    HandlingEvent:
+      type: object
+      additionalProperties: false
+      required: [id, itemId, itemVersion, actorId, disposition, assigneeId, note, feedback, eventKind, carriedFromItemVersion, createdAt]
+      properties:
+        id: { type: string }
+        itemId: { type: string }
+        itemVersion: { type: integer, minimum: 1 }
+        actorId: { type: string }
+        disposition: { type: string, enum: [open, done, dismissed] }
+        assigneeId: { type: [string, 'null'] }
+        note: { type: [string, 'null'] }
+        feedback: { type: [string, 'null'], enum: [classification_inaccurate, null] }
+        eventKind: { type: string }
+        carriedFromItemVersion: { type: [integer, 'null'] }
+        createdAt: { type: integer, description: Unix timestamp in seconds. }
     Handling:
       type: object
       additionalProperties: false

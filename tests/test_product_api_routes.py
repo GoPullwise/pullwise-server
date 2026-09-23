@@ -273,6 +273,39 @@ class ProductApiRoutesTest(unittest.TestCase):
             observed_at=1_800_000_000,
         )
 
+    def test_item_detail_returns_ordered_versioned_handling_history_only_to_authorized_readers(self):
+        item = self.seed_source_item(source_id="history", source_type="pr_comment", unit_type="pr_comment", module="pr")
+        self.store.patch_item_handling(item_id=item["id"], item_version=item["itemVersion"],
+            expected_revision=item["revision"], actor_id="usr_1", disposition="done", note="Verified")
+        self.store.patch_item_handling(item_id=item["id"], item_version=item["itemVersion"],
+            expected_revision=item["revision"] + 1, actor_id="usr_1", disposition="open")
+        token = self.api_key(["items:read"])
+        detail = RouteHarness(f"/v1/items/{item['id']}", headers={"Authorization": f"Bearer {token}"})
+        app.PullwiseHandler.route(detail, "GET")
+        history = detail.payload["handlingHistory"]
+        self.assertEqual([event["disposition"] for event in history], ["done", "open"])
+        self.assertEqual(history[0]["note"], "Verified")
+        self.assertEqual(history[0]["itemVersion"], item["itemVersion"])
+        listing = RouteHarness("/api/v1/items", cookie=f"{app.SESSION_COOKIE}=ses_1")
+        app.PullwiseHandler.route(listing, "GET")
+        self.assertNotIn("handlingHistory", listing.payload["items"][0])
+        restricted_token = self.api_key(["items:read"], restrictions={"repositoryIds": ["other"]})
+        blocked = RouteHarness(f"/v1/items/{item['id']}", headers={"Authorization": f"Bearer {restricted_token}"})
+        app.PullwiseHandler.route(blocked, "GET")
+        self.assertEqual(blocked.status, HTTPStatus.NOT_FOUND)
+        self.assertNotIn("Verified", json.dumps(blocked.payload))
+
+    def test_source_detail_exposes_current_material_without_creating_an_item_or_model_work(self):
+        self.seed_source_item(source_id="release-material", source_type="release", unit_type=None, module="updates")
+        detail = RouteHarness("/api/v1/sources/release-material", cookie=f"{app.SESSION_COOKIE}=ses_1")
+        app.PullwiseHandler.route(detail, "GET")
+        self.assertEqual(detail.payload["content"], {"text": "evidence for release-material"})
+        self.assertIsNone(detail.payload["contexts"][0]["itemId"])
+        listing = RouteHarness("/api/v1/sources?module=updates", cookie=f"{app.SESSION_COOKIE}=ses_1")
+        app.PullwiseHandler.route(listing, "GET")
+        self.assertNotIn("content", listing.payload["items"][0])
+        self.assertEqual(self.store.count_jobs(job_type="analyze_source"), 0)
+
     def test_sources_items_and_overview_cover_all_modules_and_updates_without_item(self) -> None:
         self.seed_source_item(source_id="pr-1", source_type="pr_comment", unit_type="pr_comment", module="pr")
         self.seed_source_item(source_id="ci-1", source_type="ci_failure", unit_type="ci_job", module="ci")

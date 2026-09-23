@@ -87,6 +87,44 @@ class RuleItemsTest(unittest.TestCase):
             self.assertEqual(snapshot['actionTypes'], ['investigate_failure'])
             self.assertEqual(snapshot['sourceFacts']['recoveryStatus'], 'unknown')
 
+    def test_verified_superseding_review_with_empty_body_closes_only_formal_rule(self):
+        self.source.update(sourceType='pr_review_body', externalKey='review:8',
+            content={'body': ''}, sourceFacts={'pullNumber': 1, 'reviewId': '8',
+                'reviewState': 'CHANGES_REQUESTED', 'formalReviewStatus': 'effective',
+                'pullAuthor': {'githubId': '1'}, 'reviewer': {'githubId': '2'}})
+        self.publish()
+        item = self.rows()[0]
+        self.assertEqual(self.current_snapshot()['actionTypes'], ['change_requested'])
+        self.source['sourceFacts']['formalReviewStatus'] = 'superseded'
+        self.publish(101)
+        closed = self.current_snapshot()
+        self.assertEqual(closed['closureReason'], 'superseded')
+        self.assertEqual(closed['actionTypes'], [])
+        self.assertEqual(self.rows()[0]['id'], item['id'])
+        self.assertEqual(self.rows()[0]['current_item_version'], 2)
+
+    def test_superseded_review_with_text_remains_pending_for_semantic_request(self):
+        self.source.update(sourceType='pr_review_body', externalKey='review:8',
+            content={'body': 'Please add a test.'}, sourceFacts={'pullNumber': 1, 'reviewId': '8',
+                'reviewState': 'CHANGES_REQUESTED', 'formalReviewStatus': 'effective',
+                'pullAuthor': {'githubId': '1'}, 'reviewer': {'githubId': '2'}})
+        self.publish()
+        self.source['sourceFacts']['formalReviewStatus'] = 'superseded'
+        self.publish(101)
+        snapshot = self.current_snapshot()
+        self.assertEqual(snapshot['attentionState'], 'needs_confirmation')
+        self.assertNotEqual(snapshot['closureReason'], 'superseded')
+
+    def test_dismissed_formal_review_closes_existing_empty_body_action(self):
+        self.source.update(sourceType='pr_review_body', externalKey='review:8',
+            content={'body': ''}, sourceFacts={'pullNumber': 1, 'reviewId': '8',
+                'reviewState': 'CHANGES_REQUESTED', 'formalReviewStatus': 'effective',
+                'pullAuthor': {'githubId': '1'}, 'reviewer': {'githubId': '2'}})
+        self.publish()
+        self.source['sourceFacts'].update(reviewState='DISMISSED', formalReviewStatus='dismissed')
+        self.publish(101)
+        self.assertEqual(self.current_snapshot()['closureReason'], 'superseded')
+
     def test_changed_ci_log_evidence_reopens_handling(self):
         self.target['module'] = 'ci'
         self.source.update(sourceType='ci_failure', externalKey='run:1:job:2',

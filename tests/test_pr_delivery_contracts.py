@@ -12,6 +12,8 @@ from unittest.mock import Mock, patch
 
 from pullwise_server.product_discovery import FactPage, ProductFactSync
 from pullwise_server.product_store import ProductStore
+from pullwise_server.github_pr_reader import GitHubPRReader
+from pullwise_server.github_transport import GitHubResponse
 
 
 class PRDeliveryContractsTest(unittest.TestCase):
@@ -98,6 +100,77 @@ class PRDeliveryContractsTest(unittest.TestCase):
         with closing(self.store.connect()) as connection:
             saved = connection.execute("SELECT lifecycle FROM source_records").fetchone()
         self.assertEqual(saved[0], "source_closed")
+
+    def test_reconciliation_rotates_saved_open_parents_and_persists_check_after_fact(self):
+        target = self.store.discovery_target(self.key)
+        for number in (41, 42):
+            self.store.upsert_source_snapshot(
+                source_id=f"source_pr_state_{number}", source_type="pr_state",
+                external_key=f"github:pr_state:{number}", repository_id="github:123",
+                content={"body": ""}, source_facts={"pullNumber": number, "state": "open"},
+                source_url=f"https://github.com/acme/lib/pull/{number}", processing_mode="rules_only",
+                completeness="partial", lifecycle="active", observed_at=self.now)
+            self.store.set_source_context(source_id=f"source_pr_state_{number}", context_id=target["context_id"],
+                context_version=1, configuration_revision=1, authorization_revision=1,
+                authorization_valid_until=self.now + 300, accessible=True, billing_owner_id="usr_1")
+        first = self.store.next_open_pr_for_reconciliation(target)
+        self.assertEqual(first["pullNumber"], 41)
+        self.store.mark_pr_reconciled(first["sourceId"], observed_at=self.now)
+        self.assertEqual(self.store.next_open_pr_for_reconciliation(target)["pullNumber"], 42)
+        self.assertEqual(ProductStore(self.path).next_open_pr_for_reconciliation(target)["pullNumber"], 42)
+
+    def test_rebuilt_scheduler_discovers_missed_close_and_closes_existing_review_item(self):
+        from pullwise_server.github_sources import pr_review_source
+
+        review = pr_review_source(repository_id="github:123", pull_number=42,
+            review={"id": 456, "state": "CHANGES_REQUESTED", "body": "",
+                    "submitted_at": "2026-09-20T00:00:00Z",
+                    "html_url": "https://github.com/acme/lib/pull/42#pullrequestreview-456"})
+        review["sourceFacts"].update(formalReviewStatus="effective", pullState="open")
+        self.reader.return_value = FactPage((review,), None, "")
+        self.sync.run_manual(self.key, now=self.now)
+        item = self.store.list_items_for_billing_owner("usr_1")[0]
+        parent = self.store.upsert_source_snapshot(
+            source_id="source_pr_state_700", source_type="pr_state",
+            external_key="github:pr_state:700", repository_id="github:123",
+            content={"body": ""}, source_facts={"pullNumber": 42, "state": "open",
+                 "updatedAt": "2026-09-20T00:00:00Z"},
+            source_url="https://github.com/acme/lib/pull/42", processing_mode="rules_only",
+            completeness="partial", lifecycle="active", observed_at=self.now)
+        target = self.store.discovery_target(self.key)
+        self.store.set_source_context(source_id=parent["id"], context_id=target["context_id"],
+            context_version=target["context_version"], configuration_revision=target["configuration_revision"],
+            authorization_revision=target["authorization_revision"], authorization_valid_until=target["valid_until"],
+            accessible=True, billing_owner_id="usr_1")
+
+        calls = []
+        def get(path, *, token):
+            calls.append(path)
+            if path in {"/repositories/123", "/repos/acme/lib"}:
+                payload = {"id": 123, "full_name": "acme/lib", "private": False}
+            elif path == "/repos/acme/lib/pulls/42":
+                payload = {"id": 700, "number": 42, "state": "closed", "title": "Fix", "body": "",
+                           "updated_at": "2026-09-21T00:00:00Z", "merged_at": None, "draft": False,
+                           "user": {"id": 1}, "head": {"sha": "abc"}, "base": {"repo": {"id": 123}},
+                           "requested_reviewers": [], "requested_teams": [],
+                           "html_url": "https://github.com/acme/lib/pull/42"}
+            else:
+                raise AssertionError(path)
+            return GitHubResponse(200, payload, {})
+        reopened_store = ProductStore(self.path)
+        reader = GitHubPRReader(get_json=get, token_for_target=lambda target: "fixture",
+                                known_open_pull=reopened_store.next_open_pr_for_reconciliation)
+        scheduler = ProductFactSync(reopened_store, read_page=reader.read_page,
+            read_scheduled_page=lambda **kwargs: reader.read_page(**kwargs, reconcile=True),
+            processing_budget=lambda owner, now: ("fixture", 10), app_id="7", webhook_secret="fixture")
+        self.assertEqual(scheduler.run_scheduled(self.key, now=self.now)["sources"], 1)
+        self.assertIn("/repos/acme/lib/pulls/42", calls)
+        self.assertNotIn("/repos/acme/lib/pulls?per_page=20&state=open&sort=updated&direction=desc&page=1", calls)
+        closed = reopened_store.list_items_for_billing_owner("usr_1")[0]
+        self.assertEqual(closed["id"], item["id"])
+        self.assertEqual(closed["closureReason"], "source_closed")
+        self.assertEqual(reopened_store.next_open_pr_for_reconciliation(target), None)
+        self.assertEqual(reopened_store.count_jobs(job_type="analyze_source"), 0)
 
     def test_parent_close_and_reopen_reconcile_existing_review_item_in_fact_transaction(self):
         from pullwise_server.github_sources import pr_review_source

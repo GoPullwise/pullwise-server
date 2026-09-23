@@ -4,8 +4,9 @@ Each call reads one fact page, bracketed by repository identity verification.
 Polling traverses open PRs in pages of twenty, then each PR's reviews and two
 comment collections. This is incremental coverage, never an atomic snapshot.
 An optional GraphQL reader enriches matching inline comments with thread facts.
-It reads only the first bounded thread page; its continuation cursor is not yet
-joined to the REST scan. Unmatched comments retain unknown thread state.
+Scheduled scans drain the nested GraphQL cursor for each bounded REST comment
+page before advancing. The cursor contains IDs, not bodies or credentials.
+Unmatched comments remain unknown; a traversal is never an atomic snapshot.
 Review submitted_at is a creation fact, not an edit clock. No model work occurs.
 """
 from __future__ import annotations
@@ -18,12 +19,13 @@ from urllib.parse import parse_qs, urlsplit
 
 from .github_release_reader import GitHubReleaseReader, _id, _time
 from .github_pr_threads import PRThreadPage
+from .github_pr_reviews import PRReviewPage
 from .github_sources import _actor, pr_issue_comment_source, pr_review_source
 from .github_transport import GitHubUnavailable
 from .product_discovery import FactPage
 
 
-_STAGES = ("pulls", "reviews", "discussion", "inline")
+_STAGES = ("reconcile", "pulls", "reviews", "discussion", "inline")
 _EVENTS = {"pull_request": "pulls", "pull_request_review": "reviews",
            "issue_comment": "discussion", "pull_request_review_comment": "inline"}
 
@@ -40,21 +42,26 @@ def _positive(value):
 
 class GitHubPRReader(GitHubReleaseReader):
     def __init__(self, *, get_json: Callable, token_for_target: Callable, page_size: int = 100,
-                 thread_reader=None):
+                 thread_reader=None, known_open_pull: Callable | None = None, review_reader=None):
         super().__init__(get_json=get_json, token_for_target=token_for_target, page_size=page_size)
         self.thread_reader = thread_reader
+        self.known_open_pull = known_open_pull
+        self.review_reader = review_reader
 
-    def _enrich_threads(self, sources, repository_id, name, number, token):
+    def _enrich_threads(self, sources, repository_id, name, number, token, *, after=None, strict=False):
         if self.thread_reader is None or not sources:
-            return
+            return set(), None
         owner, repo_name = name.split("/", 1)
         try:
             page = self.thread_reader.read(owner=owner, name=repo_name,
-                github_repository_id=repository_id, pull_number=number, token=token, after=None)
+                github_repository_id=repository_id, pull_number=number, token=token, after=after)
             if (not isinstance(page, PRThreadPage) or page.github_repository_id != repository_id
                     or type(page.pull_number) is not int or page.pull_number != number
                     or page.coverage not in {"complete", "partial"}
-                    or not isinstance(page.comment_facts, Mapping)):
+                    or not isinstance(page.comment_facts, Mapping)
+                    or (page.next_cursor is not None and (
+                        not isinstance(page.next_cursor, str) or not page.next_cursor
+                        or len(page.next_cursor) > 220000 or page.next_cursor == after))):
                 raise ValueError
             updates = []
             for source in sources:
@@ -73,19 +80,27 @@ class GitHubPRReader(GitHubReleaseReader):
                     "inReplyToId", "threadCoverage", "associationVerified")}
                 if page.coverage == "partial":
                     update["threadCoverage"] = "partial"
+                if update["threadCoverage"] == "complete":
+                    update["threadCommentIds"] = sorted(cid for cid, related in page.comment_facts.items()
+                        if related.get("threadId") == facts["threadId"])
                 updates.append((source, update))
         except GitHubUnavailable as error:
-            if error.retry_at is not None:
+            if strict or error.retry_at is not None:
                 raise
             updates = None
         except Exception:
+            if strict:
+                raise GitHubUnavailable("GITHUB_PR_THREADS_UNAVAILABLE") from None
             updates = None
         if updates is None:
             for source in sources:
                 source["sourceFacts"]["threadCoverage"] = "thread_unavailable"
-            return
+            return set(), None
         for source, facts in updates:
             source["sourceFacts"].update(facts)
+            if facts["threadCoverage"] == "complete":
+                source["completeness"] = "complete"
+        return {source["externalKey"].removeprefix("github:pr_review_comment:") for source, _ in updates}, page.next_cursor
 
     def _link(self, headers, path, canonical, query, page):
         link = headers.get("link", "") if isinstance(headers, Mapping) else None
@@ -174,9 +189,9 @@ class GitHubPRReader(GitHubReleaseReader):
                 _invalid()
             clean.update(submitted_at=_time(record.get("submitted_at")), updated_at=None)
             source = pr_review_source(repository_id=target["repository_id"], pull_number=number, review=clean)
-            source["sourceFacts"]["formalReviewStatus"] = "unknown"
+            source["sourceFacts"]["formalReviewStatus"] = "dismissed" if record["state"] == "DISMISSED" else "unknown"
             # A page cannot establish whether a later review supersedes this one.
-            source["sourceFacts"]["reviewHistoryCoverage"] = "incremental"
+            source["sourceFacts"]["reviewHistoryCoverage"] = "direct_review" if record["state"] == "DISMISSED" else "incremental"
             source["ruleActions"] = []
             return source
         clean.update(created_at=_time(record.get("created_at")), updated_at=_time(record.get("updated_at")))
@@ -203,20 +218,29 @@ class GitHubPRReader(GitHubReleaseReader):
         return source
 
     def read_page(self, *, target: Mapping, cursor: str | None, high_watermark: str | None,
-                  event: Mapping | None) -> FactPage:
+                  event: Mapping | None, reconcile: bool = False) -> FactPage:
         if (target.get("module") != "pr" or not isinstance(target.get("control_key"), str)
                 or not target["control_key"] or not isinstance(target.get("repository_id"), str)
                 or not target["repository_id"]):
             raise ValueError("GITHUB_PR_BINDING_INVALID")
         repository_id = _id(target.get("github_repository_id"))
         watermark = _time(high_watermark) if high_watermark else ""
-        scope = hashlib.sha256(json.dumps([target["control_key"], target["repository_id"], repository_id,
-                                          self.page_size, "open-updated-desc-v1"], separators=(",", ":")).encode()).hexdigest()
+        scope_parts = [target["control_key"], target["repository_id"], repository_id,
+                       self.page_size, "open-updated-desc-v1"]
+        if self.known_open_pull is not None:
+            scope_parts.append("known-open-parent-reconciliation-v1")
+        if self.thread_reader is not None:
+            scope_parts.extend(["thread-scan-v1", getattr(self.thread_reader, "page_size", 100)])
+        scope = hashlib.sha256(json.dumps(scope_parts, separators=(",", ":")).encode()).hexdigest()
         state = {"scope": scope, "watermark": watermark, "stage": "pulls", "page": 1,
                  "pulls": [], "nextPullPage": None}
+        if self.known_open_pull is not None:
+            state["reconcile"] = None
+        if self.thread_reader is not None:
+            state.update(threadAfter=None, threadSeen=[])
         if cursor is not None:
             try:
-                if not isinstance(cursor, str) or len(cursor) > 2048:
+                if not isinstance(cursor, str) or len(cursor) > (450000 if self.thread_reader is not None else 2048):
                     raise ValueError
                 saved = json.loads(cursor)
                 if (not isinstance(saved, dict) or set(saved) != set(state) or saved["scope"] != scope
@@ -225,12 +249,31 @@ class GitHubPRReader(GitHubReleaseReader):
                         or not isinstance(saved["pulls"], list) or len(saved["pulls"]) > 20
                         or any(type(n) is not int or not 1 <= n <= 2**63 - 1 for n in saved["pulls"])
                         or len(set(saved["pulls"])) != len(saved["pulls"])
-                        or (saved["stage"] == "pulls") != (not saved["pulls"])
+                        or (saved["stage"] in {"pulls", "reconcile"}) != (not saved["pulls"])
                         or (saved["nextPullPage"] is not None and (type(saved["nextPullPage"]) is not int
                             or not 2 <= saved["nextPullPage"] <= 2**31 - 1))):
                     raise ValueError
+                if self.known_open_pull is not None:
+                    pending = saved["reconcile"]
+                    if (saved["stage"] == "reconcile") != (pending is not None):
+                        raise ValueError
+                    if pending is not None and (not isinstance(pending, dict)
+                            or set(pending) != {"sourceId", "pullNumber"}
+                            or not isinstance(pending["sourceId"], str) or not pending["sourceId"]
+                            or type(pending["pullNumber"]) is not int
+                            or not 1 <= pending["pullNumber"] <= 2**63 - 1):
+                        raise ValueError
+                if self.thread_reader is not None:
+                    seen = saved["threadSeen"]
+                    after = saved["threadAfter"]
+                    if (not isinstance(seen, list) or len(seen) > self.page_size
+                            or any(not isinstance(cid, str) or not re.fullmatch(r"[1-9][0-9]{0,18}", cid) for cid in seen)
+                            or len(set(seen)) != len(seen)
+                            or (after is not None and (not isinstance(after, str) or not after or len(after) > 220000))
+                            or (saved["stage"] != "inline" and (after is not None or seen))):
+                        raise ValueError
                 state = saved
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, RecursionError):
                 raise ValueError("GITHUB_PR_CURSOR_INVALID") from None
         resource = number = None
         if event is not None:
@@ -243,6 +286,15 @@ class GitHubPRReader(GitHubReleaseReader):
             resource = _id(event.get("resource_id"))
             number = _positive(event.get("pull_number"))
             state["stage"] = _EVENTS[event["event"]]
+        elif cursor is None and reconcile and self.known_open_pull is not None:
+            pending = self.known_open_pull(dict(target))
+            if pending is not None:
+                if (not isinstance(pending, Mapping) or set(pending) != {"sourceId", "pullNumber"}
+                        or not isinstance(pending["sourceId"], str) or not pending["sourceId"]
+                        or type(pending["pullNumber"]) is not int
+                        or not 1 <= pending["pullNumber"] <= 2**63 - 1):
+                    raise ValueError("GITHUB_PR_BINDING_INVALID")
+                state.update(stage="reconcile", reconcile=dict(pending))
         try:
             token = self.token_for_target(dict(target))
         except GitHubUnavailable:
@@ -257,10 +309,13 @@ class GitHubPRReader(GitHubReleaseReader):
         root = f"/repos/{name}"
         if number is None and state["pulls"]:
             number = state["pulls"][0]
+        if state["stage"] == "reconcile":
+            number = state["reconcile"]["pullNumber"]
         paths = {"pulls": "/pulls", "reviews": f"/pulls/{number}/reviews",
-                 "discussion": f"/issues/{number}/comments", "inline": f"/pulls/{number}/comments"}
+                 "discussion": f"/issues/{number}/comments", "inline": f"/pulls/{number}/comments",
+                 "reconcile": f"/pulls/{number}"}
         suffix = paths[stage]
-        size = min(20, self.page_size) if stage == "pulls" else self.page_size
+        size = 1 if stage == "reconcile" else min(20, self.page_size) if stage == "pulls" else self.page_size
         params = {"per_page": [str(size)]}
         if stage == "pulls":
             params.update(state=["open"], sort=["updated"], direction=["desc"])
@@ -279,38 +334,95 @@ class GitHubPRReader(GitHubReleaseReader):
                 _invalid()
             next_page = None
         else:
-            if stage != "pulls":
+            if stage == "reconcile":
+                records = [self._get(f"{root}/pulls/{number}", token).payload]
+                next_page = None
+            elif stage != "pulls":
                 pull = self._get(f"{root}/pulls/{number}", token).payload
                 self._pull(pull, target, name)
                 if pull["number"] != number:
                     _invalid()
             query = "&".join(f"{key}={values[0]}" for key, values in params.items())
-            response = self._get(f"{root}{suffix}?{query}&page={page}", token)
-            records = response.payload
-            next_page = self._link(response.headers, root + suffix, f"/repositories/{repository_id}{suffix}", params, page)
+            if stage != "reconcile":
+                response = self._get(f"{root}{suffix}?{query}&page={page}", token)
+                records = response.payload
+                next_page = self._link(response.headers, root + suffix, f"/repositories/{repository_id}{suffix}", params, page)
         if not isinstance(records, list) or len(records) > size:
             _invalid()
         sources = []
         for record in records:
-            source = self._pull(record, target, name) if stage == "pulls" else self._comment(record, stage, target, name, number)
-            if stage != "pulls":
+            source = self._pull(record, target, name) if stage in {"pulls", "reconcile"} else self._comment(record, stage, target, name, number)
+            if stage not in {"pulls", "reconcile"}:
                 source["sourceFacts"]["pullState"] = pull["state"]
+                source["sourceFacts"]["pullAuthor"] = _actor(pull.get("user"))
                 if pull["state"] == "closed":
                     source["lifecycle"] = "source_closed"
             sources.append(source)
+            if stage == "reconcile" and source["sourceId"] != state["reconcile"]["sourceId"]:
+                raise ValueError("GITHUB_PR_BINDING_INVALID")
             changed = source["sourceFacts"].get("updatedAt") or source["sourceFacts"].get("submittedAt")
             if changed and changed > watermark:
                 watermark = changed
+        if stage == "reviews":
+            for source in sources:
+                source["sourceFacts"]["pullAuthor"] = _actor(pull.get("user"))
+            if self.review_reader is not None and any(
+                source["sourceFacts"].get("reviewState") == "CHANGES_REQUESTED" for source in sources
+            ):
+                owner, repo_name = name.split("/", 1)
+                proof = self.review_reader.read(owner=owner, name=repo_name,
+                    github_repository_id=repository_id, pull_number=number, token=token)
+                if not isinstance(proof, PRReviewPage) or proof.coverage not in {"complete", "partial"}:
+                    raise GitHubUnavailable("GITHUB_PR_REVIEWS_UNAVAILABLE")
+                # Bracket the independent GraphQL read with authoritative PR state.
+                current_pull = self._get(f"{root}/pulls/{number}", token).payload
+                checked = self._pull(current_pull, target, name)
+                if checked != self._pull(pull, target, name):
+                    raise GitHubUnavailable("GITHUB_PR_REVIEW_SNAPSHOT_CHANGED")
+                for source in sources:
+                    facts = source["sourceFacts"]
+                    if facts.get("reviewState") != "CHANGES_REQUESTED":
+                        continue
+                    reviewer = facts.get("reviewer")
+                    reviewer_id = reviewer.get("githubId") if isinstance(reviewer, Mapping) else None
+                    status = (proof.status(review_id=facts["reviewId"], reviewer_id=reviewer_id)
+                              if reviewer_id else "unknown")
+                    facts.update(formalReviewStatus=status, reviewHistoryCoverage=proof.coverage)
+                    source["ruleActions"] = ["change_requested"] if status == "effective" else []
         if len({source["sourceId"] for source in sources}) != len(sources):
             _invalid()
+        thread_next = None
         if stage == "inline":
-            self._enrich_threads(sources, repository_id, name, number, token)
+            matched, thread_next = self._enrich_threads(
+                sources, repository_id, name, number, token,
+                after=state.get("threadAfter"), strict=event is None)
+            if self.thread_reader is not None and event is None:
+                seen = set(state["threadSeen"])
+                # Only new verified associations are published while traversing.
+                # At completion publish never-matched comments as explicitly unknown.
+                sources = [source for source in sources
+                           if source["externalKey"].removeprefix("github:pr_review_comment:") in matched
+                           or (thread_next is None and
+                               source["externalKey"].removeprefix("github:pr_review_comment:") not in seen)]
+                state.update(threadAfter=thread_next,
+                             threadSeen=sorted(seen | matched) if thread_next else [])
+                if len(state["threadSeen"]) > self.page_size:
+                    # REST page membership changed mid-traversal. Retry from the
+                    # unchanged durable checkpoint, never grow an unbounded cursor.
+                    raise GitHubUnavailable("GITHUB_PR_THREAD_PAGE_CHANGED")
         after = self._get(root, token).payload
         if self._repository(after, repository_id) != name or after["private"] != repository["private"]:
             _invalid()
         state["watermark"] = watermark
         if event:
             return FactPage(tuple(sources), None, watermark)
+        if stage == "reconcile":
+            checked = state["reconcile"]["sourceId"]
+            state.update(stage="pulls", page=1, reconcile=None)
+            return FactPage(tuple(sources), json.dumps(state, separators=(",", ":")), watermark,
+                            reconciled_source_id=checked)
+        if thread_next:
+            return FactPage(tuple(sources), json.dumps(state, separators=(",", ":")), watermark)
         if stage == "pulls":
             state.update(pulls=[record["number"] for record in records], nextPullPage=next_page, stage="reviews", page=1)
             if not records:
