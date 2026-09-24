@@ -2225,6 +2225,19 @@ proof had expired, as designed. No model attempt or usage increment occurred.
 The expanded local Server target passes **776 tests, 73 subtests**; the
 candidate package sync and diff checks pass.
 
+## Web developer API and key scopes (2026-09-24 continuation)
+
+Web's rendered developer API page now describes the PR/CI/Updates product-v1
+preview, its saved-result/handling/usage/manual fact-sync routes, and the
+Cloudflare Server availability boundary. The old Scan/quota examples and
+dead docs implementation were removed. API key creation offers current
+product scopes, defaulting to the same five read scopes as Server; four write
+scopes require explicit selection. The 390px page's directory changed from
+vertical stacking to horizontal scrolling; local headless Chrome/CDP showed
+`scrollWidth=clientWidth=390`. API screen tests pass **35 tests**. Full Web
+`npm run check` passes **49 files/617 tests**, lint and build. Existing
+untracked `output/` screenshots remain preserved.
+
 ## Private product HTTP cache headers (2026-09-24 continuation)
 
 The local Worker initially omitted `Cache-Control` on authenticated
