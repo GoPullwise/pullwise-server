@@ -45,9 +45,13 @@ revision; pending or incomplete assessment must not silently close an item.
   credential, stable watch control, capacity and idempotency key, then stores
   the watch plus completed 201 response atomically. Replay returns the saved
   response without another watch or usage charge. Public proof staging is
-  synthetic/trusted only; real GitHub resolution and workerd verification of
-  this route remain unconnected under the D1 cost pause. Personal private and
-  shared watch creation remain closed.
+  synthetic/trusted only. `D1PublicUpstreamProofs.refresh` accepts one injected
+  repository read, requires a numeric stable GitHub ID and matching canonical
+  owner/name, and records a newer negative proof on private, renamed, missing,
+  limited or malformed results. Its negative proof blocks new POSTs but does
+  not yet revoke existing watch content; wire that fence before live ingestion.
+  Workerd verification remains unconnected under the D1 cost pause. Personal
+  private and shared watch creation remain closed.
 
 - Derive the local D1 entitlement projection from the persisted storage-form
   users entry with `entitlements_for_user` at a fixed timestamp. Use its

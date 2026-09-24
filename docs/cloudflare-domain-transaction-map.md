@@ -635,6 +635,12 @@ watch and completed 201 replay response atomically; no model work is queued.
 Synthetic Python/SQLite tests cover replay, expiry, Origin, restricted key,
 capacity and proof revocation between read/write. No live GitHub resolver or
 workerd/D1/remote validation ran after the user's cost pause.
+The injected proof refresher performs one repository read, checks a positive
+numeric GitHub repo ID plus canonical owner/name and public visibility, then
+stages a 300-second proof. Private, renamed, missing, rate-limited and malformed
+results stage a higher-revision negative proof in one guarded batch. This
+blocks later creation; the existing-watch content and job revocation transaction
+is still unmapped. Real HTTP transport and live GitHub binding remain disconnected.
 
 Candidate repository list mapping: `repository_directory` stores one complete
 owner snapshot, each installation/App accessibility proof and bounded expiry

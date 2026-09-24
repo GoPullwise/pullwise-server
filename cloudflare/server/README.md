@@ -141,6 +141,12 @@ SameSite=None, and commits the watch with its 201 replay response in one
 guarded batch. The real GitHub resolver that would stage these proofs is not
 connected. No workerd/D1 check of this route was run after the user's cost
 pause.
+The local proof refresher accepts exactly one injected repository read per
+attempt, validates canonical owner/name and numeric stable GitHub ID, and
+atomically replaces an older positive proof with a negative one on private,
+renamed, missing, limited or malformed results. It makes no live GitHub call.
+This fences new POSTs; existing watch content still needs a D1 revocation path.
+Local Python/SQLite tests cover this refresh; CF2/CF3 remain pending.
 Successful Item/watch detail and handling responses include revision `ETag`
 for the shared If-Match contract.
 When `PULLWISE_COOKIE_SAME_SITE=None`, Cookie Item/watch writes require an Origin or

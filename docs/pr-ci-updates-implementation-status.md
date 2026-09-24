@@ -2296,3 +2296,27 @@ creation tests passed after error priority was corrected. The exact
 Server-module package sync and diff check passed. The real GitHub resolver,
 private/shared watch creation, final workerd runtime check and remote CF2/CF3
 remain pending; no Wrangler/workerd/D1 command was run after the cost pause.
+
+## Injected public upstream proof refresh (2026-09-24 continuation)
+
+Test-first refresh coverage began with six failures for the missing method and
+one failure for permissive proof staging. `D1PublicUpstreamProofs.refresh` now
+uses one injected read per attempt, accepts only a matching canonical owner/name,
+positive numeric stable GitHub ID, explicit public visibility and non-private
+result, then publishes a 300-second proof. Private, renamed, missing, limited,
+malformed and transport-error results stage a newer negative proof instead of
+leaving an older positive proof usable. A guarded revision blocks late stale
+publication. Candidate POST checks this proof in its read and write batches;
+synthetic tests verify rejection after a private transition.
+
+This is local Python/SQLite composition only. No real GitHub adapter is wired,
+and negative proof publication does not yet pause or hide content for an
+already-created watch. That revocation transaction, bounded error backoff and
+HTTP transport policy remain prerequisites for live ingestion. CF2/CF3 and the
+Jev bounded-exit/model-quality gates are pending under the cost pause.
+Focused local verification: `tests/test_cloudflare_public_upstream_refresh.py`
+plus `tests/test_cloudflare_product_reads.py` passed 60 tests. The 48-file
+Server CI pytest selection passed 778 tests and 68 subtests on Python 3.13.
+`cloudflare/server/sync_server_modules.py --check` and `git diff --check`
+passed. The latest remote CI success is for `e9c8137`; the two local commits
+and this working-tree slice have no remote CI run. No push was made.
