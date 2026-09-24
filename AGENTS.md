@@ -29,6 +29,10 @@ revision; pending or incomplete assessment must not silently close an item.
   Overview and visualization totals still cover the full authorized scope,
   not just one page. The local SQLite implementation computes these pages
   after authorized projection; this is not a Cloudflare row-cost claim.
+  `/items?q=...` searches only authorized Item title, stable ID/URL and selected
+  GitHub identity fields, case-insensitively, with a 200-character bound; it
+  does not inspect evidence text. Overview and Item visualization filters use
+  the same `q` scope so distribution drilldowns preserve search intent.
 - Local `GET /api/v1/visualizations` supports `workload`, `pr_actions`,
   `ci_failures` and `updates_releases` over already authorized Source/Item
   projections; Item kinds use shared `/items` filters and Updates uses shared

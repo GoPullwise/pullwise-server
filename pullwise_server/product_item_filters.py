@@ -64,6 +64,7 @@ def filter_items(items: list[dict], params: Mapping[str, object], user_id: str,
     ci_stage = _query_value(params, "ciStage")
     ci_symptom = _query_value(params, "ciSymptom")
     classification_state = _query_value(params, "classificationState")
+    query = _query_value(params, "q")
     view = _query_value(params, "view") or "all"
     if view not in {"mine", "unassigned", "waiting", "all"}:
         raise ValueError("INVALID_VIEW")
@@ -75,6 +76,8 @@ def filter_items(items: list[dict], params: Mapping[str, object], user_id: str,
             or ci_stage and ci_stage not in CI_STAGES
             or ci_symptom and ci_symptom not in CI_SYMPTOMS
             or classification_state and classification_state not in {"identified", "unclassified"}):
+        raise ValueError("INVALID_CONFIGURATION")
+    if len(query) > 200 or any(ord(character) < 32 for character in query):
         raise ValueError("INVALID_CONFIGURATION")
     result = []
     for item in items:
@@ -93,6 +96,14 @@ def filter_items(items: list[dict], params: Mapping[str, object], user_id: str,
         if disposition and (item.get("handling") or {}).get("disposition") != disposition:
             continue
         facts = item.get("sourceFacts") or {}
+        if query:
+            searchable = (item.get("title"), item.get("id"), item.get("sourceUrl"),
+                facts.get("pullNumber"), facts.get("runId"), facts.get("jobId"),
+                facts.get("tagName"), facts.get("name")) if isinstance(facts, Mapping) else (
+                item.get("title"), item.get("id"), item.get("sourceUrl"))
+            if not any(query.casefold() in str(value).casefold()
+                       for value in searchable if value is not None):
+                continue
         if ci_stage or ci_symptom or classification_state:
             windows = facts.get("windows") if isinstance(facts, Mapping) else None
             windows = windows if isinstance(windows, list) else []

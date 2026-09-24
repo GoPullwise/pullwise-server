@@ -528,6 +528,11 @@ class ProductApiRoutesTest(unittest.TestCase):
         app.PullwiseHandler.route(filtered, "GET")
         self.assertEqual(filtered.payload["totalCount"], 1)
         self.assertEqual(filtered.payload["data"]["rows"][0]["key"], "ci")
+        searched = RouteHarness("/api/v1/visualizations?kind=workload&q=pr",
+            cookie=cookie)
+        app.PullwiseHandler.route(searched, "GET")
+        self.assertEqual(searched.status, HTTPStatus.OK)
+        self.assertEqual(searched.payload["totalCount"], 1)
         self.assertEqual(self.store.count_jobs(job_type="analyze_source"), before_jobs)
         token = self.api_key(["items:read"], restrictions={"repositoryIds": ["other"]})
         denied = RouteHarness("/v1/visualizations?kind=workload",

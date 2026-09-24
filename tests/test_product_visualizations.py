@@ -110,6 +110,14 @@ def test_updates_table_keeps_release_watch_rows_without_items_or_analysis():
     assert rows["watch-b"]["relevance"] is None
     assert all(value is None for value in rows["watch-b"]["updateSignals"].values())
     assert rows["watch-b"]["itemId"] is None
+    source["contexts"][0]["contextStale"] = True
+    stale = updates_releases_visualization([source], {"watchId": "watch-a"},
+        owner_id="owner", now=1800000000, request_id="req-stale")
+    stale_row = next(row for row in stale["data"]["rows"] if row["watchId"] == "watch-a")
+    assert stale_row["relevance"] is None
+    assert all(state is None for state in stale_row["updateSignals"].values())
+    assert stale_row["evidenceIds"] == []
+    source["contexts"][0]["contextStale"] = False
     first = updates_releases_visualization([source], {"limit": "1"},
         owner_id="owner", now=1800000000, request_id="req-page")
     assert first["hasMore"] and len(first["data"]["rows"]) == 1

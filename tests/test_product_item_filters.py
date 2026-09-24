@@ -56,3 +56,12 @@ def test_ci_stage_and_symptom_must_pair_within_one_window():
                   {**base, "classificationState": "unknown"}):
         with pytest.raises(ValueError, match="INVALID_CONFIGURATION"):
             filter_items(items, query, "", include_view=True)
+
+
+def test_text_query_matches_authorized_item_title_without_scanning_evidence():
+    first = {**_item("pr"), "id": "pr-cache", "title": "Clarify Cache Invalidation"}
+    second = {**_item("pr"), "id": "pr-other", "title": "Review auth flow"}
+    assert filter_items([first, second], {"module": "pr", "q": "cache"},
+        "", include_view=True) == [first]
+    with pytest.raises(ValueError, match="INVALID_CONFIGURATION"):
+        filter_items([first], {"q": "x" * 201}, "", include_view=True)

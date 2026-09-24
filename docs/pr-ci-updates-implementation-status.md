@@ -58,6 +58,27 @@ lint and build). A synthetic local Chrome pass at 390px/1440px in light/dark
 reported no horizontal overflow or page errors. The old `/repos` scan UI and
 remaining non-Dashboard legacy routes are not yet removed.
 
+Follow-up: `/repos` now renders the product management screen too, preserving
+existing GitHub OAuth return links. It is keyed by session user identity so
+switching accounts clears private repository configuration before the new read.
+The `repoAuth=1` automatic GitHub continuation now refreshes the product
+directory after success; a test first kept the pre-refresh empty list and then
+passed after the authorization revision was wired through App and the screen.
+After `/repos` replaced the old scan selector, the App route suite passed
+59/59 with current product and OAuth tests. Full Web `npm run check` passed
+51 files/647 tests, lint and build on its second run. The first run had one
+Windows subprocess timeout in the optional synthetic cross-project Source
+exporter; its focused rerun and the subsequent full run passed without a code
+change. The old `ReposScreen` remains only as direct legacy test/cleanup code.
+Ten App-route assertions for the retired batch-scan page were replaced with
+current product route tests for GitHub connection, service configuration,
+fact-only sync, watch creation, conflict handling and private cache clearing;
+the direct `flow.test.jsx` legacy tests remain until the old components are
+removed. The full Web check passed 51 files/646 tests, build and lint; a later
+lint cleanup removed two newly unused test helpers, and App tests passed 58/58.
+`/scanning`, `/history`, `/issues` and their old runtime paths remain open P4/P6
+cleanup work.
+
 The local REST `/items`, `/sources`, `/watches` and `/repositories` lists now
 use bounded 50-default/100-maximum pages. A cursor binds owner, key resource
 restrictions, filters, limit and visible result fingerprint; stale or crossed
@@ -72,6 +93,26 @@ subtests** after the pagination changes. The Web `npm run check` passed **51
 files and 645 tests**, lint and build. OpenAPI YAML parsed and `git diff
 --check` passed. Remote CI did not exercise these working-tree changes; the
 read-only Actions query failed with GitHub API EOF/TLS timeout.
+Local `/items?q` now searches bounded authorized title/identity fields rather
+than just the displayed page; overview and Item visualizations preserve the
+same search scope for counts and drilldowns. A pure filter test and an HTTP
+visualization test failed before implementation and passed afterward. OpenAPI
+now declares `q`, the complete RepositoryService PUT body and watch priority,
+and removes the unimplemented POST `/repositories` stub. The latest local
+Server CI selection passed 799 tests plus 68 subtests; Web `npm run check`
+passed 51 files/648 tests, lint and build. These remain local-only results.
+The Updates release table now makes saved signal cells keyboard-operable
+drilldowns to their bound evidence ID in the selected watch context. A Web
+test first found only a static label; the focused Dashboard suite passed
+26 tests after wiring evidence focus. No browser-only inference or model
+request was added.
+The follow-up stale-context test first exposed old Updates labels in the table;
+the Server aggregate now clears stale relevance, signals, evidence IDs and
+Item links, and Web hides stale controls. The current local Server CI pytest
+selection passed **799 tests and 68 subtests**; Web `npm run check` passed
+**51 files and 650 tests**, lint and build. These checks include the shared
+workspace visual cleanup pending its own local commit. No new remote CI run
+covers the unpushed changes.
 
 ## P0 baseline
 

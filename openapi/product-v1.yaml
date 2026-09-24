@@ -33,6 +33,7 @@ paths:
         - $ref: '#/components/parameters/RepositoryId'
         - $ref: '#/components/parameters/WatchId'
         - $ref: '#/components/parameters/View'
+        - $ref: '#/components/parameters/SearchQuery'
       responses:
         '200':
           description: Item counts and source coverage for the authorized scope.
@@ -52,6 +53,7 @@ paths:
         - $ref: '#/components/parameters/RepositoryId'
         - $ref: '#/components/parameters/WatchId'
         - $ref: '#/components/parameters/View'
+        - $ref: '#/components/parameters/SearchQuery'
         - $ref: '#/components/parameters/Cursor'
         - name: limit
           in: query
@@ -140,7 +142,9 @@ paths:
         - $ref: '#/components/parameters/RepositoryId'
         - $ref: '#/components/parameters/WatchId'
         - $ref: '#/components/parameters/View'
+        - $ref: '#/components/parameters/SearchQuery'
         - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageLimit'
       responses:
         '200':
           description: Deduplicated current Items for the authorized scope.
@@ -191,7 +195,6 @@ paths:
       parameters:
         - $ref: '#/components/parameters/ItemId'
         - $ref: '#/components/parameters/Cursor'
-        - $ref: '#/components/parameters/PageLimit'
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
@@ -214,10 +217,6 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Page' }
-    post:
-      operationId: createRepositoryService
-      responses:
-        '201': { description: Repository service enabled. }
   /api/v1/repositories/{repositoryId}/service:
     get:
       operationId: getRepositoryService
@@ -230,6 +229,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RepositoryIdPath'
         - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RepositoryServiceInput' }
       responses:
         '200': { description: Repository service updated. }
   /api/v1/repositories/{repositoryId}/sync:
@@ -392,6 +396,11 @@ components:
       name: view
       in: query
       schema: { type: string, enum: [mine, unassigned, waiting, all] }
+    SearchQuery:
+      name: q
+      in: query
+      schema: { type: string, maxLength: 200 }
+      description: Case-insensitive Item title and stable GitHub identity search; does not search evidence text.
     Cursor:
       name: cursor
       in: query
@@ -920,6 +929,29 @@ components:
         sourceCoverage: { type: object }
         lastSyncedAt: { type: [string, 'null'], format: date-time }
         requestId: { type: string }
+    RepositoryServiceInput:
+      type: object
+      additionalProperties: false
+      required: [enabled, modules, analysisEnabled, allowMemberSync, defaultAssigneeId, priorityOrder]
+      properties:
+        enabled: { type: boolean }
+        modules:
+          type: object
+          additionalProperties: false
+          required: [pr, ci]
+          properties:
+            pr: { type: boolean }
+            ci: { type: boolean }
+        analysisEnabled:
+          type: object
+          additionalProperties: false
+          required: [pr, ci]
+          properties:
+            pr: { type: boolean }
+            ci: { type: boolean }
+        allowMemberSync: { type: boolean }
+        defaultAssigneeId: { type: [string, 'null'] }
+        priorityOrder: { type: integer, minimum: 0 }
     WatchInput:
       type: object
       additionalProperties: false
@@ -937,6 +969,7 @@ components:
         includePrerelease: { type: boolean, default: false }
         analysisEnabled: { type: boolean, default: false }
         enabled: { type: boolean, default: true }
+        priorityOrder: { type: integer, minimum: 0, default: 0 }
     SyncJob:
       type: object
       additionalProperties: false

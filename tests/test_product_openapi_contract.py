@@ -45,6 +45,9 @@ class ProductOpenApiContractTest(unittest.TestCase):
         self.assertIn("CIFailuresVisualization:", CONTRACT.read_text(encoding="utf-8"))
         self.assertIn("UpdatesReleaseVisualization:", CONTRACT.read_text(encoding="utf-8"))
         self.assertIn("/api/v1/items/{itemId}/timeline:", CONTRACT.read_text(encoding="utf-8"))
+        self.assertNotIn("operationId: createRepositoryService", CONTRACT.read_text(encoding="utf-8"))
+        self.assertIn("RepositoryServiceInput:", CONTRACT.read_text(encoding="utf-8"))
+        self.assertIn("priorityOrder: { type: integer, minimum: 0", CONTRACT.read_text(encoding="utf-8"))
 
     def test_source_and_item_state_enums_preserve_pending_partial_and_unknown(self) -> None:
         text = CONTRACT.read_text(encoding="utf-8")

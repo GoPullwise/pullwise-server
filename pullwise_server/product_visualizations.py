@@ -17,7 +17,8 @@ PR_ACTIONS = ("change_requested", "reply_needed", "review_requested",
 UPDATE_SIGNALS = ("migration_stated", "deprecation_stated",
                   "breaking_change_stated", "security_fix_stated")
 WORKLOAD_FILTERS = ("module", "repositoryId", "watchId", "view", "attentionState",
-                    "actionType", "lifecycle", "disposition", "pullNumber", "runId")
+                    "actionType", "lifecycle", "disposition", "pullNumber", "runId",
+                    "q")
 
 
 def workload_visualization(items: list[dict], sources: list[dict],
@@ -271,8 +272,9 @@ def updates_releases_visualization(sources: list[dict], params: Mapping[str, obj
                     or identity in seen):
                 raise ValueError("INVALID_CONFIGURATION")
             seen.add(identity)
-            states = context.get("updateSignals") or {}
-            units = context.get("units") or ()
+            stale = bool(context.get("contextStale"))
+            states = {} if stale else context.get("updateSignals") or {}
+            units = () if stale else context.get("units") or ()
             evidence_ids = sorted({evidence_id for unit in units
                 if isinstance(unit, Mapping) for evidence_id in unit.get("evidenceIds") or ()
                 if isinstance(evidence_id, str) and evidence_id})
@@ -287,12 +289,13 @@ def updates_releases_visualization(sources: list[dict], params: Mapping[str, obj
                 "releaseId": release_id, "tagName": facts.get("tagName"),
                 "title": facts.get("name") or facts.get("title"),
                 "publishedAt": facts.get("publishedAt"),
-                "sourceUrl": source.get("sourceUrl"), "itemId": context.get("itemId"),
+                "sourceUrl": source.get("sourceUrl"),
+                "itemId": None if stale else context.get("itemId"),
                 "contextVersion": context.get("contextVersion"),
                 "processingStatus": context.get("processingStatus"),
-                "contextStale": bool(context.get("contextStale")),
+                "contextStale": stale,
                 "coverage": context.get("coverage"),
-                "relevance": context.get("relevance"),
+                "relevance": None if stale else context.get("relevance"),
                 "updateSignals": {signal: states.get(signal) for signal in UPDATE_SIGNALS},
                 "evidenceIds": evidence_ids, "signalEvidenceIds": signal_evidence,
                 "drilldown": {"resource": "sources", "filters": {
