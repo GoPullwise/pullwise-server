@@ -22,6 +22,13 @@ revision; pending or incomplete assessment must not silently close an item.
 
 ## Current product-v1 implementation invariants
 
+- Local `/items`, `/sources`, `/watches` and `/repositories` lists now page at
+  50 by default and 100 maximum. Their opaque cursors bind owner, API-key
+  resource restrictions, filters, limit and a fingerprint of the currently
+  visible rows/versions; changed data or authority rejects an old cursor.
+  Overview and visualization totals still cover the full authorized scope,
+  not just one page. The local SQLite implementation computes these pages
+  after authorized projection; this is not a Cloudflare row-cost claim.
 - Local `GET /api/v1/visualizations` supports `workload`, `pr_actions`,
   `ci_failures` and `updates_releases` over already authorized Source/Item
   projections; Item kinds use shared `/items` filters and Updates uses shared
@@ -34,8 +41,18 @@ revision; pending or incomplete assessment must not silently close an item.
   unclassified failures. Updates rows count Release × watch contexts even
   without an Item or saved assessment; null labels remain null. Source list
   contexts expose saved current change-unit evidence IDs via `units`.
-  Full timelines remain separate implementation work; do not return empty
-  success for them.
+  Local `GET /items/{id}/timeline` rechecks current Item authority and reads
+  saved ItemVersions/handling events in one SQLite snapshot. It emits observed
+  snapshots, first saved assessment IDs and actual handling transitions with
+  explicit time basis; only a persisted `recoveryStatus=verified` CI successor
+  forms a relation. Cursors bind owner, resource restrictions, Item version,
+  revision and limit. Local `source_fact_events` records verified thread
+  resolved/reopened, comment/release edits with advancing authoritative
+  timestamps, explicit PR close/merge and source deletion on changed source
+  revisions. Item timelines attach a journal event only to a saved ItemVersion
+  containing that exact source revision. Partial thread coverage and first
+  observations record no named historical action; unknown GitHub occurrence
+  times remain null.
 - The workspace Cloudflare D1 cost pause applies here: do not run Wrangler,
   workerd or D1 commands, even local probes, until the user explicitly
   authorizes resuming. Use Python/SQLite and static checks meanwhile; keep

@@ -20,6 +20,7 @@ from .product_dto_rules import (
 from .update_filter import project_saved_updates
 from .product_timeline import item_timeline
 from .product_item_filters import apply_item_restrictions
+from .product_source_events import source_transition_events, source_transition_time
 from .product_usage_events import parse_usage_events_query, usage_events_page
 
 
@@ -311,6 +312,18 @@ class ProductStore:
                     created_at INTEGER NOT NULL,
                     UNIQUE(source_id, content_hash)
                 );
+
+                CREATE TABLE IF NOT EXISTS source_fact_events (
+                    id TEXT PRIMARY KEY,
+                    source_id TEXT NOT NULL REFERENCES source_records(source_id),
+                    source_revision INTEGER NOT NULL CHECK (source_revision >= 2),
+                    event_type TEXT NOT NULL,
+                    occurred_at INTEGER,
+                    observed_at INTEGER NOT NULL,
+                    UNIQUE(source_id, source_revision, event_type)
+                );
+                CREATE INDEX IF NOT EXISTS source_fact_events_source_order
+                    ON source_fact_events(source_id, source_revision, observed_at);
 
                 CREATE TABLE IF NOT EXISTS source_contexts (
                     source_id TEXT NOT NULL REFERENCES source_records(source_id),
@@ -1764,6 +1777,20 @@ class ProductStore:
                 """,
                 (version_id, source_id, content_hash, content_json, observed_at),
             )
+            if current is not None and source_revision > int(current["source_revision"]):
+                previous_facts = json.loads(current["source_facts_json"] or "{}")
+                for event_type in source_transition_events(source_type,
+                        previous_facts, source_facts,
+                        previous_content_hash=current["latest_version"],
+                        current_content_hash=version_id,
+                        previous_lifecycle=current["lifecycle"],
+                        current_lifecycle=lifecycle):
+                    connection.execute("""INSERT INTO source_fact_events(
+                        id,source_id,source_revision,event_type,occurred_at,observed_at)
+                        VALUES(?,?,?,?,?,?)""", (
+                            f"source_event_{uuid.uuid4().hex}", source_id,
+                            source_revision, event_type,
+                            source_transition_time(event_type, source_facts), observed_at))
             row = connection.execute("SELECT * FROM source_records WHERE source_id = ?", (source_id,)).fetchone()
         return self._source_record_dto(row, contexts=[])
 
@@ -2012,9 +2039,15 @@ class ProductStore:
             versions = connection.execute("""SELECT item_version,sources_json,
                 snapshot_json,observed_at FROM item_versions WHERE item_id=?
                 ORDER BY item_version""", (item_id,)).fetchall()
+            source_ids = sorted({source["sourceId"] for source in readable[0]["sources"]})
+            placeholders = ",".join("?" for _ in source_ids)
+            source_events = connection.execute("""SELECT id,source_id,source_revision,
+                event_type,occurred_at,observed_at FROM source_fact_events
+                WHERE source_id IN (""" + placeholders + ") ORDER BY observed_at,id",
+                source_ids).fetchall()
             return item_timeline(readable[0], versions, owner_id=billing_owner_id,
                 visibility_key=visibility_key, limit=limit, cursor=cursor,
-                request_id=request_id)
+                request_id=request_id, source_events=source_events)
 
     def publish_item_snapshot(
         self,

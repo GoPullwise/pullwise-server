@@ -20,9 +20,20 @@ def main():
         # Reuse the protected-route test account/session setup; no real credentials.
         user = app.USERS.pop("usr_1")
         user["id"] = "owner"
+        user["githubRepositoryAccess"]["authorizedUserId"] = "owner"
         app.USERS["owner"] = user
         app.SESSIONS["ses_1"]["userId"] = "owner"
+        resolver = patch("pullwise_server.product_api.resolve_upstream_repository",
+            return_value={"id": "github:202", "private": False,
+                          "fullName": "acme/sdk"})
+        resolver.start()
+        fixture.addCleanup(resolver.stop)
         f = ThreadFixture(fixture.db_path)
+        f.store.put_repository_service(repository_id=fixture.repository["id"],
+            installation_id="111", billing_owner_id="owner", expected_revision=0,
+            enabled=True, modules={"pr": True, "ci": False},
+            analysis_enabled={"pr": False, "ci": False},
+            allow_member_sync=False, default_assignee_id=None, priority_order=0)
         f.source("1", "Please add tests.")
         f.source("2", "Done. Why this approach?", reply="1")
         f.publish("1", "change_request")
@@ -46,7 +57,8 @@ def main():
         runner = threading.Thread(target=server.serve_forever, daemon=True)
         runner.start()
         print(json.dumps(dict(origin=f"http://127.0.0.1:{server.server_port}",
-            cookie=f"{app.SESSION_COOKIE}=ses_1", key=key, watchId=watch["id"], releaseId=release["id"])), flush=True)
+            cookie=f"{app.SESSION_COOKIE}=ses_1", key=key, watchId=watch["id"],
+            releaseId=release["id"], repositoryId=fixture.repository["id"])), flush=True)
         if sys.stdin.readline().strip() == "verify":
             unchanged = before == f.store.processing_usage(billing_owner_id="owner", period="period")
             print(json.dumps(dict(unchangedUsage=unchanged, modelJobs=f.store.count_jobs(job_type="analyze_source"))), flush=True)

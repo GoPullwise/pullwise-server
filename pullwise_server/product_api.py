@@ -17,6 +17,8 @@ from .product_store import ProductStore
 from .product_source_filters import apply_source_restrictions, filter_sources
 from .product_item_filters import apply_item_restrictions, filter_items, item_in_view
 from .product_usage_events import parse_usage_events_query
+from .product_pagination import (paged_items, paged_sources, paged_watches,
+                                 paged_repositories)
 from .product_visualizations import (WORKLOAD_FILTERS, workload_visualization,
                                      pr_actions_visualization, ci_failures_visualization,
                                      updates_releases_visualization)
@@ -209,14 +211,19 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
                     "service": store.get_repository_service(repository["id"]),
                 }
             )
-        handler.json(
-            {
-                "items": items,
-                "nextCursor": None,
-                "hasMore": False,
-                "requestId": _request_id(handler),
-            }
-        )
+        raw_limit = _query_value(params, "limit") or "50"
+        try:
+            if set(params) - {"limit", "cursor"} or not raw_limit.isdigit():
+                raise ValueError("INVALID_CONFIGURATION")
+            page = paged_repositories(items, owner_id=user_id,
+                restrictions=restrictions, filters=params, limit=int(raw_limit),
+                cursor=_query_value(params, "cursor") or None,
+                request_id=_request_id(handler))
+        except ValueError as error:
+            _error(handler, HTTPStatus.UNPROCESSABLE_ENTITY, str(error),
+                   "Invalid repository pagination.")
+            return True
+        handler.json(page)
         return True
     if len(segments) == 2 and segments[0] == "jobs":
         job = store.get_background_job(segments[1])
@@ -294,14 +301,19 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
             items = [item for item in items if item["id"] in allowed_watch_ids]
         elif restrictions:
             items = []
-        handler.json(
-            {
-                "items": items,
-                "nextCursor": None,
-                "hasMore": False,
-                "requestId": _request_id(handler),
-            }
-        )
+        raw_limit = _query_value(params, "limit") or "50"
+        try:
+            if set(params) - {"limit", "cursor"} or not raw_limit.isdigit():
+                raise ValueError("INVALID_CONFIGURATION")
+            page = paged_watches(items, owner_id=user_id,
+                restrictions=restrictions, filters=params, limit=int(raw_limit),
+                cursor=_query_value(params, "cursor") or None,
+                request_id=_request_id(handler))
+        except ValueError as error:
+            _error(handler, HTTPStatus.UNPROCESSABLE_ENTITY, str(error),
+                   "Invalid watch pagination.")
+            return True
+        handler.json(page)
         return True
     if len(segments) == 2 and segments[0] == "watches":
         watch = store.get_watch(segments[1])
@@ -365,14 +377,19 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
         _error(handler, HTTPStatus.UNPROCESSABLE_ENTITY, "INVALID_CONFIGURATION", "Invalid source filters.")
         return True
     if segments == ["sources"]:
-        handler.json(
-            {
-                "items": sources,
-                "nextCursor": None,
-                "hasMore": False,
-                "requestId": _request_id(handler),
-            }
-        )
+        raw_limit = _query_value(params, "limit") or "50"
+        try:
+            if not raw_limit.isdigit():
+                raise ValueError("INVALID_CONFIGURATION")
+            page = paged_sources(sources, owner_id=user_id,
+                restrictions=restrictions, filters=params, limit=int(raw_limit),
+                cursor=_query_value(params, "cursor") or None,
+                request_id=_request_id(handler))
+        except ValueError as error:
+            _error(handler, HTTPStatus.UNPROCESSABLE_ENTITY, str(error),
+                   "Invalid Source pagination.")
+            return True
+        handler.json(page)
         return True
     if len(segments) == 2 and segments[0] == "sources":
         source = next((item for item in sources if item["id"] == segments[1]), None)
@@ -478,14 +495,19 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
         return True
     if segments == ["items"]:
         items = filter_items(all_items, params, github_user_id, include_view=True)
-        handler.json(
-            {
-                "items": items,
-                "nextCursor": None,
-                "hasMore": False,
-                "requestId": _request_id(handler),
-            }
-        )
+        raw_limit = _query_value(params, "limit") or "50"
+        try:
+            if not raw_limit.isdigit():
+                raise ValueError("INVALID_CONFIGURATION")
+            page = paged_items(items, owner_id=user_id,
+                restrictions=restrictions, filters=params, limit=int(raw_limit),
+                cursor=_query_value(params, "cursor") or None,
+                request_id=_request_id(handler))
+        except ValueError as error:
+            _error(handler, HTTPStatus.UNPROCESSABLE_ENTITY, str(error),
+                   "Invalid Item pagination.")
+            return True
+        handler.json(page)
         return True
     item = next((candidate for candidate in all_items if candidate["id"] == segments[1]), None)
     if item is None:

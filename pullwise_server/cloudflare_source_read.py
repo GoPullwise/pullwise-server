@@ -127,6 +127,7 @@ class D1SourceReads:
                 projection = project_saved_updates(public_assessment, context["coverage"]) if public_assessment else None
                 context["relevance"] = projection["relevance"] if projection else None
                 context["updateSignals"] = projection["updateSignals"] if projection else {}
+                context["units"] = projection["units"] if projection else []
             if include_content:
                 context["assessments"] = [json.loads(publication["assessment_json"])] if current else []
                 context["evidence"] = json.loads(publication["evidence_json"]) if current else []

@@ -28,6 +28,7 @@ class ProductOpenApiContractTest(unittest.TestCase):
             self.assertIn(path, text)
         self.assertIn("cookieSession: []", text)
         self.assertIn("apiKey: []", text)
+        self.assertIn("PageLimit:", text)
 
     def test_contract_has_no_user_model_submission(self) -> None:
         text = CONTRACT.read_text(encoding="utf-8").lower()

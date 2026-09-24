@@ -32,7 +32,46 @@ whose null labels and no-Item rows remain visible. Current saved Updates
 change-unit evidence IDs are exposed in Source contexts without source text.
 The CI filter test first returned unrelated Items; the Updates Source units
 test first failed with a missing field. Their focused reruns passed. Complete
-Item timelines and remaining P3/P4/P5 functionality are still open.
+Item timeline groundwork now reads all saved ItemVersions and handling events
+under one current-authorization SQLite snapshot, distinguishes observed and
+occurred time, pages under owner/restriction/version/revision-bound cursors,
+and emits CI successor relations only from saved verified recovery. The route
+test first returned 404; focused Server timeline/API tests and Web detail tests
+then passed. A subsequent test-first slice adds append-only
+`source_fact_events` for consecutive verified source revisions: complete
+thread resolved/reopened transitions, comment/release edits with advancing
+provider timestamps, explicit PR close/merge and source deletion. The Item
+timeline attaches these only when a saved ItemVersion references the exact
+source revision. First discovery and partial thread coverage remain generic
+observations. Red tests found the missing table, missing timeline mapping and
+missing Web label; focused tests then passed. Other specific GitHub events and
+remaining P3/P4/P5 functionality are open.
+
+The Web product configuration route `/services` now offers owner repository
+PR/CI service switches and Updates watch creation/edit/archive through the
+shared REST contract, with If-Match, fresh idempotency keys, fact-only sync,
+duplicate-action locks and an archive confirmation. It retains existing
+OAuth/App account entrypoints. Component tests first failed on the missing
+screen/client and premature archive; after implementation 5 focused tests,
+the App route test and full Web `npm run check` passed (51 files, 640 tests,
+lint and build). A synthetic local Chrome pass at 390px/1440px in light/dark
+reported no horizontal overflow or page errors. The old `/repos` scan UI and
+remaining non-Dashboard legacy routes are not yet removed.
+
+The local REST `/items`, `/sources`, `/watches` and `/repositories` lists now
+use bounded 50-default/100-maximum pages. A cursor binds owner, key resource
+restrictions, filters, limit and visible result fingerprint; stale or crossed
+cursors reject with 422. Test-first list cases failed on prior unbounded
+responses and then passed, including unclassified Updates Sources. Web
+`/services` pages repositories and watches independently and labels displayed
+rows as "This page" rather than an account total. A selected shared-watch
+target survives repository page changes. The visualizations still return
+full-scope counts. This is local SQLite behavior; no D1 cost/CF validation.
+The current local Server CI pytest selection passed **798 tests and 68
+subtests** after the pagination changes. The Web `npm run check` passed **51
+files and 645 tests**, lint and build. OpenAPI YAML parsed and `git diff
+--check` passed. Remote CI did not exercise these working-tree changes; the
+read-only Actions query failed with GitHub API EOF/TLS timeout.
 
 ## P0 baseline
 

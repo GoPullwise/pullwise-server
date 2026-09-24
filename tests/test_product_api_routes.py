@@ -152,6 +152,48 @@ class ProductApiRoutesTest(unittest.TestCase):
         self.assertEqual(api_key.payload["items"], session.payload["items"])
         self.assertEqual(session.payload["items"][0]["watchScopeKey"], self.watch["watchScopeKey"])
 
+    def test_watch_list_pages_without_exposing_other_owner(self) -> None:
+        second = self.store.create_watch(owner_id="usr_1", target_repository_id=None,
+            upstream_repository_id="github:456", billing_owner_id="usr_1",
+            interests=["CI"], enabled=True, analysis_enabled=False)
+        self.store.create_watch(owner_id="other", target_repository_id=None,
+            upstream_repository_id="github:789", billing_owner_id="other",
+            interests=["Private"], enabled=True, analysis_enabled=False)
+        cookie = f"{app.SESSION_COOKIE}=ses_1"
+        first = RouteHarness("/api/v1/watches?limit=1", cookie=cookie)
+        app.PullwiseHandler.route(first, "GET")
+        self.assertEqual(first.status, HTTPStatus.OK)
+        self.assertTrue(first.payload["hasMore"])
+        cursor = first.payload["nextCursor"]
+        next_page = RouteHarness(f"/api/v1/watches?limit=1&cursor={cursor}", cookie=cookie)
+        app.PullwiseHandler.route(next_page, "GET")
+        self.assertEqual(next_page.status, HTTPStatus.OK)
+        self.assertEqual({first.payload["items"][0]["id"],
+                          next_page.payload["items"][0]["id"]},
+                         {self.watch["id"], second["id"]})
+        self.assertFalse(next_page.payload["hasMore"])
+
+    def test_repository_list_pages_authorized_manifest_only(self) -> None:
+        other = db.upsert_repository({"github_repo_id": "456", "full_name": "acme/other",
+            "default_branch": "main", "private": 0,
+            "html_url": "https://github.com/acme/other",
+            "clone_url": "https://github.com/acme/other.git"})
+        app.USERS["usr_1"]["githubRepositoryAccess"]["repositoryItems"].append({
+            "id": "456", "githubRepoId": "456", "fullName": "acme/other",
+            "installationId": "111", "defaultBranch": "main"})
+        cookie = f"{app.SESSION_COOKIE}=ses_1"
+        first = RouteHarness("/api/v1/repositories?limit=1", cookie=cookie)
+        app.PullwiseHandler.route(first, "GET")
+        self.assertEqual(first.status, HTTPStatus.OK)
+        self.assertTrue(first.payload["hasMore"])
+        cursor = first.payload["nextCursor"]
+        next_page = RouteHarness(f"/api/v1/repositories?limit=1&cursor={cursor}",
+            cookie=cookie)
+        app.PullwiseHandler.route(next_page, "GET")
+        self.assertEqual({first.payload["items"][0]["id"],
+                          next_page.payload["items"][0]["id"]},
+                         {self.repository["id"], other["id"]})
+
     def test_watch_detail_reuses_owner_and_key_restrictions(self) -> None:
         cookie = RouteHarness(f"/api/v1/watches/{self.watch['id']}",
             cookie=f"{app.SESSION_COOKIE}=ses_1")
@@ -406,6 +448,57 @@ class ProductApiRoutesTest(unittest.TestCase):
         self.assertEqual(overview.payload["viewCounts"]["unassigned"], 3)
         self.assertEqual(overview.payload["sourceCoverage"]["total"], 4)
         self.assertEqual(self.store.count_jobs(job_type="analyze_source"), before_jobs)
+
+    def test_item_list_pages_bind_scope_and_fail_on_changed_snapshot(self) -> None:
+        for index in range(3):
+            self.seed_source_item(source_id=f"paged-{index}",
+                source_type="pr_comment", unit_type="pr_comment", module="pr")
+        cookie = f"{app.SESSION_COOKIE}=ses_1"
+        first = RouteHarness("/api/v1/items?module=pr&limit=1", cookie=cookie)
+        app.PullwiseHandler.route(first, "GET")
+        self.assertEqual(first.status, HTTPStatus.OK)
+        self.assertEqual(len(first.payload["items"]), 1)
+        self.assertTrue(first.payload["hasMore"])
+        cursor = first.payload["nextCursor"]
+        second = RouteHarness(f"/api/v1/items?module=pr&limit=1&cursor={cursor}", cookie=cookie)
+        app.PullwiseHandler.route(second, "GET")
+        self.assertEqual(second.status, HTTPStatus.OK)
+        self.assertNotEqual(second.payload["items"][0]["id"], first.payload["items"][0]["id"])
+        other_scope = RouteHarness(f"/api/v1/items?module=ci&limit=1&cursor={cursor}",
+            cookie=cookie)
+        app.PullwiseHandler.route(other_scope, "GET")
+        self.assertEqual(other_scope.status, HTTPStatus.UNPROCESSABLE_ENTITY)
+        token = self.api_key(["items:read"], restrictions={"repositoryIds": ["repo-1"]})
+        other_authority = RouteHarness(f"/v1/items?module=pr&limit=1&cursor={cursor}",
+            headers={"Authorization": f"Bearer {token}"})
+        app.PullwiseHandler.route(other_authority, "GET")
+        self.assertEqual(other_authority.status, HTTPStatus.UNPROCESSABLE_ENTITY)
+        self.seed_source_item(source_id="paged-new", source_type="pr_comment",
+            unit_type="pr_comment", module="pr")
+        stale = RouteHarness(f"/api/v1/items?module=pr&limit=1&cursor={cursor}", cookie=cookie)
+        app.PullwiseHandler.route(stale, "GET")
+        self.assertEqual(stale.status, HTTPStatus.UNPROCESSABLE_ENTITY)
+
+    def test_source_list_pages_include_unclassified_releases(self) -> None:
+        for index in range(3):
+            self.seed_source_item(source_id=f"release-page-{index}",
+                source_type="release", unit_type=None, module="updates")
+        cookie = f"{app.SESSION_COOKIE}=ses_1"
+        first = RouteHarness("/api/v1/sources?module=updates&limit=1", cookie=cookie)
+        app.PullwiseHandler.route(first, "GET")
+        self.assertEqual(first.status, HTTPStatus.OK)
+        self.assertEqual(len(first.payload["items"]), 1)
+        self.assertTrue(first.payload["hasMore"])
+        cursor = first.payload["nextCursor"]
+        second = RouteHarness(f"/api/v1/sources?module=updates&limit=1&cursor={cursor}",
+            cookie=cookie)
+        app.PullwiseHandler.route(second, "GET")
+        self.assertEqual(second.status, HTTPStatus.OK)
+        self.assertNotEqual(first.payload["items"][0]["id"], second.payload["items"][0]["id"])
+        changed_scope = RouteHarness(f"/api/v1/sources?module=pr&limit=1&cursor={cursor}",
+            cookie=cookie)
+        app.PullwiseHandler.route(changed_scope, "GET")
+        self.assertEqual(changed_scope.status, HTTPStatus.UNPROCESSABLE_ENTITY)
 
     def test_workload_visualization_uses_item_filters_and_authorized_distinct_counts(self) -> None:
         pr = self.seed_source_item(source_id="pr-visual", source_type="pr_comment",

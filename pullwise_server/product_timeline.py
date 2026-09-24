@@ -11,7 +11,7 @@ from .product_dto_rules import iso_timestamp
 
 def item_timeline(item: dict, versions: list[Mapping], *, owner_id: str,
                   visibility_key: str, limit: int, cursor: str | None,
-                  request_id: str) -> dict:
+                  request_id: str, source_events: list[Mapping] | None = None) -> dict:
     if type(limit) is not int or not 1 <= limit <= 100:
         raise ValueError("INVALID_CONFIGURATION")
     revision = item["revision"]
@@ -34,6 +34,7 @@ def item_timeline(item: dict, versions: list[Mapping], *, owner_id: str,
     events = []
     limitations = set()
     seen_assessments = set()
+    version_sources = {}
     for version in versions:
         snapshot = json.loads(version["snapshot_json"])
         historical_sources = json.loads(version["sources_json"])
@@ -43,6 +44,9 @@ def item_timeline(item: dict, versions: list[Mapping], *, owner_id: str,
             limitations.add("historical_source_not_current")
         when = int(version["observed_at"])
         number = int(version["item_version"])
+        for source in source_refs:
+            version_sources.setdefault((source["sourceId"],
+                source["sourceRevision"]), (number, source))
         events.append({"id": f"{item['id']}:iv:{number}:observed", "itemId": item["id"],
             "itemVersion": number, "sourceKind": "github",
             "eventType": "snapshot_observed", "occurredAt": None,
@@ -68,6 +72,24 @@ def item_timeline(item: dict, versions: list[Mapping], *, owner_id: str,
                 "timeBasis": "observed", "sourceRefs": source_refs,
                 "evidenceIds": evidence_ids, "actor": {"kind": "system", "id": "system"},
                 "_sort": (when, number, 1)})
+    for source_event in source_events or ():
+        binding = version_sources.get((source_event["source_id"],
+                                       source_event["source_revision"]))
+        if binding is None or source_event["event_type"] not in {
+                "thread_resolved", "thread_reopened", "comment_edited",
+                "pr_closed", "pr_merged", "release_edited", "source_deleted"}:
+            continue
+        number, source_ref = binding
+        occurred_at = source_event["occurred_at"]
+        when = int(source_event["observed_at"])
+        events.append({"id": source_event["id"], "itemId": item["id"],
+            "itemVersion": number, "sourceKind": "github",
+            "eventType": source_event["event_type"],
+            "occurredAt": iso_timestamp(int(occurred_at)) if occurred_at is not None else None,
+            "observedAt": iso_timestamp(when),
+            "timeBasis": "source" if occurred_at is not None else "observed",
+            "sourceRefs": [source_ref], "evidenceIds": [], "actor": None,
+            "_sort": (when, number, -1)})
     previous = {"disposition": "open", "assigneeId": None, "feedback": None}
     for order, handling in enumerate(item.get("handlingHistory") or ()):
         when = int(handling["createdAt"])

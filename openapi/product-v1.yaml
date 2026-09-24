@@ -98,6 +98,7 @@ paths:
         - $ref: '#/components/parameters/RepositoryId'
         - $ref: '#/components/parameters/WatchId'
         - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageLimit'
         - name: relevance
           in: query
           schema: { type: string, enum: [relevant, not_relevant, unclear] }
@@ -190,6 +191,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/ItemId'
         - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageLimit'
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
@@ -203,6 +205,9 @@ paths:
   /api/v1/repositories:
     get:
       operationId: listRepositoryServices
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageLimit'
       responses:
         '200':
           description: Authorized repository service configurations.
@@ -250,6 +255,9 @@ paths:
   /api/v1/watches:
     get:
       operationId: listUpdateWatches
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageLimit'
       responses:
         '200':
           description: Authorized personal and shared update watches.
@@ -388,6 +396,10 @@ components:
       name: cursor
       in: query
       schema: { type: string }
+    PageLimit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
     UsageLimit:
       name: limit
       in: query
@@ -431,7 +443,7 @@ components:
         itemId: { type: string }
         itemVersion: { type: integer, minimum: 1 }
         sourceKind: { type: string, enum: [github, model, handling] }
-        eventType: { type: string, enum: [snapshot_observed, assessed, disposition_changed, assignee_changed, feedback_changed, disposition_carried_forward] }
+        eventType: { type: string, enum: [snapshot_observed, thread_resolved, thread_reopened, comment_edited, pr_closed, pr_merged, release_edited, source_deleted, assessed, disposition_changed, assignee_changed, feedback_changed, disposition_carried_forward] }
         occurredAt: { type: [string, 'null'], format: date-time }
         observedAt: { type: string, format: date-time }
         timeBasis: { type: string, enum: [source, observed] }
