@@ -34,6 +34,7 @@ TABLES = (
     "request_idempotency",
     "repository_services",
     "repository_directory",
+    "public_upstream_proofs",
     "processing_controls",
     "discovery_targets",
     "billing_public_catalog",

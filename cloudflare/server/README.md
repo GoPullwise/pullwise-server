@@ -15,6 +15,8 @@ public `GET /billing/plan` from a fresh trusted D1 catalog projection,
 `PATCH /api/v1/items/{id}` for handling, and
 `PATCH /api/v1/watches/{id}` and `DELETE /api/v1/watches/{id}` for owner public
 watch configuration/archive, and
+`POST /api/v1/watches` for an owner public upstream with a fresh trusted
+resolution proof and atomic Idempotency-Key replay, and
 `GET /api/v1/jobs/{id}` for requester-owned manual sync status,
 `POST /api/v1/watches/{id}/sync` for owner public watches and
 `POST /api/v1/repositories/{id}/sync` for managed owner repositories, and
@@ -131,8 +133,14 @@ restrictions and hides shared-watch Jobs when the parent repository service is
 inactive; these checks share the read batch.
 Public watch PATCH/DELETE recheck Cookie/API-key, stored user, owner, resource
 restriction and revision in the read snapshot and guarded write batch. They
-do not enqueue analysis. Private/shared watch writes and public-watch creation
-are still unported.
+do not enqueue analysis. Private/shared watch writes remain unported.
+Owner-public creation requires a trusted `public_upstream_proofs` row valid
+for at most 300 seconds; its HTTP read never calls GitHub. It rejects
+resource-restricted keys for a personal watch, checks Cookie Origin under
+SameSite=None, and commits the watch with its 201 replay response in one
+guarded batch. The real GitHub resolver that would stage these proofs is not
+connected. No workerd/D1 check of this route was run after the user's cost
+pause.
 Successful Item/watch detail and handling responses include revision `ETag`
 for the shared If-Match contract.
 When `PULLWISE_COOKIE_SAME_SITE=None`, Cookie Item/watch writes require an Origin or
@@ -217,7 +225,7 @@ or D1 probes are authorized.
 
 ## Remaining gates
 
-- Repository creation, public-watch creation, private/shared watch mutations,
+- Repository creation, private/shared watch creation and mutations,
   visualization, sync and other
   product-v1 REST paths are not routed yet. Session issuance, OAuth/App
   lifecycle, bounded API-key last-used/rotation policy and complete authorization still need D1

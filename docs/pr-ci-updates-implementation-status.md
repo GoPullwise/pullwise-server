@@ -2277,3 +2277,22 @@ mapping (765 tests, 68 subtests); the packed-row refinement then passed the
 last known remote Server Action remains the old `7a1ade3` run that fails
 before tests at retired Worker checkout. No new remote CI result exists for
 this local commit.
+
+## Candidate owner-public watch creation (2026-09-24 continuation)
+
+Test-first candidate `POST /api/v1/watches` now consumes a saved trusted
+public-upstream proof (stable repo ID, public visibility, owner/name and a
+300-second deadline). It requires Cookie or unrestricted API key with
+`watches:write`, exact public-personal body, Idempotency-Key and SameSite=None
+Origin. The existing D1 watch command now rechecks credential, account,
+public proof, owner capacity, stable watch control and idempotency key in its
+write batch. Watch creation and the completed 201 response are atomic;
+same-key replay returns the saved response, with no model attempt or new
+processing usage. Full-capacity returns 402. Relevant local Python/SQLite
+tests passed 107 cases after initial 404 and capacity failures. The current
+CI pytest selection then passed 769 tests and 68 subtests locally. A later
+duplicate-watch/full-capacity regression failed first, then the seven focused
+creation tests passed after error priority was corrected. The exact
+Server-module package sync and diff check passed. The real GitHub resolver,
+private/shared watch creation, final workerd runtime check and remote CF2/CF3
+remain pending; no Wrangler/workerd/D1 command was run after the cost pause.

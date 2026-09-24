@@ -150,6 +150,132 @@ def test_injected_repository_pages_must_close_before_directory_publication(tmp_p
         {"Cookie": "pw_session=session-local"}, fixture.now)[0] == 200
 
 
+def test_public_watch_post_requires_fresh_public_proof_and_atomic_replay(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("watches:write", "watches:read"))
+    binding = D1ShapedSQLite(fixture.store)
+    from pullwise_server.cloudflare_public_upstream import D1PublicUpstreamProofs
+    asyncio.run(D1PublicUpstreamProofs(binding).stage(
+        owner="acme", repository="toolkit", github_repo_id="github:101",
+        full_name="acme/toolkit", public_visible=True, private=False,
+        source_revision=1, observed_at=fixture.now,
+        valid_until=fixture.now + 300))
+    body = json.dumps({"upstream": {"owner": "acme", "repository": "toolkit"},
+        "targetRepositoryId": None, "interests": ["OAuth"], "enabled": True}).encode()
+    async def read_body():
+        return body
+    headers = {"Cookie": "pw_session=session-local", "Content-Length": str(len(body)),
+        "Idempotency-Key": "create-watch-1"}
+    async def post():
+        return await handle_http_request(method="POST", path="/api/v1/watches",
+            headers=headers, read_body=read_body, binding=binding,
+            creem_secret="", configured_products={}, now=fixture.now)
+    first_status, first = asyncio.run(post())
+    assert first_status == 201 and first["upstreamRepositoryId"] == "github:101"
+    assert first["analysisEnabled"] is False
+    assert asyncio.run(post()) == (201, first)
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT COUNT(*) FROM update_watches").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM provider_attempts").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM processing_usage_ledger").fetchone()[0] == 1
+
+
+def test_public_watch_post_rejects_expired_proof_restricted_key_and_origin(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("watches:write",),
+        restrictions='{"watchIds":["other"]}')
+    binding = D1ShapedSQLite(fixture.store)
+    from pullwise_server.cloudflare_public_upstream import D1PublicUpstreamProofs
+    asyncio.run(D1PublicUpstreamProofs(binding).stage(
+        owner="acme", repository="toolkit", github_repo_id="github:101",
+        full_name="acme/toolkit", public_visible=True, private=False,
+        source_revision=1, observed_at=fixture.now,
+        valid_until=fixture.now + 300))
+    body = json.dumps({"upstream": {"owner": "acme", "repository": "toolkit"},
+        "interests": ["OAuth"]}).encode()
+    async def read_body():
+        return body
+    headers = {"Authorization": f"Bearer {TOKEN}", "Content-Length": str(len(body)),
+        "Idempotency-Key": "create-watch-2"}
+    async def post(headers, now=fixture.now, **options):
+        return await handle_http_request(method="POST", path="/api/v1/watches",
+            headers=headers, read_body=read_body, binding=binding,
+            creem_secret="", configured_products={}, now=now, **options)
+    assert asyncio.run(post(headers))[0] == 403
+    cookie = {"Cookie": "pw_session=session-local", "Content-Length": str(len(body)),
+        "Idempotency-Key": "create-watch-2"}
+    assert asyncio.run(post({**cookie, "Origin": "https://evil.example"},
+        cookie_same_site="None", trusted_origins={"https://app.example"}))[0] == 403
+    assert asyncio.run(post(cookie, fixture.now + 301))[0] == 503
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT COUNT(*) FROM update_watches").fetchone()[0] == 0
+
+
+def test_public_watch_post_rolls_back_when_public_proof_changes_before_write(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("watches:write",))
+    binding = D1ShapedSQLite(fixture.store)
+    from pullwise_server.cloudflare_public_upstream import D1PublicUpstreamProofs
+    asyncio.run(D1PublicUpstreamProofs(binding).stage(
+        owner="acme", repository="toolkit", github_repo_id="github:101",
+        full_name="acme/toolkit", public_visible=True, private=False,
+        source_revision=1, observed_at=fixture.now,
+        valid_until=fixture.now + 300))
+    batches = 0
+    def revoke_before_write():
+        nonlocal batches
+        batches += 1
+        if batches == 2:
+            with fixture.store._immediate() as db:
+                db.execute("UPDATE public_upstream_proofs SET public_visible=0")
+    binding.before_batch = revoke_before_write
+    body = json.dumps({"upstream": {"owner": "acme", "repository": "toolkit"},
+        "interests": ["OAuth"]}).encode()
+    async def read_body():
+        return body
+    status, _ = asyncio.run(handle_http_request(method="POST",
+        path="/api/v1/watches", headers={"Cookie": "pw_session=session-local",
+            "Content-Length": str(len(body)), "Idempotency-Key": "race-watch"},
+        read_body=read_body, binding=binding, creem_secret="",
+        configured_products={}, now=fixture.now))
+    assert status == 409
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT COUNT(*) FROM update_watches").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM request_idempotency").fetchone()[0] == 0
+
+
+def test_public_watch_post_reports_owner_capacity_without_creating_watch(tmp_path):
+    fixture, _, frozen = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("watches:write",))
+    from pullwise_server.product_entitlement_rules import entitlements_for_user
+    limit = entitlements_for_user(json.loads(frozen),
+        timestamp=fixture.now)["entitlements"]["activeWatchLimit"]
+    for number in range(limit):
+        fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+            upstream_repository_id=f"github:{number + 200}",
+            billing_owner_id="owner", interests=["OAuth"],
+            enabled=True, analysis_enabled=False)
+    binding = D1ShapedSQLite(fixture.store)
+    from pullwise_server.cloudflare_public_upstream import D1PublicUpstreamProofs
+    asyncio.run(D1PublicUpstreamProofs(binding).stage(
+        owner="acme", repository="toolkit", github_repo_id="github:101",
+        full_name="acme/toolkit", public_visible=True, private=False,
+        source_revision=1, observed_at=fixture.now,
+        valid_until=fixture.now + 300))
+    body = json.dumps({"upstream": {"owner": "acme", "repository": "toolkit"},
+        "interests": ["OAuth"]}).encode()
+    async def read_body():
+        return body
+    status, payload = asyncio.run(handle_http_request(method="POST",
+        path="/api/v1/watches", headers={"Cookie": "pw_session=session-local",
+            "Content-Length": str(len(body)), "Idempotency-Key": "full-capacity"},
+        read_body=read_body, binding=binding, creem_secret="",
+        configured_products={}, now=fixture.now))
+    assert status == 402 and payload["error"]["code"] == "WATCH_LIMIT_REACHED"
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT COUNT(*) FROM update_watches").fetchone()[0] == limit
+
+
 def test_cookie_me_and_api_key_usage_match_existing_read_dtos(tmp_path):
     fixture, _, frozen = seed(tmp_path / "domain.db")
     _seed_auth(fixture)

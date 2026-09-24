@@ -26,6 +26,25 @@ def test_public_watch_creation_uses_persisted_owner_entitlement(tmp_path):
         assert db.execute("SELECT COUNT(*) FROM provider_attempts").fetchone()[0] == 0
 
 
+def test_duplicate_public_watch_precedes_full_owner_capacity(tmp_path):
+    fixture, _, frozen = seed(tmp_path / "domain.db")
+    adapter = D1WatchTransactions(D1ShapedSQLite(fixture.store))
+    asyncio.run(adapter.create_public_watch(owner_id="owner",
+        resolved_public_repository_id="github:101", interests=["OAuth"],
+        enabled=True, analysis_enabled=False, now=fixture.now))
+    limit = entitlements_for_user(json.loads(frozen),
+        timestamp=fixture.now)["entitlements"]["activeWatchLimit"]
+    for number in range(limit - 1):
+        fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+            upstream_repository_id=f"github:{number + 200}",
+            billing_owner_id="owner", interests=["OAuth"],
+            enabled=True, analysis_enabled=False)
+    with pytest.raises(ValueError, match="WATCH_ALREADY_EXISTS"):
+        asyncio.run(adapter.create_public_watch(owner_id="owner",
+            resolved_public_repository_id="github:101", interests=["OAuth"],
+            enabled=True, analysis_enabled=False, now=fixture.now))
+
+
 def test_recreated_watch_scope_advances_context_version_after_changed_interest(tmp_path):
     fixture, _, _ = seed(tmp_path / "domain.db")
     adapter = D1WatchTransactions(D1ShapedSQLite(fixture.store))

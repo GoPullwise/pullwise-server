@@ -158,6 +158,16 @@ class ProductStore:
                     item_count INTEGER NOT NULL,
                     items_json TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS public_upstream_proofs (
+                    lookup_key TEXT PRIMARY KEY,
+                    github_repo_id TEXT NOT NULL,
+                    full_name TEXT NOT NULL,
+                    public_visible INTEGER NOT NULL,
+                    private INTEGER NOT NULL,
+                    source_revision INTEGER NOT NULL,
+                    observed_at INTEGER NOT NULL,
+                    valid_until INTEGER NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS fact_sync_generations (
                     parent_key TEXT PRIMARY KEY,
                     generation INTEGER NOT NULL

@@ -38,6 +38,16 @@ revision; pending or incomplete assessment must not silently close an item.
   expired, inconsistent or account-changed proof returns 503, never a partial
   success. API-key `repositoryIds` narrows the complete result; repositories
   without a service remain listed. Real GitHub App refresh is unconnected.
+- Candidate owner-public `POST /api/v1/watches` requires a saved 300-second
+  `public_upstream_proofs` row from a trusted resolver, an unrestricted
+  `watches:write` principal, exact body, Idempotency-Key and Cookie Origin
+  where SameSite=None. The write batch rechecks the proof, account,
+  credential, stable watch control, capacity and idempotency key, then stores
+  the watch plus completed 201 response atomically. Replay returns the saved
+  response without another watch or usage charge. Public proof staging is
+  synthetic/trusted only; real GitHub resolution and workerd verification of
+  this route remain unconnected under the D1 cost pause. Personal private and
+  shared watch creation remain closed.
 
 - Derive the local D1 entitlement projection from the persisted storage-form
   users entry with `entitlements_for_user` at a fixed timestamp. Use its

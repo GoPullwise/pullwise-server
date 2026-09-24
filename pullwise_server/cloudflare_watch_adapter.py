@@ -42,7 +42,10 @@ class D1WatchTransactions:
                                   interests: list[str], enabled: bool,
                                   analysis_enabled: bool, now: int,
                                   include_prerelease: bool = False,
-                                  priority_order: int = 0) -> dict:
+                                  priority_order: int = 0,
+                                  proof: dict | None = None,
+                                  public_resolution: dict | None = None,
+                                  idempotency: dict | None = None) -> dict:
         if (not isinstance(owner_id, str) or not owner_id
                 or not isinstance(resolved_public_repository_id, str)
                 or not resolved_public_repository_id or type(now) is not int
@@ -66,6 +69,12 @@ class D1WatchTransactions:
             WHERE watch_scope_key=? AND archived_at IS NULL""").bind(scope_key).first()
         if existing:
             raise ValueError("WATCH_ALREADY_EXISTS")
+        if enabled:
+            capacity = await self.binding.prepare("""SELECT COUNT(*) AS active_count
+                FROM update_watches WHERE billing_owner_id=? AND enabled=1
+                  AND archived_at IS NULL""").bind(owner_id).first()
+            if capacity and int(capacity["active_count"]) >= limit:
+                raise ValueError("WATCH_LIMIT_REACHED")
         control = await self.binding.prepare("""SELECT context_version,context_hash
             FROM watch_controls WHERE watch_scope_key=?""").bind(scope_key).first()
         version = (int(control["context_version"]) if control else 1)
@@ -75,6 +84,23 @@ class D1WatchTransactions:
             WHERE a.name='users' AND u.key=? AND u.value=?)""",
             "NOT EXISTS(SELECT 1 FROM update_watches WHERE watch_scope_key=? AND archived_at IS NULL)"]
         guard_values: list = [owner_id, account["snapshot"], scope_key]
+        if proof is not None:
+            credential_sql, credential_params = _credential_guard(owner_id, proof)
+            guard_conditions.append(credential_sql)
+            guard_values.extend(credential_params)
+        if public_resolution is not None:
+            guard_conditions.append("""EXISTS(SELECT 1 FROM public_upstream_proofs
+                WHERE lookup_key=? AND github_repo_id=? AND full_name=?
+                AND source_revision=? AND public_visible=1 AND private=0
+                AND observed_at<=? AND valid_until>=?)""")
+            guard_values.extend((public_resolution["lookup_key"],
+                resolved_public_repository_id, public_resolution["full_name"],
+                public_resolution["source_revision"], now, now))
+        if idempotency is not None:
+            guard_conditions.append("""NOT EXISTS(SELECT 1 FROM request_idempotency
+                WHERE subject_id=? AND method='POST' AND path='/api/v1/watches'
+                AND idempotency_key=? AND expires_at>?)""")
+            guard_values.extend((owner_id, idempotency["key"], now))
         if enabled:
             guard_conditions.append("""(SELECT COUNT(*) FROM update_watches
                 WHERE billing_owner_id=? AND enabled=1 AND archived_at IS NULL)<?""")
@@ -119,8 +145,36 @@ class D1WatchTransactions:
                 owner_id, version, semantic_hash, interests_json,
                 int(include_prerelease), priority_order, int(enabled),
                 int(analysis_enabled), now, now))
+        if idempotency is not None:
+            watch = {"id": watch_id, "watchScopeKey": scope_key,
+                "ownerId": owner_id, "targetRepositoryId": None,
+                "upstreamRepositoryId": resolved_public_repository_id,
+                "billingOwnerId": owner_id, "contextVersion": version,
+                "contextHash": semantic_hash, "interests": list(normalized),
+                "includePrerelease": include_prerelease,
+                "priorityOrder": priority_order, "enabled": enabled,
+                "analysisEnabled": analysis_enabled, "revision": 1}
+            response = {**watch, "upstream": public_resolution["full_name"],
+                "status": "active" if enabled else "paused", "lastSyncedAt": None,
+                "links": {"self": f"/api/v1/watches/{watch_id}"},
+                "requestId": idempotency["request_id"]}
+            statements.extend([
+                self.binding.prepare("""DELETE FROM request_idempotency
+                    WHERE subject_id=? AND method='POST' AND path='/api/v1/watches'
+                    AND idempotency_key=? AND expires_at<=?""").bind(
+                        owner_id, idempotency["key"], now),
+                self.binding.prepare("""INSERT INTO request_idempotency(
+                    subject_id,method,path,idempotency_key,body_hash,state,
+                    status_code,response_json,created_at,completed_at,expires_at)
+                    VALUES(?,'POST','/api/v1/watches',?,?,'completed',201,?,?,?,?)""").bind(
+                        owner_id, idempotency["key"], idempotency["body_hash"],
+                        json.dumps(response, separators=(",", ":"), sort_keys=True),
+                        now, now, now + 86400),
+            ])
         statements.append(self.binding.prepare("DELETE FROM d1_command_guard"))
         await self.binding.batch(statements)
+        if idempotency is not None:
+            return response
         row = await self.binding.prepare("SELECT * FROM update_watches WHERE id=?").bind(watch_id).first()
         if row is None:
             raise RuntimeError("committed watch missing")

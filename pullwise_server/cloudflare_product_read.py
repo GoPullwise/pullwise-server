@@ -19,6 +19,7 @@ from .cloudflare_item_handling import D1ItemHandling
 from .cloudflare_watch_adapter import D1WatchTransactions
 from .cloudflare_manual_sync import D1ManualSyncTransactions
 from .cloudflare_repository_adapter import D1RepositoryTransactions
+from .cloudflare_public_upstream import lookup_key
 from .product_source_filters import apply_source_restrictions, filter_sources
 from .product_item_filters import apply_item_restrictions, filter_items
 from .product_usage_events import parse_usage_events_query, usage_events_page
@@ -702,6 +703,87 @@ async def post_manual_sync(*, binding: Any, resource_kind: str,
     except Exception:
         return error(409, "RESOURCE_CHANGED", "Manual sync resource changed.")
     return 202, payload
+
+
+async def post_public_watch(*, binding: Any, headers: Mapping[str, object],
+                            body: object, idempotency_key: str,
+                            now: int) -> tuple[int, dict]:
+    request_id = _header(headers, "X-Request-Id") or f"req_{uuid.uuid4().hex}"
+
+    def error(status: int, code: str) -> tuple[int, dict]:
+        return status, {"error": {"code": code, "retryable": False},
+                        "requestId": request_id}
+
+    allowed = {"upstream", "targetRepositoryId", "interests", "includePrerelease",
+               "analysisEnabled", "enabled", "priorityOrder"}
+    if (not isinstance(body, dict) or set(body) - allowed
+            or not isinstance(body.get("upstream"), dict)
+            or set(body["upstream"]) != {"owner", "repository"}
+            or body.get("targetRepositoryId") is not None
+            or not isinstance(body.get("interests"), list)):
+        return error(400, "INVALID_REQUEST")
+    for name in ("includePrerelease", "analysisEnabled", "enabled"):
+        if name in body and type(body[name]) is not bool:
+            return error(400, "INVALID_REQUEST")
+    priority = body.get("priorityOrder", 0)
+    if type(priority) is not int or priority < 0:
+        return error(400, "INVALID_REQUEST")
+    try:
+        upstream_key = lookup_key(body["upstream"]["owner"],
+                                  body["upstream"]["repository"])
+        user, restrictions = await _principal(binding, headers,
+            scope="watches:write", now=now)
+        if restrictions:
+            return error(403, "INSUFFICIENT_SCOPE")
+        body_hash = hashlib.sha256(json.dumps(body, ensure_ascii=False,
+            separators=(",", ":"), sort_keys=True).encode()).hexdigest()
+        proof: dict = {}
+        auth, validate = _resource_auth_snapshot(binding, headers, user,
+            restrictions, now, "watches:write", proof)
+        snapshot = await binding.batch([*auth,
+            binding.prepare("SELECT * FROM public_upstream_proofs WHERE lookup_key=?").bind(
+                upstream_key),
+            binding.prepare("""SELECT * FROM request_idempotency
+                WHERE subject_id=? AND method='POST' AND path='/api/v1/watches'
+                AND idempotency_key=?""").bind(user["id"], idempotency_key)])
+        validate([part.results for part in snapshot[:len(auth)]])
+        existing = snapshot[-1].results
+        if existing and int(existing[0]["expires_at"]) > now:
+            row = existing[0]
+            if row["body_hash"] != body_hash:
+                return error(409, "IDEMPOTENCY_CONFLICT")
+            if row["state"] != "completed":
+                return error(409, "IDEMPOTENCY_IN_PROGRESS")
+            return int(row["status_code"]), json.loads(row["response_json"])
+        resolutions = snapshot[-2].results
+        if len(resolutions) != 1:
+            return error(503, "UPSTREAM_PROOF_UNAVAILABLE")
+        resolution = resolutions[0]
+        if (resolution["public_visible"] != 1 or resolution["private"] != 0
+                or int(resolution["observed_at"]) > now
+                or int(resolution["valid_until"]) < now):
+            return error(503, "UPSTREAM_PROOF_UNAVAILABLE")
+        created = await D1WatchTransactions(binding).create_public_watch(
+            owner_id=user["id"],
+            resolved_public_repository_id=resolution["github_repo_id"],
+            interests=body["interests"], enabled=body.get("enabled", True),
+            analysis_enabled=body.get("analysisEnabled", False),
+            include_prerelease=body.get("includePrerelease", False),
+            priority_order=priority, now=now, proof=proof,
+            public_resolution=resolution, idempotency={"key": idempotency_key,
+                "body_hash": body_hash, "request_id": request_id})
+        return 201, created
+    except ProductReadAuthError as failure:
+        return error(failure.status, failure.code)
+    except ValueError as failure:
+        code = str(failure)
+        if code == "WATCH_ALREADY_EXISTS":
+            return error(409, code)
+        if code == "WATCH_LIMIT_REACHED":
+            return error(402, code)
+        return error(400, "INVALID_REQUEST")
+    except Exception:
+        return error(409, "RESOURCE_CHANGED")
 
 
 async def put_repository_service_http(*, binding: Any, repository_id: str,

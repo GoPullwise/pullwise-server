@@ -626,6 +626,16 @@ Current user cost constraint (2026-09-24): pause all Wrangler/workerd and D1
 commands, including local probes, until explicitly reauthorized. The commands
 below are historical reproduction notes, not permission to run them now.
 
+Owner-public watch POST mapping: trusted `public_upstream_proofs` publication
+requires a public, non-private resolved stable ID and at most 300 seconds of
+validity. Candidate HTTP reads that proof with Cookie/API-key/account and
+idempotency facts, then the watch creation D1 batch rechecks the same proof,
+owner capacity, credential, account and stable watch control. It inserts the
+watch and completed 201 replay response atomically; no model work is queued.
+Synthetic Python/SQLite tests cover replay, expiry, Origin, restricted key,
+capacity and proof revocation between read/write. No live GitHub resolver or
+workerd/D1/remote validation ran after the user's cost pause.
+
 Candidate repository list mapping: `repository_directory` stores one complete
 owner snapshot, each installation/App accessibility proof and bounded expiry
 in one packed row. Trusted injected discovery refuses an
