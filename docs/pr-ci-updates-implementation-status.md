@@ -1,6 +1,6 @@
 # PR / CI / Updates 1.4 implementation status
 
-Last updated: 2026-09-22. This file records implementation evidence; it does
+Last updated: 2026-09-24. This file records implementation evidence; it does
 not replace `../../docs/design/pr-ci-updates/README.md`, its 01–07 contracts,
 or the Cloudflare deployment appendix 08.
 
@@ -56,8 +56,16 @@ session, GitHub-state and billing-event collections plus active scan jobs,
 reserved scan units and reservation-ledger rows without creating or mutating
 legacy tables. It provides the settlement gate for eventual old-path removal.
 
-P0 remains incomplete: the 1440px/390px light/dark non-Dashboard screenshot
-baseline is not yet captured.
+The P0 non-Dashboard visual comparison is now captured locally: 20 screenshots
+at detached Web baseline `f5b1b2f` and 20 on current Web, across login,
+repositories, Settings, Billing and Pricing at 1440px/390px in light/dark.
+They remain in preserved untracked `pullwise-web/output/p0-original-f5b1b2/`
+and `output/p0-baseline-final/`. Ten pairs are byte-identical; Billing/Pricing
+content changed as designed, and a 390px repository row bug was fixed after
+the original screenshot exposed vertical text in a 24px grid column. All
+captured mobile pages had `scrollWidth=clientWidth=390`. The screenshots use
+a synthetic loopback API and real local headless Chrome/CDP, not live OAuth,
+payment or deployed Web. P0 as a whole remains incomplete.
 Admin/Worker must not be removed before Server/Web no longer depend on them and
 the old active scan/reservation path is accounted for.
 
