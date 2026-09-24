@@ -52,6 +52,104 @@ def _grant_repository_access(fixture, *, installation_id="inst-1"):
         db.execute("UPDATE app_state SET payload=? WHERE name='users'", (json.dumps(users),))
 
 
+def test_repository_list_requires_complete_fresh_owner_directory_and_same_snapshot_auth(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("repositories:read",))
+    _grant_repository_access(fixture)
+    with fixture.store._immediate() as db:
+        users = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])
+        users["owner"]["githubRepositoryAccess"]["repositoryItems"].append(
+            {"id": "repo-two", "installationId": "inst-1"})
+        db.execute("UPDATE app_state SET payload=? WHERE name='users'", (json.dumps(users),))
+    binding = D1ShapedSQLite(fixture.store)
+    path = "/api/v1/repositories"
+    cookie = {"Cookie": "pw_session=session-local"}
+    assert _get(binding, path, cookie, fixture.now)[0] == 503
+
+    from pullwise_server.cloudflare_repository_directory import D1RepositoryDirectory
+    directory = D1RepositoryDirectory(binding)
+    with closing(fixture.store.connect()) as db:
+        account = db.execute("SELECT json_extract(payload,'$.owner') FROM app_state WHERE name='users'").fetchone()[0]
+    items = [{"id": "repo", "githubRepoId": "101", "fullName": "acme/api",
+              "defaultBranch": "main", "private": True, "installationId": "inst-1",
+              "appId": "synthetic-app", "appAccessible": True},
+             {"id": "repo-two", "githubRepoId": "102", "fullName": "acme/other",
+              "defaultBranch": "main", "private": False, "installationId": "inst-1",
+              "appId": "synthetic-app", "appAccessible": True}]
+    with pytest.raises(ValueError):
+        asyncio.run(directory.publish(owner_id="owner", account_snapshot=account,
+            items=items, expected_count=3, complete=True, source_revision=1,
+            observed_at=fixture.now, valid_until=fixture.now + 300))
+    with pytest.raises(ValueError):
+        asyncio.run(directory.publish(owner_id="owner", account_snapshot=account,
+            items=items, expected_count=2, complete=True, source_revision=1,
+            observed_at=fixture.now, valid_until=fixture.now + 86400))
+    asyncio.run(directory.publish(owner_id="owner", account_snapshot=account,
+        items=items, expected_count=2, complete=True, source_revision=1,
+        observed_at=fixture.now, valid_until=fixture.now + 300))
+    status, payload = _get(binding, path, cookie, fixture.now)
+    assert status == 200 and [item["id"] for item in payload["items"]] == ["repo", "repo-two"]
+    assert payload["items"][0]["service"] is None
+    assert payload["hasMore"] is False and payload["nextCursor"] is None
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE repository_directory SET items_json=json_set(items_json,'$[1].appAccessible',json('false')) WHERE owner_id='owner'")
+    assert _get(binding, path, cookie, fixture.now)[0] == 503
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE repository_directory SET items_json=json_set(items_json,'$[1].appAccessible',json('true')) WHERE owner_id='owner'")
+    key = {"Authorization": f"Bearer {TOKEN}"}
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE api_keys SET restrictions=? WHERE id='key-local'",
+            (json.dumps({"repositoryIds": ["repo-two"]}),))
+    status, restricted = _get(binding, path, key, fixture.now)
+    assert status == 200 and [item["id"] for item in restricted["items"]] == ["repo-two"]
+    with fixture.store._immediate() as db:
+        users = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])
+        users["owner"]["githubRepositoryAccess"]["repositoryItems"].pop()
+        db.execute("UPDATE app_state SET payload=? WHERE name='users'", (json.dumps(users),))
+    assert _get(binding, path, cookie, fixture.now)[0] == 503
+    assert _get(binding, path, key, fixture.now)[0] == 503
+    assert _get(binding, path, cookie, fixture.now + 301)[0] == 503
+
+    def revoke_before_snapshot():
+        with fixture.store._immediate() as db:
+            db.execute("UPDATE app_state SET payload='{}' WHERE name='sessions'")
+    binding.before_batch = revoke_before_snapshot
+    assert _get(binding, path, cookie, fixture.now)[0] == 401
+    assert binding.batch_count >= 1
+
+
+def test_injected_repository_pages_must_close_before_directory_publication(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("repositories:read",))
+    _grant_repository_access(fixture)
+    binding = D1ShapedSQLite(fixture.store)
+    from pullwise_server.cloudflare_repository_directory import D1RepositoryDirectory
+    directory = D1RepositoryDirectory(binding)
+    with closing(fixture.store.connect()) as db:
+        account = db.execute("SELECT json_extract(payload,'$.owner') FROM app_state WHERE name='users'").fetchone()[0]
+    item = {"id": "repo", "githubRepoId": "101", "fullName": "acme/api",
+        "defaultBranch": "main", "private": True, "installationId": "inst-1",
+        "appId": "synthetic-app", "appAccessible": True}
+    async def incomplete(cursor):
+        return {"ownerId": "owner", "expectedCount": 2, "items": [item],
+            "hasMore": False, "nextCursor": None}
+    with pytest.raises(ValueError):
+        asyncio.run(directory.collect_and_publish(owner_id="owner",
+            account_snapshot=account, fetch_page=incomplete,
+            source_revision=1, observed_at=fixture.now))
+    assert _get(binding, "/api/v1/repositories",
+        {"Cookie": "pw_session=session-local"}, fixture.now)[0] == 503
+
+    async def complete(cursor):
+        return {"ownerId": "owner", "expectedCount": 1, "items": [item],
+            "hasMore": False, "nextCursor": None}
+    asyncio.run(directory.collect_and_publish(owner_id="owner",
+        account_snapshot=account, fetch_page=complete,
+        source_revision=1, observed_at=fixture.now))
+    assert _get(binding, "/api/v1/repositories",
+        {"Cookie": "pw_session=session-local"}, fixture.now)[0] == 200
+
+
 def test_cookie_me_and_api_key_usage_match_existing_read_dtos(tmp_path):
     fixture, _, frozen = seed(tmp_path / "domain.db")
     _seed_auth(fixture)

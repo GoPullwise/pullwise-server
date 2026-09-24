@@ -2,6 +2,7 @@
 
 This is the first real Server HTTP entry candidate. It exposes `/health`,
 authenticated `GET /api/v1/me`, `GET /api/v1/usage`, `GET /api/v1/watches`,
+`GET /api/v1/repositories` from a complete fresh owner directory,
 `GET /api/v1/usage/events` for owner successful-processing history,
 session-only `GET /api-keys` for redacted owner API-key metadata,
 session-only `DELETE /api-keys/{id}` for guarded revocation,
@@ -45,7 +46,17 @@ App repository authority remains a prerequisite for a write route.
 The detail GET also requires the persisted account's GitHub App repository
 item bound to the service installation and any API-key repositoryIds scope.
 It reads account, service and discovery proof in one D1 snapshot and emits
-the saved revision ETag. No repository list or write route is exposed.
+the saved revision ETag. The repository list reads a complete owner manifest
+containing individual GitHub App accessibility proofs, current account/session/key and
+owner services in one D1 batch. Missing, expired or inconsistent proof returns
+503 rather than a partial list. It includes authorized repositories without a
+service, using `service: null`. A trusted injected page collector requires a
+closed cursor chain and exact total before atomic publication, with 500-item,
+ten-page and 300-second caps. Real GitHub discovery refresh remains unconnected.
+The full-list D1 row-read cost and request rate must be bounded before any
+remote exposure; the user's current D1 cost pause prohibits Wrangler/workerd
+and D1 commands until explicit reauthorization. No repository creation route
+is exposed.
 The package also carries unmounted `D1ManualSyncTransactions` for an owner
 public watch or managed repository. It checks the exact persisted account,
 active resource and logical Job, plus the GitHub App account item and fresh
@@ -196,10 +207,17 @@ account access, service and repository proof. Cookie and scoped API-key GETs
 returned the same service and `ETag: "1"`; anonymous GET returned 401. The
 Cookie read passed again after a real local workerd restart. The default
 fixture is unchanged.
+The isolated `server-http-repository-list-permission-state` used
+`export_local_fixture.py --repository-list`. Its synthetic Cookie and scoped
+API-key list, no-service row and anonymous denial passed before and after a
+local workerd restart. This was completed before the user's D1 cost pause;
+the restart covered the earlier separate-row draft. The current packed
+directory is verified by Python/SQLite tests only. No further Wrangler/workerd
+or D1 probes are authorized.
 
 ## Remaining gates
 
-- Repository, public-watch creation, private/shared watch mutations,
+- Repository creation, public-watch creation, private/shared watch mutations,
   visualization, sync and other
   product-v1 REST paths are not routed yet. Session issuance, OAuth/App
   lifecycle, bounded API-key last-used/rotation policy and complete authorization still need D1

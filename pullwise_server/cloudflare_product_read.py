@@ -226,6 +226,64 @@ async def _repository_service(binding: Any, user: dict, restrictions: dict,
             and account_can_read_repository_service(user, rows[0]) else None)
 
 
+async def _repositories(binding: Any, user: dict, restrictions: dict,
+                        headers: Mapping[str, object], now: int) -> tuple[int, dict]:
+    auth, validate = _resource_auth_snapshot(binding, headers, user,
+        restrictions, now, "repositories:read")
+    result = await binding.batch([*auth,
+        binding.prepare("""SELECT * FROM repository_directory
+            WHERE owner_id=?""").bind(user["id"]),
+        binding.prepare("""SELECT * FROM repository_services
+            WHERE billing_owner_id=?""").bind(user["id"]),
+    ])
+    validate([part.results for part in result[:len(auth)]])
+    directory = result[-2].results
+    unavailable = (503, {"error": {"code": "REPOSITORY_DIRECTORY_UNAVAILABLE",
+        "message": "A complete current repository directory is unavailable.",
+        "retryable": True}})
+    if len(directory) != 1:
+        return unavailable
+    row = directory[0]
+    try:
+        items = json.loads(row["items_json"])
+    except (TypeError, ValueError):
+        return unavailable
+    try:
+        directory_account = json.loads(row["account_snapshot"])
+    except (TypeError, ValueError):
+        return unavailable
+    if (directory_account != user
+            or int(row["valid_until"]) < now
+            or int(row["observed_at"]) > now
+            or not isinstance(items, list) or len(items) != int(row["item_count"])):
+        return unavailable
+    services = {service["repository_id"]: repository_service_dto(service)
+                for service in result[-1].results}
+    allowed = restrictions.get("repositoryIds") if restrictions else None
+    if restrictions and (not isinstance(allowed, list)
+                         or not all(isinstance(value, str) for value in allowed)):
+        allowed = []
+    projected = []
+    seen = set()
+    for item in items:
+        if (not isinstance(item, dict) or item.get("id") in seen
+                or item.get("appAccessible") is not True
+                or not isinstance(item.get("appId"), str) or not item["appId"]
+                or not account_can_read_repository_service(user, {
+                    "repository_id": item.get("id"),
+                    "installation_id": item.get("installationId")})):
+            return unavailable
+        seen.add(item["id"])
+        if allowed is not None and item["id"] not in allowed:
+            continue
+        projected.append({"id": item["id"], "githubRepoId": item["githubRepoId"],
+            "fullName": item["fullName"],
+            "defaultBranch": item.get("defaultBranch") or "main",
+            "private": item["private"], "service": services.get(item["id"])})
+    return 200, {"items": projected, "nextCursor": None, "hasMore": False,
+        "requestId": _header(headers, "X-Request-Id") or f"req_{uuid.uuid4().hex}"}
+
+
 async def _usage_events(binding: Any, user: dict, restrictions: dict,
                         headers: Mapping[str, object], now: int,
                         params: Mapping[str, object]) -> dict:
@@ -366,11 +424,11 @@ async def read_product(*, binding: Any, path: str, headers: Mapping[str, object]
     job_path = path.startswith("/api/v1/jobs/")
     repository_service_path = (path.startswith("/api/v1/repositories/")
                                and path.endswith("/service"))
-    if path not in {"/api/v1/me", "/api/v1/usage", "/api/v1/usage/events", "/api/v1/watches"} and not source_path and not item_path and not job_path and not watch_path and not repository_service_path:
+    if path not in {"/api/v1/me", "/api/v1/usage", "/api/v1/usage/events", "/api/v1/watches", "/api/v1/repositories"} and not source_path and not item_path and not job_path and not watch_path and not repository_service_path:
         return 404, {"error": {"code": "NOT_FOUND"}}
     scope = ("profile:read" if path.endswith("/me") else "usage:read"
              if path in {"/api/v1/usage", "/api/v1/usage/events"}
-             else "repositories:read" if repository_service_path
+             else "repositories:read" if repository_service_path or path == "/api/v1/repositories"
              else "items:read" if source_path or item_path or job_path else "watches:read")
     try:
         user, restrictions = await _principal(binding, headers, scope=scope, now=now)
@@ -391,6 +449,13 @@ async def read_product(*, binding: Any, path: str, headers: Mapping[str, object]
         return 200, {"id": user["id"], "name": user.get("name") or "",
                      "email": user.get("email") or "",
                      "modules": ["pr", "ci", "updates"]}
+    if path == "/api/v1/repositories":
+        try:
+            return await _repositories(binding, user, restrictions, headers, now)
+        except ProductReadAuthError as error:
+            return error.status, {"error": {"code": error.code,
+                "message": error.message, "retryable": False},
+                "requestId": f"req_{uuid.uuid4().hex}"}
     if repository_service_path:
         repository_id = path[len("/api/v1/repositories/"):-len("/service")]
         if not repository_id or "/" in repository_id:

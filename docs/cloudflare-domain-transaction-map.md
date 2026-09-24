@@ -622,6 +622,23 @@ A real local workerd header check failed before the change and passed after.
 
 ## Reproduce
 
+Current user cost constraint (2026-09-24): pause all Wrangler/workerd and D1
+commands, including local probes, until explicitly reauthorized. The commands
+below are historical reproduction notes, not permission to run them now.
+
+Candidate repository list mapping: `repository_directory` stores one complete
+owner snapshot, each installation/App accessibility proof and bounded expiry
+in one packed row. Trusted injected discovery refuses an
+open cursor chain, mismatched total, duplicates, oversized directory or validity
+beyond 300 seconds, then publishes the manifest in one guarded D1 batch.
+GET reads identity, account, manifest and owner services in one
+read-only batch, rejects stale/inconsistent authority with 503, and applies
+API-key repository restrictions only to the complete result. Synthetic local
+workerd restart passed for the earlier separate-row draft before the cost
+pause; the packed form has Python/SQLite coverage only. Real GitHub refresh and remote
+D1 per-request row/operation budget are unmapped; do not expose this full-list
+query remotely before those bounds and user approval.
+
 From `pullwise-server`, with TEMP/TMP set to the workspace test directory:
 
 ```powershell

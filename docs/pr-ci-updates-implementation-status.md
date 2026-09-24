@@ -2247,3 +2247,33 @@ identity Vary headers, while successful versioned detail retains ETag.
 The local `--private-headers-only` driver passed for profile and watch detail.
 The older synthetic Item had expired Source authority and was correctly empty;
 the header check used a still-visible watch. Port 8797 was stopped.
+
+## Candidate repository directory list (2026-09-24 continuation)
+
+Test-first candidate `GET /api/v1/repositories` now lists owner-authorized
+repositories even without a RepositoryService. A trusted injected discovery
+collector requires a closed cursor chain, exact total and owner binding before
+one atomic D1 manifest publication; publication is capped at
+500 entries, ten pages and 300 seconds. The GET rechecks Cookie/API key, persisted account,
+directory completeness, each GitHub App permission proof and owner services in
+one D1 read batch. Missing, expired, changed or inconsistent proof returns 503,
+never an apparently complete partial list. API-key repository restrictions
+apply after completeness validation. Synthetic Python tests failed first on
+404, missing permission rows and incomplete/overlong proofs, then passed.
+The focused read/HTTP/service/local-route suite passed 98 tests. A synthetic
+local workerd/D1 list passed Cookie, scoped key, no-service and anonymous cases
+before and after restart under a fresh isolated persistence directory. This
+occurred before the user's 2026-09-24 D1 cost pause. No remote D1 or real GitHub
+was used. Real GitHub discovery refresh, measured D1 cost, bounded request
+frequency and remote CF2/CF3 are still pending. Do not run further Wrangler,
+workerd or D1 commands without explicit reauthorization. The final mapping
+packs every repository proof into one owner row, avoiding one D1 write per
+repository on refresh and one D1 row read per repository on GET. The earlier
+workerd restart covered the separate-row draft; the packed form has only
+Python/SQLite verification under the user's cost pause.
+The checked-in CI pytest selection passed locally after the first directory
+mapping (765 tests, 68 subtests); the packed-row refinement then passed the
+98-test focused suite and exact module-sync check. No push was made, so the
+last known remote Server Action remains the old `7a1ade3` run that fails
+before tests at retired Worker checkout. No new remote CI result exists for
+this local commit.

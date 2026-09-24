@@ -44,9 +44,9 @@ async def handle_http_request(*, method: str, path: str,
                     'source_contexts','source_assessment_publications',
                     'items','item_versions','item_handling_events',
                     'background_jobs','repository_services','request_idempotency',
-                    'processing_controls','discovery_targets',
+                    'processing_controls','discovery_targets','repository_directory',
                     'billing_public_catalog')""").first()
-            if row and row.get("table_count") == 23:
+            if row and row.get("table_count") == 24:
                 return 200, {"ok": True, "service": "pullwise-server",
                              "database": {"type": "d1", "configured": True}}
         except Exception:
@@ -163,7 +163,7 @@ async def handle_http_request(*, method: str, path: str,
         except Exception:
             return 503, {"error": {"code": "SERVER_UNAVAILABLE"}}
     if method == "GET" and path in {"/api/v1/me", "/api/v1/usage", "/api/v1/usage/events",
-                                       "/api/v1/watches", "/api/v1/sources"} or (
+                                       "/api/v1/watches", "/api/v1/sources", "/api/v1/repositories"} or (
             method == "GET" and (path.startswith("/api/v1/sources/")
                 or path == "/api/v1/items" or path.startswith("/api/v1/items/")
                 or path.startswith("/api/v1/jobs/")

@@ -62,7 +62,7 @@ def test_candidate_webhook_rejects_bad_body_before_d1_and_hides_errors(tmp_path)
         assert db.execute("SELECT COUNT(*) FROM billing_webhook_receipts").fetchone()[0] == 0
 
 
-def test_candidate_worker_has_read_only_health_and_no_unported_product_api(tmp_path):
+def test_candidate_worker_has_read_only_health_and_authenticated_repository_list(tmp_path):
     fixture, _, _ = seed(tmp_path / "domain.db")
     with fixture.store._immediate() as db:
         _seed_health_read_tables(db)
@@ -72,7 +72,7 @@ def test_candidate_worker_has_read_only_health_and_no_unported_product_api(tmp_p
     assert status == 200 and health["ok"] is True and health["service"] == "pullwise-server"
     assert reads == [] and binding.batch_count == before
     (status, payload), reads = _request(binding, method="GET", path="/api/v1/repositories")
-    assert status == 404 and reads == [] and binding.batch_count == before
+    assert status == 401 and reads == [] and binding.batch_count == before
 
 
 def test_health_rejects_incomplete_d1_auth_schema(tmp_path):

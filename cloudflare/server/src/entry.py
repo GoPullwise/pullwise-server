@@ -60,6 +60,7 @@ class Default(WorkerEntrypoint):
                 and type(payload.get("revision")) is int
                 and (path.startswith("/api/v1/items/")
                      or path.startswith("/api/v1/watches/")
+                     or path == "/api/v1/repositories"
                      or (path.startswith("/api/v1/repositories/")
                          and path.endswith("/service")))):
             response_headers = dict(response_headers or {})

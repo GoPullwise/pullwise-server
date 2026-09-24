@@ -41,6 +41,21 @@ def call(path, *, raw=None, signature=None, extra_headers=None, method=None,
 
 def main():
     same_site_none = "--same-site-none" in sys.argv
+    if "--repository-list-only" in sys.argv:
+        cookie = {"Cookie": "pw_session=session-local"}
+        status, listing, headers = call("/api/v1/repositories",
+            extra_headers=cookie, return_headers=True)
+        assert status == 200 and [row["id"] for row in listing["items"]] == ["repo", "repo-two"]
+        assert listing["items"][0]["service"]["repositoryId"] == "repo"
+        assert listing["items"][1]["service"] is None
+        assert next((value for key, value in headers.items()
+            if key.lower() == "cache-control"), None) == "no-store"
+        status, scoped = call("/api/v1/repositories", extra_headers={
+            "Authorization": "Bearer pwk_local_http_test"})
+        assert status == 200 and [row["id"] for row in scoped["items"]] == ["repo-two"]
+        assert call("/api/v1/repositories")[0] == 401
+        print("Local Server Worker complete repository directory passed")
+        return
     if "--private-headers-only" in sys.argv:
         status, _, headers = call("/api/v1/me",
             extra_headers={"Cookie": "pw_session=session-local"},

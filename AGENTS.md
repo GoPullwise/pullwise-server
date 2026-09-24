@@ -22,6 +22,23 @@ revision; pending or incomplete assessment must not silently close an item.
 
 ## Current product-v1 implementation invariants
 
+- The workspace Cloudflare D1 cost pause applies here: do not run Wrangler,
+  workerd or D1 commands, even local probes, until the user explicitly
+  authorizes resuming. Use Python/SQLite and static checks meanwhile; keep
+  remote CF2/CF3 validation pending. Do not expose candidate repository list
+  remotely until its full-list row-read cost, call frequency and cache or
+  pagination policy have been bounded and explicitly approved by the user.
+- Candidate `GET /api/v1/repositories` reads a complete owner-scoped
+  `repository_directory` manifest containing every per-repository GitHub App
+  accessibility proof, owner services
+  and Cookie/API-key/account in one D1 read batch. Trusted injected discovery
+  requires a closed page chain and exact total before atomic publication;
+  directory size is capped at 500, discovery at ten pages, and validity at
+  300 seconds. Missing,
+  expired, inconsistent or account-changed proof returns 503, never a partial
+  success. API-key `repositoryIds` narrows the complete result; repositories
+  without a service remain listed. Real GitHub App refresh is unconnected.
+
 - Derive the local D1 entitlement projection from the persisted storage-form
   users entry with `entitlements_for_user` at a fixed timestamp. Use its
   period, monthlyProcessingLimit and strict resetAt; do not copy plan rules

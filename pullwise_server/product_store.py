@@ -149,6 +149,15 @@ class ProductStore:
                     configuration_epoch INTEGER NOT NULL DEFAULT 0,
                     next_scheduled_at INTEGER NOT NULL DEFAULT 0
                 );
+                CREATE TABLE IF NOT EXISTS repository_directory (
+                    owner_id TEXT PRIMARY KEY,
+                    account_snapshot TEXT NOT NULL,
+                    source_revision INTEGER NOT NULL,
+                    observed_at INTEGER NOT NULL,
+                    valid_until INTEGER NOT NULL,
+                    item_count INTEGER NOT NULL,
+                    items_json TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS fact_sync_generations (
                     parent_key TEXT PRIMARY KEY,
                     generation INTEGER NOT NULL

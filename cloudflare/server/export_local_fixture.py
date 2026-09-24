@@ -33,6 +33,7 @@ TABLES = (
     "background_jobs",
     "request_idempotency",
     "repository_services",
+    "repository_directory",
     "processing_controls",
     "discovery_targets",
     "billing_public_catalog",
@@ -42,6 +43,7 @@ TABLES = (
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repository-read", action="store_true")
+    parser.add_argument("--repository-list", action="store_true")
     options = parser.parse_args()
     server_root = Path(__file__).resolve().parents[2]
     sys.path.insert(0, str(server_root))
@@ -51,6 +53,7 @@ def main() -> None:
     from pullwise_server.product_entitlement_rules import PLAN_ENTITLEMENTS
 
     output = Path(__file__).resolve().parent / ".wrangler" / (
+        "local-repository-list-seed.sql" if options.repository_list else
         "local-repository-seed.sql" if options.repository_read else "local-seed.sql")
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=os.environ.get("TEMP")) as directory:
@@ -113,7 +116,7 @@ def main() -> None:
         with fixture.store._immediate() as db:
             db.execute("UPDATE background_jobs SET id='sync-local' WHERE id=?",
                 (sync_job["id"],))
-        if options.repository_read:
+        if options.repository_read or options.repository_list:
             fixture.store.put_repository_service(repository_id="repo",
                 installation_id="inst-1", billing_owner_id="owner", expected_revision=0,
                 enabled=True, modules={"pr": True, "ci": False},
@@ -125,14 +128,29 @@ def main() -> None:
                 authorization_revision=1, accessible=True,
                 valid_until=fixture.now + 300, observed_at=fixture.now)
         with fixture.store._immediate() as db:
-            if options.repository_read:
+            if options.repository_read or options.repository_list:
                 users = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])
                 users["owner"]["githubRepositoryAccess"] = {
                     "mode": "github-app", "authorizedUserId": "owner",
                     "authorizedGithubId": "author", "repositoriesNeedSync": False,
-                    "repositoryItems": [{"id": "repo", "installationId": "inst-1"}],
+                    "repositoryItems": [{"id": "repo", "installationId": "inst-1"}]
+                        + ([{"id": "repo-two", "installationId": "inst-1"}]
+                           if options.repository_list else []),
                 }
                 db.execute("UPDATE app_state SET payload=? WHERE name='users'", (json.dumps(users),))
+                if options.repository_list:
+                    account = db.execute("SELECT json_extract(payload,'$.owner') FROM app_state WHERE name='users'").fetchone()[0]
+                    items = [{"id": "repo", "githubRepoId": "101", "fullName": "synthetic/repo",
+                              "defaultBranch": "main", "private": True,
+                              "installationId": "inst-1", "appId": "synthetic-app",
+                              "appAccessible": True},
+                             {"id": "repo-two", "githubRepoId": "102",
+                              "fullName": "synthetic/other", "defaultBranch": "main",
+                              "private": False, "installationId": "inst-1",
+                              "appId": "synthetic-app", "appAccessible": True}]
+                    db.execute("""INSERT INTO repository_directory VALUES(?,?,?,?,?,?,?)""",
+                        ("owner", account, 1, fixture.now, fixture.now + 300, 2,
+                         json.dumps(items)))
             db.execute("INSERT INTO app_state(name,payload,updated_at) VALUES('sessions',?,?)",
                 (json.dumps({"session-local": {"userId": "owner",
                     "expiresAt": fixture.now + 86400}}), fixture.now))
@@ -146,10 +164,11 @@ def main() -> None:
                 ("key-local", "owner", "Synthetic", token[:16],
                  hashlib.sha256(token.encode()).hexdigest(),
                  json.dumps(["profile:read", "usage:read", "watches:read", "items:read"]
-                            + (["repositories:read"] if options.repository_read else [])),
+                            + (["repositories:read"] if options.repository_read or options.repository_list else [])),
                  fixture.now + 86400,
                  json.dumps({"watchIds": [first_watch["id"]],
-                             **({"repositoryIds": ["repo"]} if options.repository_read else {})}),
+                             **({"repositoryIds": ["repo-two"]} if options.repository_list else
+                                {"repositoryIds": ["repo"]} if options.repository_read else {})}),
                  fixture.now, None, None))
         with closing(fixture.store.connect()) as db:
             statements = []
