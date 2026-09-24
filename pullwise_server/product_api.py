@@ -17,6 +17,9 @@ from .product_store import ProductStore
 from .product_source_filters import apply_source_restrictions, filter_sources
 from .product_item_filters import apply_item_restrictions, filter_items, item_in_view
 from .product_usage_events import parse_usage_events_query
+from .product_visualizations import (WORKLOAD_FILTERS, workload_visualization,
+                                     pr_actions_visualization, ci_failures_visualization,
+                                     updates_releases_visualization)
 
 
 def _header(handler: object, name: str) -> str:
@@ -138,11 +141,13 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
         or segments == ["sources"]
         or segments == ["items"]
         or segments == ["items", "overview"]
+        or segments == ["visualizations"]
         or segments == ["usage"]
         or segments == ["usage", "events"]
         or (len(segments) == 2 and segments[0] == "jobs")
         or (len(segments) == 3 and segments[0] == "repositories" and segments[2] == "service")
         or (len(segments) == 2 and segments[0] in {"sources", "items"})
+        or (len(segments) == 3 and segments[0] == "items" and segments[2] == "timeline")
     )
     if not recognized:
         return False
@@ -309,14 +314,52 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
         else:
             handler.json(watch, headers={"ETag": f'"{watch["revision"]}"'})
         return True
+    if len(segments) == 3 and segments[0] == "items" and segments[2] == "timeline":
+        raw_limit = _query_value(params, "limit") or "50"
+        if not raw_limit.isdigit() or not 1 <= int(raw_limit) <= 100 or set(params) - {"limit", "cursor"}:
+            _error(handler, HTTPStatus.UNPROCESSABLE_ENTITY, "INVALID_CONFIGURATION",
+                   "Invalid timeline pagination.")
+            return True
+        restrictions = principal.get("restrictions") or {}
+        try:
+            timeline = store.item_timeline_for_billing_owner(user_id, segments[1],
+                limit=int(raw_limit), cursor=_query_value(params, "cursor") or None,
+                request_id=_request_id(handler), restrictions=restrictions,
+                visibility_key=json.dumps(restrictions, sort_keys=True))
+        except ValueError as error:
+            _error(handler, HTTPStatus.UNPROCESSABLE_ENTITY, str(error),
+                   "Invalid timeline cursor.")
+            return True
+        if timeline is None:
+            _error(handler, HTTPStatus.NOT_FOUND, "NOT_FOUND", "Item was not found.")
+        else:
+            handler.json(timeline)
+        return True
     restrictions = principal.get("restrictions") or {}
+    if segments == ["visualizations"]:
+        kind = _query_value(params, "kind")
+        allowed = {"kind", *WORKLOAD_FILTERS}
+        if kind == "pr_actions":
+            allowed.update({"limit", "cursor"})
+        if kind == "ci_failures":
+            allowed.update({"ciStage", "ciSymptom", "classificationState"})
+        if kind == "updates_releases":
+            allowed = {"kind", "module", "repositoryId", "watchId", "releaseId",
+                       "relevance", "updateSignal", "processingStatus", "limit", "cursor"}
+        if kind not in {"workload", "pr_actions", "ci_failures", "updates_releases"} or set(params) - allowed:
+            _error(handler, HTTPStatus.UNPROCESSABLE_ENTITY,
+                   "INVALID_CONFIGURATION", "Invalid visualization filters.")
+            return True
     try:
+        source_params = ({**params, "module": "updates"}
+                         if segments == ["visualizations"] and
+                         _query_value(params, "kind") == "updates_releases" else params)
         sources = filter_sources(
             apply_source_restrictions(store.list_sources_for_billing_owner(
                 user_id, include_content=len(segments) == 2 and segments[0] == "sources",
                 source_id=segments[1] if len(segments) == 2 and segments[0] == "sources" else None
             ), restrictions),
-            params,
+            source_params,
         )
     except ValueError:
         _error(handler, HTTPStatus.UNPROCESSABLE_ENTITY, "INVALID_CONFIGURATION", "Invalid source filters.")
@@ -343,13 +386,27 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
         item_id=segments[1] if len(segments) == 2 and segments[0] == "items" and segments[1] != "overview" else None
     ), restrictions)
     github_user_id = str(principal["user"].get("githubId") or "")
+    visualization_module = {"pr_actions": "pr", "ci_failures": "ci"}.get(
+        _query_value(params, "kind")) if segments == ["visualizations"] else None
+    item_params = {**params, "module": visualization_module} if visualization_module else params
     try:
-        resource_items = filter_items(all_items, params, github_user_id, include_view=False)
+        resource_items = filter_items(all_items, item_params, github_user_id, include_view=False)
     except ValueError as error:
         code = str(error)
         _error(handler, HTTPStatus.UNPROCESSABLE_ENTITY,
                code if code in {"INVALID_VIEW", "INVALID_CONFIGURATION"} else "INVALID_CONFIGURATION",
                "Invalid Item filters.")
+        return True
+    if segments == ["visualizations"] and _query_value(params, "kind") == "updates_releases":
+        try:
+            payload = updates_releases_visualization(sources, params,
+                owner_id=user_id, now=int(time.time()), request_id=_request_id(handler),
+                visibility_key=json.dumps(restrictions, sort_keys=True))
+        except ValueError as error:
+            _error(handler, HTTPStatus.UNPROCESSABLE_ENTITY, str(error),
+                   "Invalid visualization filters or cursor.")
+            return True
+        handler.json(payload)
         return True
     if segments == ["items", "overview"]:
         selected = filter_items(all_items, params, github_user_id, include_view=True)
@@ -394,6 +451,30 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
                 "requestId": _request_id(handler),
             }
         )
+        return True
+    if segments == ["visualizations"]:
+        selected = filter_items(all_items, item_params, github_user_id, include_view=True)
+        if _query_value(params, "kind") == "workload":
+            payload = workload_visualization(selected, sources, params,
+                now=int(time.time()), request_id=_request_id(handler))
+        elif _query_value(params, "kind") == "pr_actions":
+            try:
+                payload = pr_actions_visualization(selected, sources, params,
+                    owner_id=user_id, now=int(time.time()), request_id=_request_id(handler),
+                    visibility_key=json.dumps(restrictions, sort_keys=True))
+            except ValueError as error:
+                _error(handler, HTTPStatus.UNPROCESSABLE_ENTITY, str(error),
+                       "Invalid visualization filters or cursor.")
+                return True
+        else:
+            try:
+                payload = ci_failures_visualization(selected, sources, params,
+                    now=int(time.time()), request_id=_request_id(handler))
+            except ValueError as error:
+                _error(handler, HTTPStatus.UNPROCESSABLE_ENTITY, str(error),
+                       "Invalid visualization filters.")
+                return True
+        handler.json(payload)
         return True
     if segments == ["items"]:
         items = filter_items(all_items, params, github_user_id, include_view=True)

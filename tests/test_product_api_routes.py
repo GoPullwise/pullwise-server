@@ -241,6 +241,7 @@ class ProductApiRoutesTest(unittest.TestCase):
         unit_type: str | None,
         module: str,
         attention_state: str = "needs_action",
+        source_facts: dict | None = None,
     ) -> dict:
         source = self.store.upsert_source_snapshot(
             source_id=source_id,
@@ -248,7 +249,7 @@ class ProductApiRoutesTest(unittest.TestCase):
             external_key=f"github:{source_type}:{source_id}",
             repository_id="repo-1" if module != "updates" else "upstream-1",
             content={"text": f"evidence for {source_id}"},
-            source_facts={"fixture": source_id},
+            source_facts={"fixture": source_id, **(source_facts or {})},
             source_url=f"https://github.com/acme/repo/{source_id}",
             processing_mode="model",
             completeness="complete",
@@ -295,6 +296,7 @@ class ProductApiRoutesTest(unittest.TestCase):
             }],
             snapshot={
                 "module": module,
+                "sourceFacts": {"fixture": source_id, **(source_facts or {})},
                 "repositoryId": "repo-1" if module != "updates" else None,
                 "watchId": self.watch["id"] if module == "updates" else None,
                 "title": f"{module} item",
@@ -331,6 +333,48 @@ class ProductApiRoutesTest(unittest.TestCase):
         self.assertEqual(blocked.status, HTTPStatus.NOT_FOUND)
         self.assertNotIn("Verified", json.dumps(blocked.payload))
 
+    def test_item_timeline_uses_saved_observation_and_handling_without_inventing_event_time(self):
+        item = self.seed_source_item(source_id="timeline", source_type="pr_comment",
+            unit_type="pr_comment", module="pr")
+        self.store.patch_item_handling(item_id=item["id"], item_version=item["itemVersion"],
+            expected_revision=item["revision"], actor_id="usr_1", disposition="done")
+        request = RouteHarness(f"/api/v1/items/{item['id']}/timeline",
+            cookie=f"{app.SESSION_COOKIE}=ses_1")
+        app.PullwiseHandler.route(request, "GET")
+        self.assertEqual(request.status, HTTPStatus.OK)
+        self.assertEqual({event["eventType"] for event in request.payload["items"]},
+            {"snapshot_observed", "disposition_changed"})
+        snapshot = next(event for event in request.payload["items"]
+            if event["sourceKind"] == "github")
+        handling = next(event for event in request.payload["items"]
+            if event["sourceKind"] == "handling")
+        self.assertIsNone(snapshot["occurredAt"])
+        self.assertEqual(snapshot["timeBasis"], "observed")
+        self.assertEqual(snapshot["sourceKind"], "github")
+        self.assertEqual(handling["sourceKind"], "handling")
+        self.assertEqual(handling["actor"], {"kind": "user", "id": "usr_1"})
+        self.assertEqual(self.store.count_jobs(job_type="analyze_source"), 0)
+        page = RouteHarness(f"/api/v1/items/{item['id']}/timeline?limit=1",
+            cookie=f"{app.SESSION_COOKIE}=ses_1")
+        app.PullwiseHandler.route(page, "GET")
+        self.assertTrue(page.payload["hasMore"])
+        cursor = page.payload["nextCursor"]
+        next_page = RouteHarness(f"/api/v1/items/{item['id']}/timeline?limit=1&cursor={cursor}",
+            cookie=f"{app.SESSION_COOKIE}=ses_1")
+        app.PullwiseHandler.route(next_page, "GET")
+        self.assertEqual(len(next_page.payload["items"]), 1)
+        self.store.patch_item_handling(item_id=item["id"], item_version=item["itemVersion"],
+            expected_revision=item["revision"] + 1, actor_id="usr_1", disposition="dismissed")
+        stale_page = RouteHarness(f"/api/v1/items/{item['id']}/timeline?limit=1&cursor={cursor}",
+            cookie=f"{app.SESSION_COOKIE}=ses_1")
+        app.PullwiseHandler.route(stale_page, "GET")
+        self.assertEqual(stale_page.status, HTTPStatus.UNPROCESSABLE_ENTITY)
+        token = self.api_key(["items:read"], restrictions={"repositoryIds": ["other"]})
+        denied = RouteHarness(f"/v1/items/{item['id']}/timeline",
+            headers={"Authorization": f"Bearer {token}"})
+        app.PullwiseHandler.route(denied, "GET")
+        self.assertEqual(denied.status, HTTPStatus.NOT_FOUND)
+
     def test_source_detail_exposes_current_material_without_creating_an_item_or_model_work(self):
         self.seed_source_item(source_id="release-material", source_type="release", unit_type=None, module="updates")
         detail = RouteHarness("/api/v1/sources/release-material", cookie=f"{app.SESSION_COOKIE}=ses_1")
@@ -362,6 +406,89 @@ class ProductApiRoutesTest(unittest.TestCase):
         self.assertEqual(overview.payload["viewCounts"]["unassigned"], 3)
         self.assertEqual(overview.payload["sourceCoverage"]["total"], 4)
         self.assertEqual(self.store.count_jobs(job_type="analyze_source"), before_jobs)
+
+    def test_workload_visualization_uses_item_filters_and_authorized_distinct_counts(self) -> None:
+        pr = self.seed_source_item(source_id="pr-visual", source_type="pr_comment",
+            unit_type="pr_comment", module="pr")
+        ci = self.seed_source_item(source_id="ci-visual", source_type="ci_failure",
+            unit_type="ci_job", module="ci", attention_state="waiting")
+        before_jobs = self.store.count_jobs(job_type="analyze_source")
+        cookie = f"{app.SESSION_COOKIE}=ses_1"
+        visual = RouteHarness("/api/v1/visualizations?kind=workload&view=all", cookie=cookie)
+        app.PullwiseHandler.route(visual, "GET")
+        self.assertEqual(visual.status, HTTPStatus.OK)
+        self.assertEqual(visual.payload["kind"], "workload")
+        self.assertEqual(visual.payload["countUnit"], "item")
+        self.assertEqual(visual.payload["totalCount"], 2)
+        rows = {row["key"]: row for row in visual.payload["data"]["rows"]}
+        self.assertEqual(rows["pr"]["totalCount"], 1)
+        self.assertEqual(rows["ci"]["totalCount"], 1)
+        cell = next(cell for cell in rows["pr"]["cells"] if cell["key"] == "needs_action")
+        self.assertEqual(cell["count"], 1)
+        self.assertEqual(cell["drilldown"], {"resource": "items", "filters": {
+            "view": "all", "module": "pr", "attentionState": "needs_action"}})
+        detail = RouteHarness("/api/v1/items?view=all&module=pr&attentionState=needs_action",
+            cookie=cookie)
+        app.PullwiseHandler.route(detail, "GET")
+        self.assertEqual([item["id"] for item in detail.payload["items"]], [pr["id"]])
+        filtered = RouteHarness("/api/v1/visualizations?kind=workload&module=ci", cookie=cookie)
+        app.PullwiseHandler.route(filtered, "GET")
+        self.assertEqual(filtered.payload["totalCount"], 1)
+        self.assertEqual(filtered.payload["data"]["rows"][0]["key"], "ci")
+        self.assertEqual(self.store.count_jobs(job_type="analyze_source"), before_jobs)
+        token = self.api_key(["items:read"], restrictions={"repositoryIds": ["other"]})
+        denied = RouteHarness("/v1/visualizations?kind=workload",
+            headers={"Authorization": f"Bearer {token}"})
+        app.PullwiseHandler.route(denied, "GET")
+        self.assertEqual(denied.payload["totalCount"], 0)
+        invalid = RouteHarness("/api/v1/visualizations?kind=unknown", cookie=cookie)
+        app.PullwiseHandler.route(invalid, "GET")
+        self.assertEqual(invalid.status, HTTPStatus.UNPROCESSABLE_ENTITY)
+
+    def test_pr_matrix_route_rejects_invalid_cursor_and_other_module(self) -> None:
+        cookie = f"{app.SESSION_COOKIE}=ses_1"
+        empty = RouteHarness("/api/v1/visualizations?kind=pr_actions", cookie=cookie)
+        app.PullwiseHandler.route(empty, "GET")
+        self.assertEqual(empty.status, HTTPStatus.OK)
+        self.assertEqual(empty.payload["data"]["rowsTotal"], 0)
+        self.assertEqual(empty.payload["totalCount"], 0)
+        for query in ("kind=pr_actions&module=ci", "kind=pr_actions&cursor=invalid"):
+            invalid = RouteHarness(f"/api/v1/visualizations?{query}", cookie=cookie)
+            app.PullwiseHandler.route(invalid, "GET")
+            self.assertEqual(invalid.status, HTTPStatus.UNPROCESSABLE_ENTITY)
+
+    def test_ci_matrix_route_preserves_unclassified_entry_and_scope(self) -> None:
+        self.seed_source_item(source_id="ci-matrix", source_type="ci_failure",
+            unit_type="ci_job", module="ci", source_facts={"runId": "7",
+                "runAttempt": 1, "jobId": "9", "windows": []})
+        request = RouteHarness("/api/v1/visualizations?kind=ci_failures&module=ci",
+            cookie=f"{app.SESSION_COOKIE}=ses_1")
+        app.PullwiseHandler.route(request, "GET")
+        self.assertEqual(request.status, HTTPStatus.OK)
+        self.assertEqual(request.payload["totalCount"], 1)
+        self.assertEqual(request.payload["data"]["unclassifiedCount"], 1)
+        self.assertEqual(request.payload["data"]["unclassifiedDrilldown"], {
+            "resource": "items", "filters": {"module": "ci", "view": "all",
+                "classificationState": "unclassified"}})
+
+    def test_updates_table_route_keeps_unclassified_release_without_item(self) -> None:
+        self.seed_source_item(source_id="release-table", source_type="release",
+            unit_type=None, module="updates", source_facts={"releaseId": "77",
+                "tagName": "v2", "name": "SDK 2"})
+        request = RouteHarness("/api/v1/visualizations?kind=updates_releases",
+            cookie=f"{app.SESSION_COOKIE}=ses_1")
+        app.PullwiseHandler.route(request, "GET")
+        self.assertEqual(request.status, HTTPStatus.OK)
+        self.assertEqual(request.payload["totalCount"], 1)
+        row = request.payload["data"]["rows"][0]
+        self.assertEqual(row["sourceId"], "release-table")
+        self.assertEqual(row["watchId"], self.watch["id"])
+        self.assertIsNone(row["itemId"])
+        self.assertIsNone(row["relevance"])
+        invalid = RouteHarness("/api/v1/visualizations?kind=updates_releases&view=mine",
+            cookie=f"{app.SESSION_COOKIE}=ses_1")
+        app.PullwiseHandler.route(invalid, "GET")
+        self.assertEqual(invalid.status, HTTPStatus.UNPROCESSABLE_ENTITY)
 
     def test_source_permission_revocation_removes_detail_and_overview_count(self) -> None:
         self.seed_source_item(source_id="pr-revoked", source_type="pr_comment", unit_type="pr_comment", module="pr")

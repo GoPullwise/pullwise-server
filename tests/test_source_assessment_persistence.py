@@ -123,6 +123,7 @@ def test_source_list_projects_saved_answers_without_item_labels(publication):
     result = store.list_sources_for_billing_owner("owner")[0]["contexts"][0]
     assert result["relevance"] == "unclear"
     assert all(value == "unclear" for value in result["updateSignals"].values())
+    assert result["units"][0]["evidenceIds"] == ["e1"]
     assert "assessments" not in result
     store.set_source_context(**context, coverage={**coverage, "state": "complete"})
     refreshed = store.list_sources_for_billing_owner("owner")[0]["contexts"][0]

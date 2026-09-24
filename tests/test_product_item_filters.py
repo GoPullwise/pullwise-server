@@ -31,3 +31,28 @@ def test_pull_and_run_identity_filters_require_module_and_repository():
                   {"module": "ci", "runId": "77"}):
         with pytest.raises(ValueError):
             filter_items(items, query, "", include_view=True)
+
+
+def test_ci_stage_and_symptom_must_pair_within_one_window():
+    paired = _item("ci", facts={"windows": [
+        {"windowId": "install", "stage": "dependency_install",
+         "symptoms": ["connection_timeout"]},
+        {"windowId": "test", "stage": "test",
+         "symptoms": ["assertion_failure"]}]})
+    unclassified = _item("ci", facts={"windows": [
+        {"windowId": "build", "stage": "build", "symptoms": []}]})
+    unclassified["id"] = "ci-unclassified"
+    items = [paired, unclassified]
+    base = {"module": "ci"}
+    assert filter_items(items, {**base, "ciStage": "dependency_install",
+        "ciSymptom": "connection_timeout"}, "", include_view=True) == [paired]
+    assert filter_items(items, {**base, "ciStage": "dependency_install",
+        "ciSymptom": "assertion_failure"}, "", include_view=True) == []
+    assert filter_items(items, {**base, "classificationState": "identified"},
+        "", include_view=True) == [paired]
+    assert filter_items(items, {**base, "classificationState": "unclassified"},
+        "", include_view=True) == [unclassified]
+    for query in ({"ciStage": "test"}, {**base, "ciSymptom": "invented"},
+                  {**base, "classificationState": "unknown"}):
+        with pytest.raises(ValueError, match="INVALID_CONFIGURATION"):
+            filter_items(items, query, "", include_view=True)

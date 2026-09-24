@@ -4,6 +4,36 @@ Last updated: 2026-09-24. This file records implementation evidence; it does
 not replace `../../docs/design/pr-ci-updates/README.md`, its 01–07 contracts,
 or the Cloudflare deployment appendix 08.
 
+## Two-project product completion milestone (2026-09-24)
+
+The current user target is all PR / CI / Updates product functionality in
+`pullwise-server` and `pullwise-web`; Cloudflare adaptation/validation and Jev
+verification are excluded from this implementation milestone. This does not
+relax the separate release gates or permit live GitHub/model calls.
+
+The first cross-project visualization slice adds local
+`GET /api/v1/visualizations?kind=workload` and a Dashboard module distribution.
+The endpoint counts distinct authorized Items under the same filters as
+`GET /items`, exposes server-defined drilldowns and coverage, and reads only
+saved state. Test-first evidence: the route test failed 404, then passed.
+`tests/test_product_api_routes.py` plus the OpenAPI contract passed 34 tests;
+the exact local Server CI pytest selection passed 779 tests and 68 subtests.
+Web Dashboard tests passed 19 tests; full `npm run check` passed 49 files,
+620 tests, lint and build. A subsequent test-first PR action matrix added
+one distinct Item per PR row, independent action-label cells, 20/50-row
+pagination, owner/restriction/filter-bound cursors and Server-provided `/items`
+drilldowns. The new pure test failed collection before implementation and now
+passes; local Server visualization/API/OpenAPI suites pass 36 tests and Web
+Dashboard/API suites pass 28 tests. The broader checks above predate the PR
+matrix addition. Subsequent test-first slices added shared CI stage/symptom
+filters with same-window pairing and unclassified matching, a fixed 6 × 9 CI
+matrix with a separate unclassified entry, and a paged Release × watch table
+whose null labels and no-Item rows remain visible. Current saved Updates
+change-unit evidence IDs are exposed in Source contexts without source text.
+The CI filter test first returned unrelated Items; the Updates Source units
+test first failed with a missing field. Their focused reruns passed. Complete
+Item timelines and remaining P3/P4/P5 functionality are still open.
+
 ## P0 baseline
 
 The four repositories were clean before implementation started. Recovery

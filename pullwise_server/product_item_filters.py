@@ -4,6 +4,13 @@ from __future__ import annotations
 from typing import Mapping
 
 
+CI_STAGES = ("dependency_install", "build", "test", "deploy", "runtime", "unknown")
+CI_SYMPTOMS = ("connection_timeout", "name_resolution_failure",
+    "authentication_denied", "authorization_denied", "assertion_failure",
+    "syntax_or_type_error", "package_resolution_failure",
+    "resource_exhausted", "configuration_error")
+
+
 def _query_value(params: Mapping[str, object], name: str) -> str:
     value = params.get(name)
     if isinstance(value, list):
@@ -54,13 +61,20 @@ def filter_items(items: list[dict], params: Mapping[str, object], user_id: str,
     disposition = _query_value(params, "disposition")
     pull_number = _query_value(params, "pullNumber")
     run_id = _query_value(params, "runId")
+    ci_stage = _query_value(params, "ciStage")
+    ci_symptom = _query_value(params, "ciSymptom")
+    classification_state = _query_value(params, "classificationState")
     view = _query_value(params, "view") or "all"
     if view not in {"mine", "unassigned", "waiting", "all"}:
         raise ValueError("INVALID_VIEW")
     if (pull_number and (module != "pr" or not repository_id or not pull_number.isdigit()
                          or int(pull_number) < 1)
             or run_id and (module != "ci" or not repository_id or not run_id.isdigit()
-                           or int(run_id) < 1)):
+                           or int(run_id) < 1)
+            or (ci_stage or ci_symptom or classification_state) and module != "ci"
+            or ci_stage and ci_stage not in CI_STAGES
+            or ci_symptom and ci_symptom not in CI_SYMPTOMS
+            or classification_state and classification_state not in {"identified", "unclassified"}):
         raise ValueError("INVALID_CONFIGURATION")
     result = []
     for item in items:
@@ -79,6 +93,23 @@ def filter_items(items: list[dict], params: Mapping[str, object], user_id: str,
         if disposition and (item.get("handling") or {}).get("disposition") != disposition:
             continue
         facts = item.get("sourceFacts") or {}
+        if ci_stage or ci_symptom or classification_state:
+            windows = facts.get("windows") if isinstance(facts, Mapping) else None
+            windows = windows if isinstance(windows, list) else []
+            pairs = [(window.get("stage"), symptom)
+                     for window in windows if isinstance(window, Mapping)
+                     for symptom in (window.get("symptoms") or ())
+                     if isinstance(symptom, str) and symptom in CI_SYMPTOMS]
+            if classification_state == "identified" and not pairs:
+                continue
+            if classification_state == "unclassified" and pairs:
+                continue
+            if ci_stage or ci_symptom:
+                if not any(isinstance(window, Mapping)
+                           and (not ci_stage or window.get("stage") == ci_stage)
+                           and (not ci_symptom or ci_symptom in (window.get("symptoms") or ()))
+                           for window in windows):
+                    continue
         if pull_number and str(facts.get("pullNumber") or "") != pull_number:
             continue
         if run_id and str(facts.get("runId") or "") != run_id:

@@ -18,6 +18,8 @@ from .product_dto_rules import (
     job_dto,
 )
 from .update_filter import project_saved_updates
+from .product_timeline import item_timeline
+from .product_item_filters import apply_item_restrictions
 from .product_usage_events import parse_usage_events_query, usage_events_page
 
 
@@ -1889,6 +1891,7 @@ class ProductStore:
                     projection = project_saved_updates(public_assessment, context["coverage"]) if public_assessment else None
                     context["relevance"] = projection["relevance"] if projection else None
                     context["updateSignals"] = projection["updateSignals"] if projection else {}
+                    context["units"] = projection["units"] if projection else []
                 if include_content:
                     context["assessments"] = [json.loads(publication["assessment_json"])] if current else []
                     context["evidence"] = json.loads(publication["evidence_json"]) if current else []
@@ -1991,6 +1994,27 @@ class ProductStore:
                 item["lastSyncedAt"] = _iso_timestamp(min(synced))
             result.append(item)
         return result
+
+    def item_timeline_for_billing_owner(self, billing_owner_id: str, item_id: str,
+                                        *, cursor: str | None = None,
+                                        limit: int = 50, request_id: str,
+                                        visibility_key: str = "",
+                                        restrictions: Mapping[str, object] | None = None) -> dict | None:
+        """Authorize current Item and read its saved history in one snapshot."""
+        with self._read() as connection:
+            if self._connection is None:
+                connection.execute("BEGIN")
+            scoped = ProductStore(self.database_path, _connection=connection)
+            readable = scoped.list_items_for_billing_owner(billing_owner_id,
+                include_history=True, item_id=item_id)
+            if not apply_item_restrictions(readable, restrictions or {}):
+                return None
+            versions = connection.execute("""SELECT item_version,sources_json,
+                snapshot_json,observed_at FROM item_versions WHERE item_id=?
+                ORDER BY item_version""", (item_id,)).fetchall()
+            return item_timeline(readable[0], versions, owner_id=billing_owner_id,
+                visibility_key=visibility_key, limit=limit, cursor=cursor,
+                request_id=request_id)
 
     def publish_item_snapshot(
         self,

@@ -39,6 +39,57 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Overview' }
+  /api/v1/visualizations:
+    get:
+      operationId: getProductVisualization
+      description: Read-only saved Item distributions and PR action rows; never schedules model work or charges usage.
+      parameters:
+        - name: kind
+          in: query
+          required: true
+          schema: { type: string, enum: [workload, pr_actions, ci_failures, updates_releases] }
+        - $ref: '#/components/parameters/Module'
+        - $ref: '#/components/parameters/RepositoryId'
+        - $ref: '#/components/parameters/WatchId'
+        - $ref: '#/components/parameters/View'
+        - $ref: '#/components/parameters/Cursor'
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+        - name: releaseId
+          in: query
+          schema: { type: string }
+        - name: relevance
+          in: query
+          schema: { type: string, enum: [relevant, not_relevant, unclear] }
+        - name: updateSignal
+          in: query
+          schema: { type: string, enum: [migration_stated, deprecation_stated, breaking_change_stated, security_fix_stated] }
+        - name: processingStatus
+          in: query
+          schema: { type: string }
+        - name: ciStage
+          in: query
+          schema: { type: string, enum: [dependency_install, build, test, deploy, runtime, unknown] }
+        - name: ciSymptom
+          in: query
+          schema: { type: string, enum: [connection_timeout, name_resolution_failure, authentication_denied, authorization_denied, assertion_failure, syntax_or_type_error, package_resolution_failure, resource_exhausted, configuration_error] }
+        - name: classificationState
+          in: query
+          schema: { type: string, enum: [identified, unclassified] }
+      responses:
+        '200':
+          description: Distinct current Items in the requested typed visualization.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/WorkloadVisualization'
+                  - $ref: '#/components/schemas/PRActionsVisualization'
+                  - $ref: '#/components/schemas/CIFailuresVisualization'
+                  - $ref: '#/components/schemas/UpdatesReleaseVisualization'
+                discriminator:
+                  propertyName: kind
   /api/v1/sources:
     get:
       operationId: listSources
@@ -132,6 +183,23 @@ paths:
               schema: { $ref: '#/components/schemas/Item' }
         '409': { $ref: '#/components/responses/Conflict' }
         '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /api/v1/items/{itemId}/timeline:
+    get:
+      operationId: getItemTimeline
+      description: Saved authorized source observations, assessments and handling events only; never schedules model work.
+      parameters:
+        - $ref: '#/components/parameters/ItemId'
+        - $ref: '#/components/parameters/Cursor'
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Events and verified relations with explicit time basis and history coverage.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ItemTimeline' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/repositories:
     get:
       operationId: listRepositoryServices
@@ -335,6 +403,287 @@ components:
       required: true
       schema: { type: string, minLength: 1, maxLength: 128 }
   schemas:
+    ItemTimeline:
+      type: object
+      additionalProperties: false
+      required: [items, relations, nextCursor, hasMore, coverage, requestId]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/TimelineEvent' }
+        relations: { type: array, items: { type: object } }
+        nextCursor: { type: [string, 'null'] }
+        hasMore: { type: boolean }
+        coverage:
+          type: object
+          additionalProperties: false
+          required: [historicalStartAt, limitations]
+          properties:
+            historicalStartAt: { type: [string, 'null'], format: date-time }
+            limitations: { type: array, items: { type: string } }
+        requestId: { type: string }
+    TimelineEvent:
+      type: object
+      additionalProperties: false
+      required: [id, itemId, itemVersion, sourceKind, eventType, occurredAt, observedAt, timeBasis, sourceRefs, evidenceIds, actor]
+      properties:
+        id: { type: string }
+        itemId: { type: string }
+        itemVersion: { type: integer, minimum: 1 }
+        sourceKind: { type: string, enum: [github, model, handling] }
+        eventType: { type: string, enum: [snapshot_observed, assessed, disposition_changed, assignee_changed, feedback_changed, disposition_carried_forward] }
+        occurredAt: { type: [string, 'null'], format: date-time }
+        observedAt: { type: string, format: date-time }
+        timeBasis: { type: string, enum: [source, observed] }
+        sourceRefs: { type: array, items: { type: object } }
+        evidenceIds: { type: array, items: { type: string } }
+        actor: { type: [object, 'null'] }
+    UpdatesReleaseVisualization:
+      type: object
+      additionalProperties: false
+      required: [kind, scope, generatedAt, lastSyncedAt, countUnit, totalCount, coverage, data, nextCursor, hasMore, requestId]
+      properties:
+        kind: { type: string, const: updates_releases }
+        scope: { type: object, additionalProperties: { type: string } }
+        generatedAt: { type: string, format: date-time }
+        lastSyncedAt: { type: [string, 'null'], format: date-time }
+        countUnit: { type: string, const: release_watch }
+        totalCount: { type: integer, minimum: 0 }
+        coverage: { $ref: '#/components/schemas/VisualizationCoverage' }
+        data:
+          type: object
+          additionalProperties: false
+          required: [rows, columns]
+          properties:
+            columns:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [key]
+                properties:
+                  key: { type: string, enum: [migration_stated, deprecation_stated, breaking_change_stated, security_fix_stated] }
+            rows:
+              type: array
+              items: { $ref: '#/components/schemas/UpdatesReleaseRow' }
+        nextCursor: { type: [string, 'null'] }
+        hasMore: { type: boolean }
+        requestId: { type: string }
+    UpdatesReleaseRow:
+      type: object
+      additionalProperties: false
+      required: [sourceId, contextId, watchId, upstreamRepositoryId, releaseId, tagName, title, publishedAt, sourceUrl, itemId, contextVersion, processingStatus, contextStale, coverage, relevance, updateSignals, evidenceIds, signalEvidenceIds, drilldown]
+      properties:
+        sourceId: { type: string }
+        contextId: { type: string }
+        watchId: { type: string }
+        upstreamRepositoryId: { type: [string, 'null'] }
+        releaseId: { type: string }
+        tagName: { type: [string, 'null'] }
+        title: { type: [string, 'null'] }
+        publishedAt: { type: [string, 'null'], format: date-time }
+        sourceUrl: { type: [string, 'null'] }
+        itemId: { type: [string, 'null'] }
+        contextVersion: { type: integer, minimum: 1 }
+        processingStatus: { type: string }
+        contextStale: { type: boolean }
+        coverage: { $ref: '#/components/schemas/Coverage' }
+        relevance: { type: [string, 'null'], enum: [relevant, not_relevant, unclear, null] }
+        updateSignals:
+          type: object
+          additionalProperties: false
+          required: [migration_stated, deprecation_stated, breaking_change_stated, security_fix_stated]
+          properties:
+            migration_stated: { type: [string, 'null'], enum: [present, absent, unclear, null] }
+            deprecation_stated: { type: [string, 'null'], enum: [present, absent, unclear, null] }
+            breaking_change_stated: { type: [string, 'null'], enum: [present, absent, unclear, null] }
+            security_fix_stated: { type: [string, 'null'], enum: [present, absent, unclear, null] }
+        evidenceIds: { type: array, items: { type: string } }
+        signalEvidenceIds:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string }
+        drilldown:
+          type: object
+          additionalProperties: false
+          required: [resource, filters]
+          properties:
+            resource: { type: string, const: sources }
+            filters: { type: object, additionalProperties: { type: string } }
+    CIFailuresVisualization:
+      type: object
+      additionalProperties: false
+      required: [kind, scope, generatedAt, lastSyncedAt, countUnit, totalCount, coverage, data, nextCursor, hasMore, requestId]
+      properties:
+        kind: { type: string, const: ci_failures }
+        scope: { type: object, additionalProperties: { type: string } }
+        generatedAt: { type: string, format: date-time }
+        lastSyncedAt: { type: [string, 'null'], format: date-time }
+        countUnit: { type: string, const: ci_job_attempt }
+        totalCount: { type: integer, minimum: 0 }
+        coverage: { $ref: '#/components/schemas/VisualizationCoverage' }
+        data:
+          type: object
+          additionalProperties: false
+          required: [rows, columns, cells, unclassifiedCount, unclassifiedDrilldown]
+          properties:
+            rows:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [key]
+                properties:
+                  key: { type: string, enum: [dependency_install, build, test, deploy, runtime, unknown] }
+            columns:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [key]
+                properties:
+                  key: { type: string, enum: [connection_timeout, name_resolution_failure, authentication_denied, authorization_denied, assertion_failure, syntax_or_type_error, package_resolution_failure, resource_exhausted, configuration_error] }
+            cells:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [rowKey, columnKey, count, drilldown]
+                properties:
+                  rowKey: { type: string }
+                  columnKey: { type: string }
+                  count: { type: integer, minimum: 0 }
+                  drilldown:
+                    type: object
+                    additionalProperties: false
+                    required: [resource, filters]
+                    properties:
+                      resource: { type: string, const: items }
+                      filters: { type: object, additionalProperties: { type: string } }
+            unclassifiedCount: { type: integer, minimum: 0 }
+            unclassifiedDrilldown: { type: [object, 'null'] }
+        nextCursor: { type: 'null' }
+        hasMore: { type: boolean, const: false }
+        requestId: { type: string }
+    PRActionsVisualization:
+      type: object
+      additionalProperties: false
+      required: [kind, scope, generatedAt, lastSyncedAt, countUnit, totalCount, coverage, data, nextCursor, hasMore, requestId]
+      properties:
+        kind: { type: string, const: pr_actions }
+        scope: { type: object, additionalProperties: { type: string } }
+        generatedAt: { type: string, format: date-time }
+        lastSyncedAt: { type: [string, 'null'], format: date-time }
+        countUnit: { type: string, const: item }
+        totalCount: { type: integer, minimum: 0 }
+        coverage: { $ref: '#/components/schemas/VisualizationCoverage' }
+        data:
+          type: object
+          additionalProperties: false
+          required: [rowsTotal, columns, rows]
+          properties:
+            rowsTotal: { type: integer, minimum: 0 }
+            columns:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [key]
+                properties:
+                  key: { type: string, enum: [change_requested, reply_needed, review_requested, optional_suggestion, confirm_next_step] }
+            rows:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [key, repositoryId, pullNumber, totalCount, cells]
+                properties:
+                  key: { type: string }
+                  repositoryId: { type: string }
+                  pullNumber: { type: integer, minimum: 1 }
+                  totalCount: { type: integer, minimum: 0 }
+                  cells:
+                    type: array
+                    items: { $ref: '#/components/schemas/VisualizationCell' }
+        nextCursor: { type: [string, 'null'] }
+        hasMore: { type: boolean }
+        requestId: { type: string }
+    VisualizationCell:
+      type: object
+      additionalProperties: false
+      required: [key, count, drilldown]
+      properties:
+        key: { type: string }
+        count: { type: integer, minimum: 0 }
+        drilldown:
+          type: object
+          additionalProperties: false
+          required: [resource, filters]
+          properties:
+            resource: { type: string, const: items }
+            filters: { type: object, additionalProperties: { type: string } }
+    VisualizationCoverage:
+      type: object
+      additionalProperties: false
+      required: [syncState, analysisState, limitations]
+      properties:
+        syncState: { type: string, enum: [complete, partial, stale, unavailable] }
+        analysisState: { type: string, enum: [complete, partial, disabled, unavailable] }
+        limitations: { type: array, items: { type: string } }
+    WorkloadVisualization:
+      type: object
+      additionalProperties: false
+      required: [kind, scope, generatedAt, lastSyncedAt, countUnit, totalCount, coverage, data, nextCursor, hasMore, requestId]
+      properties:
+        kind: { type: string, const: workload }
+        scope: { type: object, additionalProperties: { type: string } }
+        generatedAt: { type: string, format: date-time }
+        lastSyncedAt: { type: [string, 'null'], format: date-time }
+        countUnit: { type: string, const: item }
+        totalCount: { type: integer, minimum: 0 }
+        coverage: { $ref: '#/components/schemas/VisualizationCoverage' }
+        data:
+          type: object
+          additionalProperties: false
+          required: [columns, rows]
+          properties:
+            columns:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [key]
+                properties:
+                  key: { type: string, enum: [needs_action, needs_confirmation, waiting, optional, closed] }
+            rows:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [key, totalCount, cells]
+                properties:
+                  key: { type: string, enum: [pr, ci, updates] }
+                  totalCount: { type: integer, minimum: 0 }
+                  cells:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [key, count, drilldown]
+                      properties:
+                        key: { type: string, enum: [needs_action, needs_confirmation, waiting, optional, closed] }
+                        count: { type: integer, minimum: 0 }
+                        drilldown:
+                          type: object
+                          additionalProperties: false
+                          required: [resource, filters]
+                          properties:
+                            resource: { type: string, const: items }
+                            filters: { type: object, additionalProperties: { type: string } }
+        nextCursor: { type: 'null' }
+        hasMore: { type: boolean, const: false }
+        requestId: { type: string }
     Page:
       type: object
       additionalProperties: false
@@ -382,6 +731,20 @@ components:
             deprecation_stated: { type: [string, 'null'], enum: [present, absent, unclear, null] }
             breaking_change_stated: { type: [string, 'null'], enum: [present, absent, unclear, null] }
             security_fix_stated: { type: [string, 'null'], enum: [present, absent, unclear, null] }
+        units:
+          type: array
+          description: Current saved change-unit judgments and evidence references; empty when unclassified.
+          items:
+            type: object
+            additionalProperties: false
+            required: [changeUnitId, evidenceIds, relevance, updateSignals]
+            properties:
+              changeUnitId: { type: string }
+              evidenceIds: { type: array, items: { type: string } }
+              relevance: { type: string, enum: [relevant, not_relevant, unclear] }
+              updateSignals:
+                type: object
+                additionalProperties: { type: [string, 'null'] }
         assessments: { type: array, items: { $ref: '#/components/schemas/Assessment' }, description: Current context-bound saved results; detail only. }
         evidence: { type: array, items: { $ref: '#/components/schemas/Evidence' }, description: Current assessment evidence; detail only. }
     Source:

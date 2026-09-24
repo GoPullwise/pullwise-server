@@ -22,6 +22,20 @@ revision; pending or incomplete assessment must not silently close an item.
 
 ## Current product-v1 implementation invariants
 
+- Local `GET /api/v1/visualizations` supports `workload`, `pr_actions`,
+  `ci_failures` and `updates_releases` over already authorized Source/Item
+  projections; Item kinds use shared `/items` filters and Updates uses shared
+  `/sources` filters.
+  Workload counts each Item once per module/attention bucket; PR rows count
+  distinct Items while action cells count each label separately. PR row cursors
+  bind owner, API-key resource restrictions, scope and limit. All kinds return
+  standard list drilldowns and perform no sync, model call or usage write.
+  CI labels pair stage/symptom only within one evidence window and retain
+  unclassified failures. Updates rows count Release × watch contexts even
+  without an Item or saved assessment; null labels remain null. Source list
+  contexts expose saved current change-unit evidence IDs via `units`.
+  Full timelines remain separate implementation work; do not return empty
+  success for them.
 - The workspace Cloudflare D1 cost pause applies here: do not run Wrangler,
   workerd or D1 commands, even local probes, until the user explicitly
   authorizes resuming. Use Python/SQLite and static checks meanwhile; keep

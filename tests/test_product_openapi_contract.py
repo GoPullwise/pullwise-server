@@ -13,6 +13,7 @@ class ProductOpenApiContractTest(unittest.TestCase):
         for path in (
             "/api/v1/me:",
             "/api/v1/items/overview:",
+            "/api/v1/visualizations:",
             "/api/v1/sources:",
             "/api/v1/sources/{sourceId}:",
             "/api/v1/items:",
@@ -28,7 +29,7 @@ class ProductOpenApiContractTest(unittest.TestCase):
         self.assertIn("cookieSession: []", text)
         self.assertIn("apiKey: []", text)
 
-    def test_contract_has_no_user_model_submission_or_p5b_fake_paths(self) -> None:
+    def test_contract_has_no_user_model_submission(self) -> None:
         text = CONTRACT.read_text(encoding="utf-8").lower()
         for forbidden in (
             "/batches",
@@ -36,10 +37,13 @@ class ProductOpenApiContractTest(unittest.TestCase):
             "/reanalyze",
             "/retry-analysis",
             "forceanalysis",
-            "/visualizations",
-            "/timeline",
         ):
             self.assertNotIn(forbidden, text)
+        self.assertIn("WorkloadVisualization:", CONTRACT.read_text(encoding="utf-8"))
+        self.assertIn("PRActionsVisualization:", CONTRACT.read_text(encoding="utf-8"))
+        self.assertIn("CIFailuresVisualization:", CONTRACT.read_text(encoding="utf-8"))
+        self.assertIn("UpdatesReleaseVisualization:", CONTRACT.read_text(encoding="utf-8"))
+        self.assertIn("/api/v1/items/{itemId}/timeline:", CONTRACT.read_text(encoding="utf-8"))
 
     def test_source_and_item_state_enums_preserve_pending_partial_and_unknown(self) -> None:
         text = CONTRACT.read_text(encoding="utf-8")
