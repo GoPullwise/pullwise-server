@@ -2,7 +2,7 @@
 
 The target Server is a Cloudflare Python Worker for the [GitHub project expense ledger](docs/design/github-project-ledger/README.md). It keeps GitHub identity and repository authorization, API keys, and Creem subscription facts. Ledger expenses, reports and CSV exports are account-owned and separate from platform billing.
 
-The deployed entry is `cloudflare/server/src/entry.py`. Its dependency mirror is generated from `pullwise_server/` by `cloudflare/server/sync_server_modules.py`. The Worker exposes GitHub OAuth and App callbacks, billing and webhook routes, `/api-keys`, and `/api/v1` projects, categories, expenses, reports and optional suggestions. The old PR/CI/Updates routes are not mounted in this Worker. The old local VM runtime and its legacy modules still exist in the repository pending final S15 physical cleanup; do not use it as evidence for the Cloudflare ledger.
+The deployed entry is `cloudflare/server/src/entry.py`. Its dependency mirror is generated from `pullwise_server/` by `cloudflare/server/sync_server_modules.py`. The Worker exposes GitHub OAuth and App callbacks, billing and webhook routes, `/api-keys`, and `/api/v1` projects, categories, expenses, reports and optional suggestions. The old local VM runtime, PR/CI/Updates modules and their historical tests have been removed. Local verification uses the Worker entry and its synthetic D1 test fixture; Cloudflare runtime behavior still needs separate acceptance.
 
 ## Local checks
 

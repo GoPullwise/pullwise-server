@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import ast
 from pathlib import Path
 
 
 MODULES = (
     "account_cycle_rules",
     "api_key_dto_rules",
+    "billing_account_rules",
     "billing_catalog_rules",
     "billing_projection",
     "cloudflare_account_adapter",
@@ -21,6 +23,7 @@ MODULES = (
     "cloudflare_creem_gateway",
     "cloudflare_creem_handler",
     "cloudflare_d1_batch",
+    "cloudflare_d1_mapping",
     "cloudflare_github_gateway",
     "cloudflare_github_identity_http",
     "cloudflare_http_contract",
@@ -42,12 +45,27 @@ MODULES = (
 )
 
 
+def check_package_imports(source: Path) -> None:
+    available = set(MODULES) | {"__init__"}
+    for module in MODULES:
+        tree = ast.parse((source / f"{module}.py").read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom) or node.level != 1:
+                continue
+            imported = {node.module.split(".")[0]} if node.module else {
+                alias.name for alias in node.names}
+            missing = imported - available
+            if missing:
+                raise SystemExit(f"{module} imports unpackaged modules: {', '.join(sorted(missing))}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     server_root = Path(__file__).resolve().parents[2]
     source = server_root / "pullwise_server"
+    check_package_imports(source)
     target = Path(__file__).resolve().parent / "src" / "pullwise_server"
     if not args.check:
         target.mkdir(parents=True, exist_ok=True)

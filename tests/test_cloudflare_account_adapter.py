@@ -3,61 +3,13 @@ import asyncio
 import json
 import sqlite3
 from contextlib import closing
-from types import SimpleNamespace
 
 import pytest
 
 from pullwise_server.cloudflare_account_adapter import D1AccountTransactions
-from test_cloudflare_server_mapping import seed
 
 
-class Prepared:
-    def __init__(self, binding, sql):
-        self.binding = binding
-        self.sql = sql
-        self.params = ()
-
-    def bind(self, *params):
-        self.params = params
-        return self
-
-    async def first(self):
-        with closing(self.binding.store.connect()) as connection:
-            cursor = connection.execute(self.sql, self.params)
-            row = cursor.fetchone()
-            return dict(zip((column[0] for column in cursor.description), row)) if row else None
-
-    async def all(self):
-        with closing(self.binding.store.connect()) as connection:
-            cursor = connection.execute(self.sql, self.params)
-            columns = [column[0] for column in cursor.description]
-            return type("Rows", (), {"results": [dict(zip(columns, row)) for row in cursor.fetchall()]})()
-
-
-class D1ShapedSQLite:
-    def __init__(self, store):
-        self.store = store
-        self.batch_count = 0
-        self.before_batch = None
-
-    def prepare(self, sql):
-        return Prepared(self, sql)
-
-    async def batch(self, statements):
-        self.batch_count += 1
-        if self.before_batch:
-            self.before_batch()
-        with self.store._immediate() as connection:
-            results = []
-            for statement in statements:
-                cursor = connection.execute(statement.sql, statement.params)
-                if cursor.description:
-                    columns = [column[0] for column in cursor.description]
-                    rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
-                else:
-                    rows = []
-                results.append(SimpleNamespace(success=True, results=rows))
-        return results
+from ledger_d1_fixture import D1ShapedSQLite, seed
 
 
 def test_async_account_adapter_dirties_and_refreshes_persisted_owner(tmp_path):

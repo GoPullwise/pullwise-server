@@ -7,8 +7,7 @@ from contextlib import closing
 import pytest
 
 from pullwise_server.cloudflare_oauth_state_adapter import D1OAuthStates
-from test_cloudflare_account_adapter import D1ShapedSQLite
-from test_cloudflare_server_mapping import seed
+from ledger_d1_fixture import D1ShapedSQLite, seed
 
 
 def test_oauth_state_issue_and_single_use_consume(tmp_path):
