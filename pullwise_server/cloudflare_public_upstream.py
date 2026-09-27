@@ -72,6 +72,23 @@ class D1PublicUpstreamProofs:
                 observed_at=excluded.observed_at,valid_until=excluded.valid_until""").bind(
                     key, "unverified", f"{owner}/{repository}",
                     source_revision, observed_at, observed_at),
+            self.binding.prepare("""UPDATE update_watches SET enabled=0,
+                analysis_enabled=0,revision=revision+1,updated_at=?
+                WHERE target_repository_id IS NULL AND archived_at IS NULL
+                  AND (enabled=1 OR analysis_enabled=1)
+                  AND upstream_repository_id=(SELECT github_repo_id
+                    FROM public_upstream_proofs WHERE lookup_key=?)""").bind(
+                    observed_at, key),
+            self.binding.prepare("""UPDATE source_contexts SET accessible=0,
+                analysis_enabled=0,context_stale=1,
+                authorization_revision=authorization_revision+1,
+                authorization_valid_until=?,updated_at=?
+                WHERE (accessible=1 OR analysis_enabled=1)
+                  AND watch_id IN (SELECT id FROM update_watches
+                    WHERE target_repository_id IS NULL AND archived_at IS NULL
+                      AND upstream_repository_id=(SELECT github_repo_id
+                        FROM public_upstream_proofs WHERE lookup_key=?))""").bind(
+                    observed_at, observed_at, key),
             self.binding.prepare("DELETE FROM d1_command_guard"),
         ])
 

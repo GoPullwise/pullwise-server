@@ -114,6 +114,21 @@ selection passed **799 tests and 68 subtests**; Web `npm run check` passed
 workspace visual cleanup pending its own local commit. No new remote CI run
 covers the unpushed changes.
 
+## Existing public-watch proof revocation (2026-09-27)
+
+A negative trusted public-upstream refresh now pauses active public watches for
+the saved GitHub repository ID and revokes their Source-context access in the
+same D1-shaped batch as the negative proof. The authorization revision advances,
+so Source reads hide the affected context and stale analysis claims cannot
+publish. Unrelated Sources stay visible. The HTTP watch PATCH cannot re-enable
+a paused watch without a fresh positive proof; a later positive proof does not
+implicitly restore revoked Source-context authority. The focused regression
+first returned an old Source and allowed re-enable, then passed after the
+change. This is synthetic local Python/SQLite evidence. Queued analysis is
+released on the next stale-authority claim; immediate D1 queue cleanup, live
+GitHub proof refresh, remote CF2/CF3 and Jev gates remain open. No Wrangler,
+workerd, remote D1, deployment or real model call was used.
+
 ## P0 baseline
 
 The four repositories were clean before implementation started. Recovery

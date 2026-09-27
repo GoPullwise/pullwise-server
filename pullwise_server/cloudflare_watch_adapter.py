@@ -240,6 +240,11 @@ class D1WatchTransactions:
             credential_sql, credential_params = _credential_guard(owner_id, proof)
             predicates.append(credential_sql)
             params.extend(credential_params)
+            if enabled and not watch["enabled"]:
+                predicates.append("""EXISTS(SELECT 1 FROM public_upstream_proofs
+                    WHERE github_repo_id=? AND public_visible=1 AND private=0
+                      AND observed_at<=? AND valid_until>=?)""")
+                params.extend((watch["upstream_repository_id"], now, now))
         if enabled and not watch["enabled"]:
             predicates.append("""(SELECT COUNT(*) FROM update_watches
                 WHERE billing_owner_id=? AND enabled=1 AND archived_at IS NULL

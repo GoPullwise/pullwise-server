@@ -83,8 +83,13 @@ revision; pending or incomplete assessment must not silently close an item.
   synthetic/trusted only. `D1PublicUpstreamProofs.refresh` accepts one injected
   repository read, requires a numeric stable GitHub ID and matching canonical
   owner/name, and records a newer negative proof on private, renamed, missing,
-  limited or malformed results. Its negative proof blocks new POSTs but does
-  not yet revoke existing watch content; wire that fence before live ingestion.
+  limited or malformed results. A negative proof atomically pauses active public
+  watches for the saved GitHub ID and revokes their Source-context access;
+  authorization revisions advance so queued/running analysis cannot publish.
+  Re-enabling a paused watch requires a fresh positive proof, and that proof
+  does not implicitly restore revoked Source-context authority. Queued analysis
+  reservations are released when the next local claim rejects their stale
+  authority; full live ingestion and immediate queue cleanup remain pending.
   Workerd verification remains unconnected under the D1 cost pause. Personal
   private and shared watch creation remain closed.
 

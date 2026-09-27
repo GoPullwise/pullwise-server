@@ -9,7 +9,7 @@ from pullwise_server.cloudflare_public_upstream import D1PublicUpstreamProofs
 from pullwise_server.cloudflare_http_contract import handle_http_request
 from test_cloudflare_account_adapter import D1ShapedSQLite
 from test_cloudflare_server_mapping import seed
-from test_cloudflare_product_reads import _seed_auth
+from test_cloudflare_product_reads import _get, _seed_auth
 
 
 def test_refresh_stages_stable_identity_with_one_injected_request(tmp_path):
@@ -127,6 +127,72 @@ def test_private_refresh_blocks_new_public_watch_post(tmp_path):
     with closing(fixture.store.connect()) as db:
         assert db.execute("SELECT COUNT(*) FROM update_watches").fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM request_idempotency").fetchone()[0] == 0
+
+
+def test_private_refresh_pauses_existing_watch_and_hides_its_sources(tmp_path):
+    fixture, job, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("watches:read", "items:read"))
+    binding = D1ShapedSQLite(fixture.store)
+    proofs = D1PublicUpstreamProofs(binding)
+    asyncio.run(proofs.stage(owner="acme", repository="toolkit",
+        github_repo_id="github:101", full_name="acme/toolkit",
+        public_visible=True, private=False, source_revision=1,
+        observed_at=fixture.now, valid_until=fixture.now + 300))
+    watch = fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=True)
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE source_contexts SET watch_id=? WHERE source_id='1'",
+            (watch["id"],))
+    headers = {"Cookie": "pw_session=session-local"}
+    assert _get(binding, "/api/v1/sources/1", headers, fixture.now)[0] == 200
+    assert _get(binding, f"/api/v1/watches/{watch['id']}", headers, fixture.now)[1]["enabled"] is True
+
+    async def private(owner, repository):
+        return {"status": 200, "repository": {"id": 101,
+            "full_name": "acme/toolkit", "private": True,
+            "visibility": "private"}}
+
+    with pytest.raises(ValueError, match="UPSTREAM_PROOF_UNAVAILABLE"):
+        asyncio.run(proofs.refresh(owner="acme", repository="toolkit",
+            fetch_repository=private, source_revision=2,
+            observed_at=fixture.now + 1))
+    assert _get(binding, "/api/v1/sources/1", headers, fixture.now + 1)[0] == 404
+    assert _get(binding, "/api/v1/sources/2", headers, fixture.now + 1)[0] == 200
+    status, paused = _get(binding, f"/api/v1/watches/{watch['id']}",
+        headers, fixture.now + 1)
+    assert status == 200 and paused["enabled"] is False
+    body = b'{"enabled":true}'
+
+    async def read_body():
+        return body
+
+    update_status, _ = asyncio.run(handle_http_request(method="PATCH",
+        path=f"/api/v1/watches/{watch['id']}",
+        headers={**headers, "Content-Length": str(len(body)),
+            "If-Match": str(paused["revision"])},
+        read_body=read_body, binding=binding, creem_secret="",
+        configured_products={}, now=fixture.now + 1))
+    assert update_status == 412
+    with closing(fixture.store.connect()) as db:
+        context = db.execute("SELECT accessible,authorization_revision FROM source_contexts "
+            "WHERE source_id='1'").fetchone()
+        assert tuple(context) == (0, 2)
+    assert fixture.store.claim_next_analysis_job(now=fixture.now + 1) is None
+    assert fixture.store.get_background_job(job["id"])["status"] == "cancelled"
+    asyncio.run(proofs.stage(owner="acme", repository="toolkit",
+        github_repo_id="github:101", full_name="acme/toolkit",
+        public_visible=True, private=False, source_revision=3,
+        observed_at=fixture.now + 2, valid_until=fixture.now + 302))
+    assert _get(binding, "/api/v1/sources/1", headers, fixture.now + 2)[0] == 404
+    update_status, reenabled = asyncio.run(handle_http_request(method="PATCH",
+        path=f"/api/v1/watches/{watch['id']}",
+        headers={**headers, "Content-Length": str(len(body)),
+            "If-Match": str(paused["revision"])},
+        read_body=read_body, binding=binding, creem_secret="",
+        configured_products={}, now=fixture.now + 2))
+    assert update_status == 200 and reenabled["enabled"] is True
+    assert _get(binding, "/api/v1/sources/1", headers, fixture.now + 2)[0] == 404
 
 
 def test_trusted_stage_refuses_unrelated_name_or_unstable_id(tmp_path):
