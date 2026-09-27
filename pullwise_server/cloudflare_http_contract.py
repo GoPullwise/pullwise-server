@@ -40,9 +40,8 @@ async def handle_http_request(*, method: str, path: str,
                     'expenses','expense_events','expense_create_idempotency',
                     'expense_suggestion_budget','expense_suggestion_events','app_state',
                     'd1_command_guard','api_keys','account_entitlement_authority',
-                    'billing_webhook_receipts','billing_public_catalog',
-                    'processing_usage_buckets','processing_usage_ledger','provider_attempts')""").first()
-            if ledger and ledger.get("table_count") == 16:
+                    'billing_webhook_receipts','billing_public_catalog')""").first()
+            if ledger and ledger.get("table_count") == 13:
                 return 200, {"ok": True, "service": "pullwise-server",
                              "database": {"type": "d1", "configured": True}}
         except Exception:

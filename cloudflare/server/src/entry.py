@@ -182,19 +182,4 @@ class Default(WorkerEntrypoint):
             if path in {"/billing", "/billing/plan", "/api-keys"}
                or path.startswith("/api-keys/")
                or path.startswith("/api/v1/") else None)
-        if (status == 200 and isinstance(payload, dict)
-                and type(payload.get("revision")) is int
-                and (path.startswith("/api/v1/items/")
-                     or path.startswith("/api/v1/watches/")
-                     or path == "/api/v1/repositories"
-                     or (path.startswith("/api/v1/repositories/")
-                         and path.endswith("/service")))):
-            response_headers = dict(response_headers or {})
-            response_headers["ETag"] = f'"{payload["revision"]}"'
-        if (status == 201 and path == "/api/v1/watches"
-                and isinstance(payload, dict)
-                and isinstance(payload.get("links"), dict)
-                and isinstance(payload["links"].get("self"), str)):
-            response_headers = dict(response_headers or {})
-            response_headers["Location"] = payload["links"]["self"]
         return Response.json(payload, status=status, headers=response_headers)
