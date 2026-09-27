@@ -8,8 +8,8 @@ from contextlib import closing
 import pytest
 
 from pullwise_server.cloudflare_http_contract import handle_http_request
-from test_cloudflare_account_adapter import D1ShapedSQLite
-from test_cloudflare_server_mapping import seed
+from ledger_d1_fixture import D1ShapedSQLite
+from ledger_d1_fixture import seed
 
 
 def _request(binding, *, method, path, raw=b"", signature=None, secret="synthetic-secret",

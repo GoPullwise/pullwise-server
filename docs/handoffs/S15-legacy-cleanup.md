@@ -8,7 +8,7 @@ Status: Incomplete. The developer explicitly requested progress through S18; thi
 
 ## Verification and blockers
 
-The focused Server suite passed 84 tests locally, module sync and S01 static checks passed. A full pytest run excluding the preexisting untracked `tests/test_jev_sdk_child_adapter.py` produced 58 failures and 1197 passes because the old local VM runtime and retired product tests remain in the repository. Unrestricted collection also fails on that untracked test's missing `jev_sdk_child_adapter` module; it was not modified or committed. Old collection/analysis modules, local scripts, probes and historical tests still need physical removal or refactoring of identity/payment fixtures. S15 is therefore not complete. No Cloudflare remote test ran; CI status unavailable locally.
+The focused Server suite passed 86 tests locally, module sync and S01 static checks passed. A full pytest run excluding the preexisting untracked `tests/test_jev_sdk_child_adapter.py` produced 58 failures and 1197 passes because the old local VM runtime and retired product tests remain in the repository. Unrestricted collection also fails on that untracked test's missing `jev_sdk_child_adapter` module; it was not modified or committed. Old collection/analysis modules and their historical tests still need physical removal or refactoring of identity/payment fixtures. The old `launcher.sh`, `git-watch.sh`, reverse-proxy script, isolated `cloudflare/probe/` and stale local Worker verification scripts were removed in follow-up cleanup. Wrangler is now pinned in `cloudflare/server/package.json`, with its lockfile and config schema colocated. S15 is therefore not complete. No Cloudflare remote test ran; CI status unavailable locally.
 
 ## Next entry
 

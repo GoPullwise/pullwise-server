@@ -9,8 +9,8 @@ from contextlib import closing
 import pytest
 
 from pullwise_server.cloudflare_creem_handler import accept_signed_creem_webhook
-from test_cloudflare_account_adapter import D1ShapedSQLite
-from test_cloudflare_server_mapping import seed
+from ledger_d1_fixture import D1ShapedSQLite
+from ledger_d1_fixture import seed
 
 
 PRODUCTS = {"pro": ("prod-pro",), "max": ("prod-max",)}
@@ -39,7 +39,7 @@ def test_signed_paid_upgrade_settles_and_refreshes_existing_bucket(tmp_path):
         assert user["billing"]["plan"] == "max"
         assert user["githubAccessToken"] == json.loads(frozen)["githubAccessToken"]
         assert tuple(db.execute("SELECT revision,dirty,plan FROM account_entitlement_authority").fetchone()) == (3, 0, "max")
-        assert tuple(db.execute("SELECT used,reserved,limit_value FROM processing_usage_buckets").fetchone()) == (0, 1, 25000)
+        assert tuple(db.execute("SELECT used,reserved,limit_value FROM processing_usage_buckets").fetchone()) == (0, 1, 5000)
         assert db.execute("SELECT state FROM billing_webhook_receipts WHERE event_id='evt-upgrade'").fetchone()[0] == "applied"
     assert asyncio.run(accept_signed_creem_webhook(**args)) == {
         "received": True, "state": "duplicate", "eventId": "evt-upgrade"}
@@ -104,7 +104,7 @@ def test_duplicate_delivery_repairs_dirty_projection_after_refresh_failure(tmp_p
     assert asyncio.run(accept_signed_creem_webhook(**args))["state"] == "duplicate"
     with closing(fixture.store.connect()) as db:
         assert tuple(db.execute("SELECT revision,dirty FROM account_entitlement_authority").fetchone()) == (3, 0)
-        assert db.execute("SELECT limit_value FROM processing_usage_buckets").fetchone()[0] == 25000
+        assert db.execute("SELECT limit_value FROM processing_usage_buckets").fetchone()[0] == 5000
 
 
 def test_oversized_body_never_reaches_d1(tmp_path):

@@ -5,9 +5,9 @@ import json
 from pullwise_server.cloudflare_http_contract import handle_http_request
 from pullwise_server.billing_projection import billing_account_dto
 from pullwise_server.account_cycle_rules import effective_user_plan
-from test_cloudflare_account_adapter import D1ShapedSQLite
-from test_cloudflare_product_reads import TOKEN, _seed_auth
-from test_cloudflare_server_mapping import seed
+from ledger_d1_fixture import D1ShapedSQLite
+from ledger_d1_fixture import TOKEN, seed_auth as _seed_auth
+from ledger_d1_fixture import seed
 
 
 def seed_public_catalog(fixture):
@@ -17,10 +17,6 @@ def seed_public_catalog(fixture):
                    "prices": {"month": {"amount": None, "configured": False}}}
                   for plan in ("free", "pro", "max")]}
     with fixture.store._immediate() as db:
-        db.execute("""CREATE TABLE billing_public_catalog(
-            id INTEGER PRIMARY KEY CHECK(id=1),payload_json TEXT NOT NULL,
-            expires_at INTEGER NOT NULL,source_revision INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL)""")
         db.execute("INSERT INTO billing_public_catalog VALUES(1,?,?,1,?)",
             (json.dumps(payload), fixture.now + 3600, fixture.now))
     return payload

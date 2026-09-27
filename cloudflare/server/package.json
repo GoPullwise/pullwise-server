@@ -1,0 +1,7 @@
+{
+  "name": "pullwise-server-worker",
+  "private": true,
+  "devDependencies": {
+    "wrangler": "4.136.3"
+  }
+}

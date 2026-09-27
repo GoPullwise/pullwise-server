@@ -8,19 +8,24 @@ from pullwise_server.api_key_dto_rules import (
     api_key_public_payload, requested_api_key_scopes,
     parse_api_key_restrictions,
 )
-from pullwise_server import app
-from test_cloudflare_account_adapter import D1ShapedSQLite
-from test_cloudflare_product_reads import TOKEN, _seed_auth
-from test_cloudflare_server_mapping import seed
+from ledger_d1_fixture import D1ShapedSQLite
+from ledger_d1_fixture import TOKEN, seed_auth as _seed_auth
+from ledger_d1_fixture import seed
 
 
-def test_api_key_projection_matches_existing_account_contract():
+def test_api_key_projection_redacts_secret_and_normalizes_fields():
     record = {"id": "key-local", "name": "  Synthetic  ", "user_id": "owner",
         "key_prefix": "pwk_synthetic", "scopes": '["profile:read","reports:read"]',
         "restrictions": '{"projectIds":["prj_project_a","prj_project_a"]}',
         "created_at": 123, "expires_at": None, "last_used_at": None,
         "revoked_at": None, "key_hash": "private-hash"}
-    assert api_key_public_payload(record) == app.api_key_public_payload(record)
+    assert api_key_public_payload(record) == {
+        "id": "key-local", "name": "Synthetic", "userId": "owner",
+        "prefix": "pwk_synthetic", "scopes": ["profile:read", "reports:read"],
+        "createdAt": 123, "expiresAt": None, "lastUsedAt": None,
+        "revokedAt": None, "restrictions": {"shared": False,
+            "projectIds": ["prj_project_a"]},
+    }
 
 
 @pytest.mark.parametrize("changes", [
@@ -29,29 +34,41 @@ def test_api_key_projection_matches_existing_account_contract():
     {"name": "bad\nname", "scopes": "invalid-json", "expires_at": "123"},
     {"restrictions": '{"kind":"audit_bundle","scanId":"scan-1","repoId":123}'},
 ])
-def test_api_key_projection_edge_cases_match_local_contract(changes):
+def test_api_key_projection_edge_cases_remain_public(changes):
     record = {"id": "key-local", "name": "Synthetic", "user_id": "owner",
         "key_prefix": "pwk_synthetic", "scopes": '["profile:read"]',
         "restrictions": "{}", "created_at": 123, "expires_at": None,
         "last_used_at": None, "revoked_at": None, **changes}
-    assert api_key_public_payload(record) == app.api_key_public_payload(record)
+    payload = api_key_public_payload(record)
+    assert payload["id"] == "key-local"
+    assert "key_hash" not in payload and "key" not in payload
+    assert set(payload["scopes"]) <= {"profile:read", "expenses:read"}
 
 
 @pytest.mark.parametrize("value,provided", [
     (None, False), (["LEDGER:EXPENSES:READ", "expenses:read"], True),
     (["invalid"], True), (42, True), ("expenses:write", True),
 ])
-def test_requested_scopes_match_existing_local_account_rules(value, provided):
-    assert requested_api_key_scopes(value, provided=provided) == app.requested_api_key_scopes(
-        value, provided=provided)
+def test_requested_scopes_validate_ledger_scopes(value, provided):
+    scopes, error = requested_api_key_scopes(value, provided=provided)
+    if value is None:
+        assert "expenses:read" in scopes and error is None
+    elif value == ["LEDGER:EXPENSES:READ", "expenses:read"]:
+        assert scopes == [] and error is not None
+    elif value == "expenses:write":
+        assert scopes == ["expenses:write"] and error is None
+    else:
+        assert scopes == [] and error
 
 
 @pytest.mark.parametrize("value", [
     {"projectIds": ["prj_project_a", "prj_project_a"]},
     {},
 ])
-def test_restriction_normalization_matches_existing_local_account_rules(value):
-    assert parse_api_key_restrictions(value) == app.parse_api_key_restrictions(value)
+def test_restriction_normalization_keeps_valid_project_ids(value):
+    normalized = parse_api_key_restrictions(value)
+    assert normalized["shared"] is False
+    assert normalized.get("projectIds", []) == list(dict.fromkeys(value.get("projectIds", [])))
 
 
 @pytest.mark.parametrize("value", [

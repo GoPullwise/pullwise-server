@@ -7,15 +7,13 @@ from contextlib import closing
 import pytest
 
 from pullwise_server.cloudflare_billing_catalog_write import D1BillingCatalogTransactions
-from pullwise_server.product_entitlement_rules import PLAN_ENTITLEMENTS
-from test_cloudflare_account_adapter import D1ShapedSQLite
-from test_cloudflare_server_mapping import seed
+from ledger_d1_fixture import D1ShapedSQLite
+from ledger_d1_fixture import seed
 
 
 def catalog(amount):
     return {"provider": "creem", "enabled": True, "currency": "USD",
         "plans": [{"id": plan, "name": plan.title(),
-            "entitlements": dict(PLAN_ENTITLEMENTS[plan]),
             "prices": {"month": {"amount": "0" if plan == "free" else amount,
                 "currency": "USD", "interval": "month", "configured": True}}}
             for plan in ("free", "pro", "max")]}
@@ -23,9 +21,6 @@ def catalog(amount):
 
 def test_verified_catalog_stage_advances_revision_and_rejects_stale_price(tmp_path):
     fixture, _, _ = seed(tmp_path / "domain.db")
-    with fixture.store._immediate() as db:
-        db.execute("""CREATE TABLE billing_public_catalog(id INTEGER PRIMARY KEY,
-            payload_json TEXT,expires_at INTEGER,source_revision INTEGER,updated_at INTEGER)""")
     adapter = D1BillingCatalogTransactions(D1ShapedSQLite(fixture.store))
     assert asyncio.run(adapter.stage_verified_catalog(payload=catalog("29"),
         source_revision=1, now=fixture.now, expires_at=fixture.now + 3600))
@@ -42,8 +37,6 @@ def test_verified_catalog_stage_advances_revision_and_rejects_stale_price(tmp_pa
 def test_verified_catalog_stage_rejects_concurrent_revision_change(tmp_path):
     fixture, _, _ = seed(tmp_path / "domain.db")
     with fixture.store._immediate() as db:
-        db.execute("""CREATE TABLE billing_public_catalog(id INTEGER PRIMARY KEY,
-            payload_json TEXT,expires_at INTEGER,source_revision INTEGER,updated_at INTEGER)""")
         db.execute("INSERT INTO billing_public_catalog VALUES(1,?,?,1,?)",
             (json.dumps(catalog("29")), fixture.now + 3600, fixture.now))
     binding = D1ShapedSQLite(fixture.store)
@@ -63,11 +56,8 @@ def test_verified_catalog_stage_rejects_concurrent_revision_change(tmp_path):
 
 def test_catalog_stage_from_injected_verified_products_keeps_product_id(tmp_path):
     fixture, _, _ = seed(tmp_path / "domain.db")
-    with fixture.store._immediate() as db:
-        db.execute("""CREATE TABLE billing_public_catalog(id INTEGER PRIMARY KEY,
-            payload_json TEXT,expires_at INTEGER,source_revision INTEGER,updated_at INTEGER)""")
     product = {"id": "prod-pro-month", "name": "Pullwise Pro",
-        "description": "PR CI Updates", "price": 2900, "currency": "USD",
+        "description": "Project expense ledger", "price": 2900, "currency": "USD",
         "billing_type": "recurring", "billing_period": "every-month",
         "status": "active"}
     adapter = D1BillingCatalogTransactions(D1ShapedSQLite(fixture.store))

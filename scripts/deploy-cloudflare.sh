@@ -32,7 +32,7 @@ fi
 cd "$repo_root"
 python3 scripts/check-ledger-s01.py --environment "$environment"
 config="cloudflare/server/wrangler.${environment}.jsonc"
-wrangler="cloudflare/probe/node_modules/wrangler/wrangler-dist/cli.js"
+wrangler="cloudflare/server/node_modules/wrangler/wrangler-dist/cli.js"
 if ((execute)); then
   [[ -f "$wrangler" ]] || { echo "Pinned local Wrangler installation is missing." >&2; exit 2; }
   echo "Applying remote D1 migrations for $environment"
