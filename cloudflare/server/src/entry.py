@@ -12,6 +12,7 @@ from pullwise_server.cloudflare_billing_mutations import handle_billing_mutation
 from pullwise_server.cloudflare_billing_catalog_refresh import read_or_refresh_catalog
 from pullwise_server.cloudflare_creem_gateway import WorkerCreemGateway, product_bindings, webhook_product_ids
 from pullwise_server.cloudflare_ledger_profile import read_ledger_me
+from pullwise_server.cloudflare_ledger_api import handle_ledger_request
 
 
 class Default(WorkerEntrypoint):
@@ -69,6 +70,46 @@ class Default(WorkerEntrypoint):
             except Exception:
                 status, payload = 503, {"error": {"code": "SERVER_UNAVAILABLE"}}
             return Response.json(payload, status=status, headers={"Cache-Control": "no-store"})
+        if path.startswith(("/api/v1/projects", "/api/v1/categories",
+                            "/api/v1/expenses", "/api/v1/reports/")):
+            if request.method in {"POST", "PATCH", "DELETE"} and (
+                    getattr(self.env, "PULLWISE_COOKIE_SAME_SITE", "Lax").casefold() == "none"
+                    and headers["Cookie"] and not headers["Authorization"]
+                    and not headers["X-Pullwise-Api-Key"]):
+                from urllib.parse import urlsplit as split_origin
+                origin = split_origin(headers["Origin"] or headers["Referer"])
+                if f"{origin.scheme}://{origin.netloc}" not in trusted_origins:
+                    return Response.json({"error": {"code": "UNTRUSTED_ORIGIN"}},
+                        status=403, headers={"Cache-Control": "no-store"})
+            try:
+                body = None
+                if request.method in {"POST", "PATCH"}:
+                    raw = await read_body()
+                    if len(raw) > 8192:
+                        return Response.json({"error": {"code": "REQUEST_TOO_LARGE"}},
+                            status=413, headers={"Cache-Control": "no-store"})
+                    body = json.loads(raw)
+                result = await handle_ledger_request(
+                    binding=getattr(self.env, "DB", None), gateway=WorkerGitHubGateway(self.env),
+                    method=request.method, path=path,
+                    headers=headers, params=parse_qs(urlsplit(request.url).query),
+                    body=body, now=now)
+                status, payload = result if result is not None else (404, {"error": {"code": "NOT_FOUND"}})
+            except (ValueError, UnicodeError):
+                status, payload = 422, {"error": {"code": "INVALID_INPUT"}}
+            except Exception:
+                status, payload = 503, {"error": {"code": "SERVER_UNAVAILABLE"}}
+            response_headers = {"Cache-Control": "no-store",
+                "Vary": "Cookie, Authorization, X-Pullwise-Api-Key"}
+            if status == 204:
+                return Response(None, status=status, headers=response_headers)
+            if isinstance(payload, str):
+                return Response(payload, status=status,
+                    headers={**response_headers, "Content-Type": "text/csv; charset=utf-8",
+                             "Content-Disposition": 'attachment; filename="expenses.csv"'})
+            if status in {200, 201} and isinstance(payload, dict) and isinstance(payload.get("revision"), int):
+                response_headers["ETag"] = f'"{payload["revision"]}"'
+            return Response.json(payload, status=status, headers=response_headers)
         if path == "/billing/plan" and request.method == "GET":
             try:
                 status, payload = await read_or_refresh_catalog(

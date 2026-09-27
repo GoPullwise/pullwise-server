@@ -21,7 +21,7 @@ def target_allowed(restrictions: dict, kind: str, project_id: str | None) -> boo
 
 async def ledger_principal(*, binding: Any, headers: Mapping[str, object],
                            scope: str, now: int, target_kind: str | None = None,
-                           project_id: str | None = None):
+                           project_id: str | None = None, proof: dict | None = None):
     """Return owner and same-snapshot recheck commands for a ledger operation.
 
     Resource SQL must be appended to returned statements in one D1 batch,
@@ -42,5 +42,5 @@ async def ledger_principal(*, binding: Any, headers: Mapping[str, object],
     else:
         restrictions = {}
     statements, validate = _resource_auth_snapshot(
-        binding, headers, user, restrictions, now, scope)
-    return user, restrictions, statements, validate
+        binding, headers, user, restrictions, now, scope, proof)
+    return user, (restrictions if key_token else {"shared": True}), statements, validate
