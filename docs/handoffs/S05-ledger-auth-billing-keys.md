@@ -53,3 +53,22 @@ unverified until S18. Production/preview configs still contain placeholder
 domains and D1 IDs. The old PR/CI/Updates runtime and UI remain during this
 transition and are scheduled for S15–S16 removal; API-key UI copy is scheduled
 for S12.
+
+## Commit and regression audit
+
+- Server ledger S01–S05: `1259494`; Web ledger client/proxy: `7444291`.
+- Earlier completed Web scan/UI cleanup: `d9f7673`. Its full `npm run check`
+  passed: lint, 370 tests and build.
+- Earlier Server scan/Agent-first/Worker/Model Gateway retirement and local
+  PR/CI fact work: `cf861f1`. Python compilation, application import, 109
+  billing/database/product/GitHub tests and 52 focused CI/GitHub/Jev/local
+  identity tests passed. Static import audit found no missing production module.
+- The broader legacy product test run is not green: 209 tests produced 11
+  failures and 4 errors. Old API-key expectations conflict with S05 ledger
+  scopes; two representative failures reproduce on `1259494` before the
+  cleanup commit. Other errors include unavailable `pytest` and sandbox socket
+  permission. Migrate or remove old product tests with S15, and keep the new
+  ledger authorization tests as the active contract.
+- `tests/test_jev_sdk_child_adapter.py` remains untracked because its
+  `pullwise_server.jev_sdk_child_adapter` implementation is absent. It is
+  unrelated to S01–S05 and should be addressed with the later Jev stage.
