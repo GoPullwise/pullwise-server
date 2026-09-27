@@ -13,7 +13,7 @@ class D1OAuthStates:
         if (not isinstance(state_id, str) or not state_id
                 or any(char in state_id for char in "\r\n\x00")
                 or not isinstance(record, dict) or type(now) is not int
-                or record.get("kind") not in {"login", "manage_installation", "install_identity"}
+                or record.get("kind") not in {"login", "install", "manage_installation", "install_identity"}
                 or type(record.get("expiresAt")) is not int
                 or not now < record["expiresAt"] <= now + 600):
             raise ValueError("invalid trusted OAuth state")

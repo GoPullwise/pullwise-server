@@ -1,3 +1,13 @@
+## Next product design — GitHub project expense ledger
+
+The requested replacement product is specified in `docs/design/github-project-ledger/README.md`. It retains existing GitHub authorization, account/API-key security and Creem payment facts while replacing PR/CI/Updates with per-repository and shared-pool expense accounting. This new design supersedes the PR/CI/Updates product target below for future work; the old notes remain current-runtime and cleanup evidence. S01–S05 are under local implementation; project, expense and report routes begin at S06. Perform no real Cloudflare tests until the entire replacement service is implemented unless the user explicitly requests them.
+
+Implement the replacement one Sxx stage at a time as defined in design section 8. After completing and locally verifying a Server stage, write `docs/handoffs/Sxx-<name>.md`, report it, and stop development until the developer explicitly continues or assigns another agent. For cross-project stages, write a handoff in both repositories.
+
+The new ledger contract is `openapi/ledger-v1.yaml`; the old `product-v1.yaml` describes only the current runtime until replacement. Ledger tables begin in `cloudflare/server/migrations/0001_ledger.sql`, separate from identity and Creem billing tables. Preview and production use separate `wrangler.<environment>.jsonc` files and D1 databases. Run `scripts/check-ledger-s01.py --allow-placeholders` for offline static checks; `scripts/deploy-cloudflare.sh` rejects placeholder IDs/domains and requires explicit local-check acknowledgement before any remote command. Do not run remote migration or deployment before the design's S18 gate.
+
+The S03–S05 Worker entry uses `0002_identity_billing_keys.sql` for identity, billing and API-key runtime tables. Keep OAuth/installation metadata checks live and hide repositories on lost access. Initialize the account authority for new GitHub users before exposing a session. Payment mutations remain Cookie and trusted-Origin only; a checkout never grants paid entitlement before a signed Creem webhook. Ledger API keys use only scopes from `api_key_dto_rules.py`, with optional `projectIds` and explicit `shared` permission. Recheck key state and restrictions in the D1 batch that reads each future ledger resource; a project allowlist never grants shared-pool access. Run `cloudflare/server/sync_server_modules.py` after editing Server-owned Worker modules.
+
 <!-- PULLWISE_PRODUCT_TARGET_START -->
 ## Current target — PR / CI / Updates design 1.4
 

@@ -11,6 +11,9 @@ dependencies = [
   "urllib3>=2.7,<3",
 ]
 
+[project.optional-dependencies]
+deployment = ["PyYAML>=6.0.3,<7"]
+
 [project.scripts]
 pullwise-server = "pullwise_server.app:main"
 pullwise-model-gateway = "pullwise_server.model_gateway_app:main"

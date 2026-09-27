@@ -6,15 +6,21 @@ from urllib.parse import urlsplit, parse_qs
 from workers import Response, WorkerEntrypoint
 
 from pullwise_server.cloudflare_http_contract import handle_http_request
+from pullwise_server.cloudflare_github_identity_http import handle_identity_request
+from pullwise_server.cloudflare_github_gateway import WorkerGitHubGateway
+from pullwise_server.cloudflare_billing_mutations import handle_billing_mutation
+from pullwise_server.cloudflare_billing_catalog_refresh import read_or_refresh_catalog
+from pullwise_server.cloudflare_creem_gateway import WorkerCreemGateway, product_bindings, webhook_product_ids
+from pullwise_server.cloudflare_ledger_profile import read_ledger_me
 
 
 class Default(WorkerEntrypoint):
     async def fetch(self, request):
         raw_products = getattr(self.env, "PULLWISE_CREEM_PRODUCT_IDS_JSON", "")
         try:
-            products = json.loads(raw_products) if raw_products else None
+            products = product_bindings(json.loads(raw_products)) if raw_products else {}
         except (TypeError, ValueError):
-            products = None
+            products = {}
 
         async def read_body():
             body = await request.bytes()
@@ -33,6 +39,61 @@ class Default(WorkerEntrypoint):
             "Referer": request.headers.get("referer") or "",
         }
         path = urlsplit(request.url).path
+        now = int(time.time())
+        trusted_origins = {value.strip() for value in (
+            getattr(self.env, "PULLWISE_ALLOWED_ORIGINS", "") + "," +
+            getattr(self.env, "PULLWISE_APP_URL", "")).split(",")
+            if value.strip() and value.strip() != "*"}
+        try:
+            identity = await handle_identity_request(
+                method=request.method, path=path, params=parse_qs(urlsplit(request.url).query),
+                headers=headers, binding=getattr(self.env, "DB", None),
+                gateway=WorkerGitHubGateway(self.env), now=now,
+                app_url=getattr(self.env, "PULLWISE_APP_URL", ""),
+                callback_url=getattr(self.env, "PULLWISE_GITHUB_CALLBACK_URL", ""),
+                cookie_same_site=getattr(self.env, "PULLWISE_COOKIE_SAME_SITE", "Lax"),
+                trusted_origins=trusted_origins,
+            )
+        except Exception:
+            return Response.json({"error": {"code": "IDENTITY_UNAVAILABLE"}}, status=503,
+                                 headers={"Cache-Control": "no-store"})
+        if identity is not None:
+            identity_status, identity_payload, identity_headers = identity
+            if identity_status == 302:
+                return Response(None, status=302, headers=identity_headers)
+            return Response.json(identity_payload, status=identity_status, headers=identity_headers)
+        if path == "/api/v1/me" and request.method == "GET":
+            try:
+                status, payload = await read_ledger_me(
+                    binding=getattr(self.env, "DB", None), headers=headers, now=now)
+            except Exception:
+                status, payload = 503, {"error": {"code": "SERVER_UNAVAILABLE"}}
+            return Response.json(payload, status=status, headers={"Cache-Control": "no-store"})
+        if path == "/billing/plan" and request.method == "GET":
+            try:
+                status, payload = await read_or_refresh_catalog(
+                    binding=getattr(self.env, "DB", None), gateway=WorkerCreemGateway(self.env),
+                    headers=headers, products=products, now=now)
+            except Exception:
+                status, payload = 503, {"error": {"code": "BILLING_CATALOG_UNAVAILABLE"}}
+            return Response.json(payload, status=status, headers={"Cache-Control": "no-store"})
+        if path in {"/billing/checkout-sessions", "/billing/change-interval",
+                    "/billing/cancel-subscription", "/billing/resume-subscription"}:
+            try:
+                raw = await read_body()
+                if len(raw) > 8192:
+                    return Response.json({"error": {"code": "REQUEST_TOO_LARGE"}}, status=413)
+                body = json.loads(raw)
+                status, payload = await handle_billing_mutation(
+                    binding=getattr(self.env, "DB", None), gateway=WorkerCreemGateway(self.env),
+                    now=now, method=request.method, path=path, headers=headers, body=body,
+                    app_url=getattr(self.env, "PULLWISE_APP_URL", ""),
+                    trusted_origins=trusted_origins, products=products)
+            except (ValueError, UnicodeError):
+                status, payload = 422, {"error": {"code": "INVALID_REQUEST"}}
+            except Exception:
+                status, payload = 503, {"error": {"code": "BILLING_UNAVAILABLE"}}
+            return Response.json(payload, status=status, headers={"Cache-Control": "no-store"})
         status, payload = await handle_http_request(
             method=request.method,
             path=path,
@@ -41,13 +102,10 @@ class Default(WorkerEntrypoint):
             read_body=read_body,
             binding=getattr(self.env, "DB", None),
             creem_secret=getattr(self.env, "PULLWISE_CREEM_WEBHOOK_SECRET", ""),
-            configured_products=products,
-            now=int(time.time()),
+            configured_products=webhook_product_ids(products),
+            now=now,
             cookie_same_site=getattr(self.env, "PULLWISE_COOKIE_SAME_SITE", "Lax"),
-            trusted_origins={value.strip() for value in (
-                getattr(self.env, "PULLWISE_ALLOWED_ORIGINS", "") + "," +
-                getattr(self.env, "PULLWISE_APP_URL", "")).split(",")
-                if value.strip() and value.strip() != "*"},
+            trusted_origins=trusted_origins,
         )
         if status == 204:
             return Response(None, status=status)

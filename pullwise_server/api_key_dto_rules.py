@@ -3,15 +3,15 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from typing import Any
 
 
-ALLOWED_SCOPES = frozenset({"profile:read", "repositories:read",
-    "repositories:manage", "items:read", "items:write", "sync:write",
-    "watches:read", "watches:write", "usage:read", "scans:read",
-    "scans:write", "quota:read"})
-DEFAULT_SCOPES = ["profile:read", "repositories:read", "items:read",
-                  "watches:read", "usage:read"]
+ALLOWED_SCOPES = frozenset({"profile:read", "projects:read", "projects:write",
+    "categories:read", "categories:write", "expenses:read", "expenses:write",
+    "reports:read", "suggestions:use"})
+DEFAULT_SCOPES = ["profile:read", "projects:read", "categories:read",
+                  "expenses:read", "reports:read"]
 
 
 def _text(value: object) -> str:
@@ -64,27 +64,12 @@ def _restrictions(value: object) -> dict:
             return {}
     if not isinstance(value, dict):
         return {}
-    kind = _text(value.get("kind") or value.get("purpose")).replace("-", "_")
-    if kind == "audit_bundle":
-        result = {"kind": "audit_bundle"}
-        scan_id = _text(value.get("scanId") or value.get("scan_id"))
-        repo_id = _access_text(value.get("repoId") or value.get("repo_id"))
-        if scan_id:
-            result["scanId"] = scan_id
-        if repo_id:
-            result["repoId"] = repo_id
-        return result
-    result = {}
-    for key in ("repositoryIds", "watchIds"):
-        values = value.get(key)
-        if not isinstance(values, list):
-            continue
-        normalized = []
-        for item in values:
-            text = _access_text(item)
-            if text and text not in normalized:
-                normalized.append(text)
-        result[key] = normalized
+    result = {"shared": value.get("shared") is True}
+    values = value.get("projectIds")
+    if isinstance(values, list):
+        result["projectIds"] = list(dict.fromkeys(
+            item for item in values if isinstance(item, str) and
+            re.fullmatch(r"prj_[A-Za-z0-9_-]{1,100}", item)))
     return result
 
 
@@ -112,7 +97,23 @@ def requested_api_key_scopes(value: object, *, provided: bool) -> tuple[list[str
 
 
 def parse_api_key_restrictions(value: object) -> dict:
-    return _restrictions(value)
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            raise ValueError("INVALID_RESTRICTION") from None
+    if value is not None and (not isinstance(value, dict)
+            or set(value) - {"projectIds", "shared"}):
+        raise ValueError("INVALID_RESTRICTION")
+    if isinstance(value, dict):
+        if "shared" in value and type(value["shared"]) is not bool:
+            raise ValueError("INVALID_RESTRICTION")
+        if "projectIds" in value and (not isinstance(value["projectIds"], list)
+                or len(value["projectIds"]) > 100
+                or any(not isinstance(item, str) or not re.fullmatch(
+                    r"prj_[A-Za-z0-9_-]{1,100}", item) for item in value["projectIds"])):
+            raise ValueError("INVALID_RESTRICTION")
+    return _restrictions(value if value is not None else {})
 
 
 def api_key_public_payload(record: dict[str, Any], *, token: str | None = None) -> dict:

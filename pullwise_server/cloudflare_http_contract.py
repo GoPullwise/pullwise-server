@@ -36,6 +36,15 @@ async def handle_http_request(*, method: str, path: str,
                               trusted_origins: set[str] | None = None) -> tuple[int, dict]:
     if method == "GET" and path == "/health":
         try:
+            ledger = await binding.prepare("""SELECT COUNT(*) AS table_count FROM sqlite_master
+                WHERE type='table' AND name IN ('ledger_projects','expense_categories',
+                    'expenses','expense_events','expense_create_idempotency','app_state',
+                    'd1_command_guard','api_keys','account_entitlement_authority',
+                    'billing_webhook_receipts','billing_public_catalog',
+                    'processing_usage_buckets','processing_usage_ledger','provider_attempts')""").first()
+            if ledger and ledger.get("table_count") == 14:
+                return 200, {"ok": True, "service": "pullwise-server",
+                             "database": {"type": "d1", "configured": True}}
             row = await binding.prepare("""SELECT COUNT(*) AS table_count FROM sqlite_master
                 WHERE type='table' AND name IN ('app_state','account_entitlement_authority',
                     'billing_webhook_receipts','processing_usage_buckets',

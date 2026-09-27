@@ -1,0 +1,321 @@
+openapi: 3.1.0
+info:
+  title: Pullwise GitHub Project Ledger API
+  version: 0.1.0-draft
+  description: |
+    Target contract for the replacement ledger. S01-S05 provide identity,
+    billing, API keys, current profile and repository authorization; project,
+    expense and report routes begin at S06. Web uses its same-origin /api proxy; direct
+    clients call these paths on the Server Worker. All private responses are
+    Cache-Control: no-store. Money is grouped by currency without conversion.
+servers:
+  - url: /
+security:
+  - cookieSession: []
+  - bearerKey: []
+tags:
+  - name: Ledger
+  - name: Reports
+paths:
+  /api/v1/me:
+    get:
+      operationId: getLedgerMe
+      x-pullwise-scope: profile:read
+      responses:
+        '200': {description: Current identity, ledger capabilities and entitlements, content: {application/json: {schema: {$ref: '#/components/schemas/Me'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /api/v1/repositories:
+    get:
+      operationId: listLedgerRepositories
+      x-pullwise-scope: projects:read
+      parameters: [{$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Current GitHub App authorized repositories, content: {application/json: {schema: {$ref: '#/components/schemas/RepositoryPage'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/projects:
+    get:
+      operationId: listLedgerProjects
+      x-pullwise-scope: projects:read
+      parameters: [{$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}, {$ref: '#/components/parameters/From'}, {$ref: '#/components/parameters/To'}]
+      responses:
+        '200': {description: Owner projects and per-currency totals, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectPage'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    post:
+      operationId: createLedgerProject
+      x-pullwise-scope: projects:write
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectInput'}}}}
+      responses:
+        '201': {description: Created project, content: {application/json: {schema: {$ref: '#/components/schemas/Project'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {$ref: '#/components/responses/InvalidInput'}
+  /api/v1/projects/{id}:
+    parameters: [{$ref: '#/components/parameters/Id'}]
+    get:
+      operationId: getLedgerProject
+      x-pullwise-scope: projects:read
+      responses:
+        '200': {description: Project, including authorization state and totals, content: {application/json: {schema: {$ref: '#/components/schemas/Project'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      operationId: updateLedgerProject
+      x-pullwise-scope: projects:write
+      parameters: [{$ref: '#/components/parameters/IfMatch'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectPatch'}}}}
+      responses:
+        '200': {description: Updated project, content: {application/json: {schema: {$ref: '#/components/schemas/Project'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+  /api/v1/categories:
+    get:
+      operationId: listExpenseCategories
+      x-pullwise-scope: categories:read
+      responses:
+        '200': {description: Account categories including archived entries, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Category'}}}}}
+    post:
+      operationId: createExpenseCategory
+      x-pullwise-scope: categories:write
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CategoryInput'}}}}
+      responses:
+        '201': {description: Created category, content: {application/json: {schema: {$ref: '#/components/schemas/Category'}}}}
+        '422': {$ref: '#/components/responses/InvalidInput'}
+  /api/v1/categories/{id}:
+    parameters: [{$ref: '#/components/parameters/Id'}]
+    patch:
+      operationId: updateExpenseCategory
+      x-pullwise-scope: categories:write
+      parameters: [{$ref: '#/components/parameters/IfMatch'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CategoryInput'}}}}
+      responses:
+        '200': {description: Updated category, content: {application/json: {schema: {$ref: '#/components/schemas/Category'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+    delete:
+      operationId: archiveExpenseCategory
+      x-pullwise-scope: categories:write
+      description: Archive only; existing expenses retain their category reference.
+      parameters: [{$ref: '#/components/parameters/IfMatch'}]
+      responses:
+        '204': {description: Archived}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+  /api/v1/expenses:
+    get:
+      operationId: listExpenses
+      x-pullwise-scope: expenses:read
+      parameters: [{$ref: '#/components/parameters/Target'}, {$ref: '#/components/parameters/ProjectId'}, {$ref: '#/components/parameters/CategoryId'}, {$ref: '#/components/parameters/From'}, {$ref: '#/components/parameters/To'}, {$ref: '#/components/parameters/Currency'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200': {description: Active expenses only, content: {application/json: {schema: {$ref: '#/components/schemas/ExpensePage'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    post:
+      operationId: createExpense
+      x-pullwise-scope: expenses:write
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ExpenseInput'}}}}
+      responses:
+        '201': {description: Created expense or exact idempotent replay, content: {application/json: {schema: {$ref: '#/components/schemas/Expense'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/InvalidInput'}
+  /api/v1/expenses/export:
+    get:
+      operationId: exportExpenses
+      x-pullwise-scope: expenses:read
+      description: Uses list filters; active records only. CSV cells must escape spreadsheet formulas.
+      parameters: [{$ref: '#/components/parameters/Target'}, {$ref: '#/components/parameters/ProjectId'}, {$ref: '#/components/parameters/CategoryId'}, {$ref: '#/components/parameters/From'}, {$ref: '#/components/parameters/To'}, {$ref: '#/components/parameters/Currency'}]
+      responses:
+        '200': {description: Streamed CSV, content: {text/csv: {schema: {type: string}}}}
+  /api/v1/expenses/{id}:
+    parameters: [{$ref: '#/components/parameters/Id'}]
+    get:
+      operationId: getExpense
+      x-pullwise-scope: expenses:read
+      responses:
+        '200': {description: Active expense, content: {application/json: {schema: {$ref: '#/components/schemas/Expense'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      operationId: updateExpense
+      x-pullwise-scope: expenses:write
+      description: Moving an expense checks write authority on both old and new targets.
+      parameters: [{$ref: '#/components/parameters/IfMatch'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ExpenseInput'}}}}
+      responses:
+        '200': {description: Updated expense, content: {application/json: {schema: {$ref: '#/components/schemas/Expense'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '422': {$ref: '#/components/responses/InvalidInput'}
+    delete:
+      operationId: removeExpense
+      x-pullwise-scope: expenses:write
+      description: Soft delete and audit event; immediately excluded from list, export and reports.
+      parameters: [{$ref: '#/components/parameters/IfMatch'}]
+      responses:
+        '204': {description: Removed or already removed by the same owner}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+  /api/v1/reports/summary:
+    get:
+      operationId: getLedgerSummary
+      x-pullwise-scope: reports:read
+      parameters: [{$ref: '#/components/parameters/Target'}, {$ref: '#/components/parameters/ProjectId'}, {$ref: '#/components/parameters/CategoryId'}, {$ref: '#/components/parameters/From'}, {$ref: '#/components/parameters/To'}, {$ref: '#/components/parameters/Currency'}]
+      responses:
+        '200': {description: Separate project, shared and account totals by currency, content: {application/json: {schema: {$ref: '#/components/schemas/Report'}}}}
+  /api/v1/reports/timeseries:
+    get:
+      operationId: getLedgerTimeseries
+      x-pullwise-scope: reports:read
+      parameters: [{$ref: '#/components/parameters/Target'}, {$ref: '#/components/parameters/ProjectId'}, {$ref: '#/components/parameters/CategoryId'}, {$ref: '#/components/parameters/From'}, {$ref: '#/components/parameters/To'}, {$ref: '#/components/parameters/Currency'}, {name: bucket, in: query, schema: {type: string, enum: [day, month]}}]
+      responses:
+        '200': {description: Per-currency date buckets, content: {application/json: {schema: {$ref: '#/components/schemas/Report'}}}}
+  /api/v1/reports/categories:
+    get:
+      operationId: getLedgerCategoriesReport
+      x-pullwise-scope: reports:read
+      parameters: [{$ref: '#/components/parameters/Target'}, {$ref: '#/components/parameters/ProjectId'}, {$ref: '#/components/parameters/CategoryId'}, {$ref: '#/components/parameters/From'}, {$ref: '#/components/parameters/To'}, {$ref: '#/components/parameters/Currency'}]
+      responses:
+        '200': {description: Per-currency category buckets including historical archived categories, content: {application/json: {schema: {$ref: '#/components/schemas/Report'}}}}
+  /api/v1/expense-suggestions:
+    post:
+      operationId: suggestExpense
+      x-pullwise-scope: suggestions:use
+      description: Optional advice only; never writes an expense.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [purpose], properties: {purpose: {type: string, maxLength: 500}, note: {type: string, maxLength: 4000}, target: {$ref: '#/components/schemas/Target'}}}}}}
+      responses:
+        '200': {description: Candidates, uncertainty and possible duplicates, content: {application/json: {schema: {type: object, properties: {categoryId: {type: [string, 'null']}, probability: {type: [number, 'null']}, uncertain: {type: boolean}, possibleDuplicates: {type: array, items: {type: string}}}}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+components:
+  securitySchemes:
+    cookieSession: {type: apiKey, in: cookie, name: pw_session}
+    bearerKey: {type: http, scheme: bearer, bearerFormat: 'pwk_ API key'}
+  parameters:
+    Id: {name: id, in: path, required: true, schema: {type: string}}
+    IfMatch: {name: If-Match, in: header, required: true, schema: {type: string}, description: Quoted revision ETag}
+    IdempotencyKey: {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 128}}
+    Target: {name: target, in: query, schema: {type: string, enum: [all, project, shared], default: all}}
+    ProjectId: {name: projectId, in: query, schema: {type: string}}
+    CategoryId: {name: categoryId, in: query, schema: {type: string}}
+    From: {name: from, in: query, schema: {type: string, format: date}, description: Inclusive business date}
+    To: {name: to, in: query, schema: {type: string, format: date}, description: Exclusive business date}
+    Currency: {name: currency, in: query, schema: {type: string, pattern: '^[A-Z]{3}$'}}
+    Cursor: {name: cursor, in: query, schema: {type: string}}
+    Limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+  responses:
+    Unauthorized: {description: Authentication required}
+    Forbidden: {description: Scope, target or GitHub authorization insufficient}
+    NotFound: {description: Resource absent or belongs to another account}
+    Conflict: {description: Idempotency key reused for different input}
+    PreconditionFailed: {description: Revision does not match If-Match}
+    InvalidInput: {description: Invalid or missing field}
+  schemas:
+    Me:
+      type: object
+      required: [id, scopes, entitlements]
+      properties:
+        id: {type: string}
+        scopes: {type: array, items: {type: string}}
+        entitlements: {type: object, additionalProperties: true}
+    Repository:
+      type: object
+      required: [githubRepoId, fullName]
+      properties:
+        githubRepoId: {type: integer, minimum: 1}
+        fullName: {type: string}
+    RepositoryPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/Repository'}}
+        nextCursor: {type: [string, 'null']}
+    Target:
+      oneOf:
+        - {type: object, required: [kind, projectId], additionalProperties: false, properties: {kind: {const: project}, projectId: {type: string}}}
+        - {type: object, required: [kind], additionalProperties: false, properties: {kind: {const: shared}}}
+    ProjectInput:
+      type: object
+      required: [githubRepoId]
+      properties:
+        githubRepoId: {type: integer, minimum: 1}
+        description: {type: string, maxLength: 2000}
+    ProjectPatch:
+      type: object
+      properties:
+        description: {type: string, maxLength: 2000}
+        status: {type: string, enum: [active, archived]}
+    Project:
+      type: object
+      required: [id, githubRepoId, description, status, githubAccess, revision, totals]
+      properties:
+        id: {type: string}
+        githubRepoId: {type: integer, minimum: 1}
+        githubFullName: {type: [string, 'null'], description: Null when GitHub authorization is lost}
+        description: {type: string}
+        status: {type: string, enum: [active, archived]}
+        githubAccess: {type: string, enum: [authorized, lost]}
+        revision: {type: integer, minimum: 1}
+        totals: {type: array, items: {$ref: '#/components/schemas/MoneyTotal'}}
+    ProjectPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/Project'}}
+        nextCursor: {type: [string, 'null']}
+    CategoryInput:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+        color: {type: [string, 'null'], maxLength: 32}
+    Category:
+      type: object
+      required: [id, name, revision, archivedAt]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        color: {type: [string, 'null']}
+        revision: {type: integer, minimum: 1}
+        archivedAt: {type: [string, 'null'], format: date-time}
+    ExpenseInput:
+      type: object
+      required: [target, occurredOn, amount, currency, categoryId, purpose]
+      properties:
+        target: {$ref: '#/components/schemas/Target'}
+        occurredOn: {type: string, format: date}
+        amount: {type: string, pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$', description: Currency exponent and safe integer bound enforced by server}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        categoryId: {type: string}
+        purpose: {type: string, minLength: 1, maxLength: 500}
+        note: {type: [string, 'null'], maxLength: 4000}
+        quantity: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$'}
+        unit: {type: [string, 'null'], maxLength: 40}
+    Expense:
+      allOf:
+        - {$ref: '#/components/schemas/ExpenseInput'}
+        - {type: object, required: [id, amountMinor, revision, createdAt, updatedAt], properties: {id: {type: string}, amountMinor: {type: integer, minimum: 0, maximum: 9007199254740991}, revision: {type: integer, minimum: 1}, createdAt: {type: string, format: date-time}, updatedAt: {type: string, format: date-time}}}
+    ExpensePage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/Expense'}}
+        nextCursor: {type: [string, 'null']}
+    MoneyTotal:
+      type: object
+      required: [currency, amountMinor]
+      properties:
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        amountMinor: {type: integer, minimum: 0}
+    Report:
+      type: object
+      required: [groups]
+      properties:
+        groups:
+          type: array
+          items:
+            type: object
+            required: [currency, amountMinor]
+            properties:
+              target: {type: [string, 'null'], enum: [project, shared, account, null]}
+              projectId: {type: [string, 'null']}
+              categoryId: {type: [string, 'null']}
+              bucket: {type: [string, 'null']}
+              currency: {type: string}
+              amountMinor: {type: integer, minimum: 0}

@@ -1,5 +1,27 @@
 # Candidate Server Worker, local validation only
 
+## Ledger transition through S05
+
+The new `wrangler.preview.jsonc` and `wrangler.production.jsonc` apply
+`migrations/0001_ledger.sql` followed by `0002_identity_billing_keys.sql` on
+separate D1 databases. The Worker now handles GitHub login/App callbacks,
+session Cookies, current authorized repository listing, Creem subscription
+mutations and webhook facts, API-key creation/revocation, ledger scopes, and
+`GET /api/v1/me`. The Web proxy removes its first `/api` prefix before forwarding
+`/api/v1/*` to this Worker. Project/category/expense/report routes start at S06.
+
+Required secrets before later deployment: `PULLWISE_GITHUB_CLIENT_ID`,
+`PULLWISE_GITHUB_CLIENT_SECRET`, `PULLWISE_GITHUB_TOKEN_KEY`,
+`PULLWISE_CREEM_API_KEY`, `PULLWISE_CREEM_WEBHOOK_SECRET`, and
+`PULLWISE_CREEM_PRODUCT_IDS_JSON` (configured `pro`/`max` product IDs for
+`month`/`year`). The configured GitHub OAuth callback is the Web `/api/auth/github/callback`.
+Local S01–S05 checks do not call GitHub, Creem, Wrangler, or Cloudflare; real
+integration and migration remain gated until S18.
+
+The older runtime notes below describe routes that are still present during
+transition. Ledger `/api/v1/me` and `/api/v1/repositories` take precedence over
+their older product versions.
+
 This is the first real Server HTTP entry candidate. It exposes `/health`,
 authenticated `GET /api/v1/me`, `GET /api/v1/usage`, `GET /api/v1/watches`,
 `GET /api/v1/repositories` from a complete fresh owner directory,

@@ -1,0 +1,25 @@
+{
+  "$schema": "../probe/node_modules/wrangler/config-schema.json",
+  "name": "pullwise-server-preview",
+  "main": "src/entry.py",
+  "compatibility_date": "2026-09-23",
+  "compatibility_flags": ["python_workers"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{"pattern": "preview-api.example.invalid", "custom_domain": true}],
+  "vars": {
+    "PULLWISE_MODE": "preview",
+    "PULLWISE_APP_URL": "https://preview.example.invalid",
+    "PULLWISE_GITHUB_CALLBACK_URL": "https://preview.example.invalid/api/auth/github/callback",
+    "PULLWISE_GITHUB_APP_SLUG": "pullwise-preview-placeholder",
+    "PULLWISE_CREEM_API_BASE_URL": "https://test-api.creem.io",
+    "PULLWISE_ALLOWED_ORIGINS": "https://preview.example.invalid",
+    "PULLWISE_COOKIE_SAME_SITE": "None"
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "pullwise-ledger-preview",
+    "database_id": "00000000-0000-0000-0000-000000000000",
+    "migrations_dir": "migrations"
+  }]
+}

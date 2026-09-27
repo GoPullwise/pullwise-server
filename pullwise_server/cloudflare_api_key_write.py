@@ -82,8 +82,9 @@ async def create_api_key(*, binding: Any, headers: Mapping[str, object],
         provided="scopes" in body)
     if scope_error:
         return 400, {"error": {"code": "INVALID_SCOPE", "message": scope_error}}
-    restrictions = parse_api_key_restrictions(body.get("restrictions"))
-    if restrictions.get("kind") == "audit_bundle":
+    try:
+        restrictions = parse_api_key_restrictions(body.get("restrictions"))
+    except ValueError:
         return 400, {"error": {"code": "INVALID_RESTRICTION"}}
     expires_at = _timestamp(body.get("expiresAt") or body.get("expires_at"))
     raw_seconds = body.get("expiresInSeconds") or body.get("expires_in_seconds")
