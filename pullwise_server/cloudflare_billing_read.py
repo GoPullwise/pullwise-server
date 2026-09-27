@@ -3,29 +3,23 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from .cloudflare_product_read import (
+from .cloudflare_principal import (
     ProductReadAuthError, _bearer, _cookie_sessions, _header,
-    _principal, _resource_auth_snapshot, _usage_from_results,
-    _usage_statements,
+    _principal, _resource_auth_snapshot,
 )
-from .product_billing_projection import billing_account_dto
-from .product_usage_events import usage_event_dto
+from .billing_projection import billing_account_dto
+from .account_cycle_rules import effective_user_plan
 
 
 def billing_statements(binding: Any, user: dict, now: int):
-    period, usage_statements = _usage_statements(binding, user, now)
-    events = binding.prepare("""SELECT reservation_id,module,period,finished_at
-        FROM processing_usage_ledger WHERE billing_owner_id=?
-          AND state='consumed' AND finished_at IS NOT NULL
-        ORDER BY finished_at DESC,reservation_id DESC LIMIT 20""").bind(user["id"])
-    return period, [*usage_statements, events]
+    return None, []
 
 
 def billing_account_from_parts(user: dict, period: str,
                                parts: list, now: int) -> dict:
-    product = _usage_from_results(user, period, parts[:3], now)
-    activity = [usage_event_dto(row) for row in parts[3].results]
-    return billing_account_dto(user, product, activity)
+    product = {"plan": effective_user_plan(user, timestamp=now),
+        "entitlements": None, "usage": None, "runtimeUsage": None}
+    return billing_account_dto(user, product, [])
 
 
 async def read_billing(*, binding: Any, headers: Mapping[str, object],

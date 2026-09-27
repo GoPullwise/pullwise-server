@@ -16,15 +16,15 @@ from test_cloudflare_server_mapping import seed
 
 def test_api_key_projection_matches_existing_account_contract():
     record = {"id": "key-local", "name": "  Synthetic  ", "user_id": "owner",
-        "key_prefix": "pwk_synthetic", "scopes": '["profile:read","usage:read"]',
-        "restrictions": '{"watchIds":["watch-a","watch-a"]}',
+        "key_prefix": "pwk_synthetic", "scopes": '["profile:read","reports:read"]',
+        "restrictions": '{"projectIds":["prj_project_a","prj_project_a"]}',
         "created_at": 123, "expires_at": None, "last_used_at": None,
         "revoked_at": None, "key_hash": "private-hash"}
     assert api_key_public_payload(record) == app.api_key_public_payload(record)
 
 
 @pytest.mark.parametrize("changes", [
-    {"scopes": '["ITEMS:READ","items:read","invalid"]',
+    {"scopes": '["LEDGER:EXPENSES:READ","expenses:read","invalid"]',
      "restrictions": '{"repositoryIds":[123," repo ","repo",null]}'},
     {"name": "bad\nname", "scopes": "invalid-json", "expires_at": "123"},
     {"restrictions": '{"kind":"audit_bundle","scanId":"scan-1","repoId":123}'},
@@ -38,8 +38,8 @@ def test_api_key_projection_edge_cases_match_local_contract(changes):
 
 
 @pytest.mark.parametrize("value,provided", [
-    (None, False), (["ITEMS:READ", "items:read"], True),
-    (["invalid"], True), (42, True), ("watches:write", True),
+    (None, False), (["LEDGER:EXPENSES:READ", "expenses:read"], True),
+    (["invalid"], True), (42, True), ("expenses:write", True),
 ])
 def test_requested_scopes_match_existing_local_account_rules(value, provided):
     assert requested_api_key_scopes(value, provided=provided) == app.requested_api_key_scopes(
@@ -47,7 +47,7 @@ def test_requested_scopes_match_existing_local_account_rules(value, provided):
 
 
 @pytest.mark.parametrize("value", [
-    {"watchIds": ["watch-a", "watch-a", 42]},
+    {"projectIds": ["prj_project_a", "prj_project_a"]},
     {},
 ])
 def test_restriction_normalization_matches_existing_local_account_rules(value):
@@ -79,7 +79,7 @@ def test_api_key_list_is_session_only_and_redacts_hash_and_token(tmp_path):
     assert status == 200 and len(payload["items"]) == 1
     assert payload["items"] == payload["apiKeys"]
     assert payload["items"][0]["id"] == "key-local"
-    assert payload["items"][0]["scopes"] == ["profile:read", "usage:read"]
+    assert payload["items"][0]["scopes"] == ["profile:read"]
     assert TOKEN not in json.dumps(payload)
     assert "key_hash" not in json.dumps(payload)
     assert get(binding, {"Authorization": f"Bearer {TOKEN}"}, fixture.now)[0] == 401
@@ -168,8 +168,8 @@ def test_session_create_returns_one_time_key_and_persists_only_hash(tmp_path):
     fixture, _, _ = seed(tmp_path / "domain.db")
     _seed_auth(fixture)
     binding = D1ShapedSQLite(fixture.store)
-    body = json.dumps({"name": "Automation", "scopes": ["items:read"],
-        "restrictions": {"watchIds": ["watch-a"]}}).encode()
+    body = json.dumps({"name": "Automation", "scopes": ["expenses:read"],
+        "restrictions": {"shared": False}}).encode()
 
     async def read_body():
         return body
@@ -179,8 +179,8 @@ def test_session_create_returns_one_time_key_and_persists_only_hash(tmp_path):
             "Content-Length": str(len(body))}, read_body=read_body,
         binding=binding, creem_secret="", configured_products={}, now=fixture.now))
     assert status == 201 and created["key"].startswith("pwk_")
-    assert created["scopes"] == ["items:read"]
-    assert created["restrictions"] == {"watchIds": ["watch-a"]}
+    assert created["scopes"] == ["expenses:read"]
+    assert created["restrictions"] == {"shared": False}
     listed = get(binding, {"Cookie": "pw_session=session-local"}, fixture.now)[1]
     assert any(row["id"] == created["id"] for row in listed["items"])
     assert all("key" not in row for row in listed["items"])
@@ -203,7 +203,7 @@ def test_key_creation_rolls_back_if_session_changes_before_write(tmp_path):
                 db.execute("UPDATE app_state SET payload='{}' WHERE name='sessions'")
 
     binding.before_batch = revoke_before_write
-    body = b'{"scopes":["items:read"]}'
+    body = b'{"scopes":["expenses:read"]}'
 
     async def read_body():
         return body

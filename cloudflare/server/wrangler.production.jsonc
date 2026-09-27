@@ -14,7 +14,9 @@
     "PULLWISE_GITHUB_APP_SLUG": "pullwise-production-placeholder",
     "PULLWISE_CREEM_API_BASE_URL": "https://api.creem.io",
     "PULLWISE_ALLOWED_ORIGINS": "https://app.example.invalid",
-    "PULLWISE_COOKIE_SAME_SITE": "None"
+    "PULLWISE_COOKIE_SAME_SITE": "None",
+    "PULLWISE_JEV_SUGGESTIONS_ENABLED": "0",
+    "PULLWISE_JEV_SUGGESTIONS_EVALUATED": "0"
   },
   "d1_databases": [{
     "binding": "DB",

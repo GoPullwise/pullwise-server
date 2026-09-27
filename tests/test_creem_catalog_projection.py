@@ -1,9 +1,7 @@
 """Verified synthetic Creem products become a safe public plan catalog."""
 import pytest
 
-from pullwise_server import billing
 from pullwise_server.creem_public_catalog_rules import verified_public_catalog
-from pullwise_server.product_entitlement_rules import PLAN_ENTITLEMENTS
 
 
 def product(product_id, price, period, currency="USD"):
@@ -22,10 +20,9 @@ def test_verified_catalog_binds_configured_ids_intervals_and_product_capacity():
     assert result["plans"][1]["prices"]["month"]["amount"] == "29"
     assert result["plans"][1]["prices"]["year"]["productId"] == "prod-year"
     assert result["plans"][2]["prices"]["month"]["configured"] is False
-    assert result["plans"][1]["entitlements"] == PLAN_ENTITLEMENTS["pro"]
-    assert result["plans"][1] == billing.public_paid_plan_payload(
-        "pro", {"month": fetched["prod-month"], "year": fetched["prod-year"]}, "USD")
-    assert result["plans"][2] == billing.public_paid_plan_payload("max", {}, "USD")
+    assert result["plans"][1]["entitlements"] is None
+    assert all(plan["entitlements"] is None for plan in result["plans"])
+    assert all("expense" in plan["description"] for plan in result["plans"])
 
 
 @pytest.mark.parametrize("fetched", [

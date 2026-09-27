@@ -13,6 +13,28 @@ from pullwise_server.cloudflare_billing_catalog_refresh import read_or_refresh_c
 from pullwise_server.cloudflare_creem_gateway import WorkerCreemGateway, product_bindings, webhook_product_ids
 from pullwise_server.cloudflare_ledger_profile import read_ledger_me
 from pullwise_server.cloudflare_ledger_api import handle_ledger_request
+from pullwise_server.cloudflare_jev_gateway import WorkerJevGateway
+from pullwise_server.cloudflare_ledger_reports import CsvExport
+
+
+def _csv_stream(export):
+    """Let the runtime request one D1-backed CSV chunk at a time."""
+    from js import Object, ReadableStream, TextEncoder
+    from pyodide.ffi import create_proxy, to_js
+
+    chunks = export.chunks().__aiter__()
+    encoder = TextEncoder.new()
+
+    async def pull(controller):
+        try:
+            chunk = await chunks.__anext__()
+        except StopAsyncIteration:
+            controller.close()
+            return
+        controller.enqueue(encoder.encode(chunk))
+
+    return ReadableStream.new(to_js({"pull": create_proxy(pull)},
+        dict_converter=Object.fromEntries))
 
 
 class Default(WorkerEntrypoint):
@@ -71,7 +93,8 @@ class Default(WorkerEntrypoint):
                 status, payload = 503, {"error": {"code": "SERVER_UNAVAILABLE"}}
             return Response.json(payload, status=status, headers={"Cache-Control": "no-store"})
         if path.startswith(("/api/v1/projects", "/api/v1/categories",
-                            "/api/v1/expenses", "/api/v1/reports/")):
+                            "/api/v1/expenses", "/api/v1/reports/",
+                            "/api/v1/expense-suggestions")):
             if request.method in {"POST", "PATCH", "DELETE"} and (
                     getattr(self.env, "PULLWISE_COOKIE_SAME_SITE", "Lax").casefold() == "none"
                     and headers["Cookie"] and not headers["Authorization"]
@@ -93,7 +116,7 @@ class Default(WorkerEntrypoint):
                     binding=getattr(self.env, "DB", None), gateway=WorkerGitHubGateway(self.env),
                     method=request.method, path=path,
                     headers=headers, params=parse_qs(urlsplit(request.url).query),
-                    body=body, now=now)
+                    body=body, now=now, suggestion_gateway=WorkerJevGateway(self.env))
                 status, payload = result if result is not None else (404, {"error": {"code": "NOT_FOUND"}})
             except (ValueError, UnicodeError):
                 status, payload = 422, {"error": {"code": "INVALID_INPUT"}}
@@ -103,6 +126,10 @@ class Default(WorkerEntrypoint):
                 "Vary": "Cookie, Authorization, X-Pullwise-Api-Key"}
             if status == 204:
                 return Response(None, status=status, headers=response_headers)
+            if isinstance(payload, CsvExport):
+                return Response(_csv_stream(payload), status=status,
+                    headers={**response_headers, "Content-Type": "text/csv; charset=utf-8",
+                             "Content-Disposition": 'attachment; filename="expenses.csv"'})
             if isinstance(payload, str):
                 return Response(payload, status=status,
                     headers={**response_headers, "Content-Type": "text/csv; charset=utf-8",

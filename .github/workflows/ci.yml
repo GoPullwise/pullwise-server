@@ -36,19 +36,18 @@ jobs:
         run: python -m pip check
       - name: Check shell scripts
         run: |
-          bash -n ./launcher.sh
-          bash -n ./git-watch.sh
-          bash -n ./ops/configure_api_proxy.sh
+          bash -n ./scripts/deploy-cloudflare.sh
+          python ./scripts/check-ledger-s01.py --allow-placeholders
+          python ./cloudflare/server/sync_server_modules.py --check
       - name: Run tests
         run: |
           python -m pytest \
-            tests/test_cloudflare_*.py \
-            tests/test_product_*.py \
-            tests/test_billing_*.py \
-            tests/test_creem_*.py \
-            tests/test_github_authorization_contracts.py \
-            tests/test_source_context_filters.py \
-            tests/test_source_assessment_persistence.py \
-            tests/test_security_contracts.py \
-            tests/test_api_security_extensions.py \
-            tests/test_github_auth_contracts.py
+            tests/test_ledger_*.py \
+            tests/test_cloudflare_github_identity_http.py \
+            tests/test_cloudflare_api_key_routes.py \
+            tests/test_cloudflare_billing_read.py \
+            tests/test_cloudflare_billing_catalog_write.py \
+            tests/test_cloudflare_billing_mutations.py \
+            tests/test_cloudflare_creem_handler.py \
+            tests/test_cloudflare_http_contract.py \
+            tests/test_creem_catalog_projection.py

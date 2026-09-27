@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .product_public_catalog_rules import catalog_payload as _catalog_payload
+from .billing_catalog_rules import catalog_payload as _catalog_payload
 from .creem_public_catalog_rules import verified_public_catalog
 
 

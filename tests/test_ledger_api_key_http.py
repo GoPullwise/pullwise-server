@@ -8,7 +8,7 @@ from pathlib import Path
 from pullwise_server.cloudflare_api_key_write import create_api_key, revoke_api_key
 from pullwise_server.cloudflare_ledger_auth import ledger_principal
 from pullwise_server.cloudflare_ledger_profile import read_ledger_me
-from pullwise_server.cloudflare_product_read import ProductReadAuthError
+from pullwise_server.cloudflare_principal import ProductReadAuthError
 from test_cloudflare_github_identity_http import D1ShapedSQLite, GitHubStub, call, login, seed
 
 

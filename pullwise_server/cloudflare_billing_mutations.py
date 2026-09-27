@@ -7,7 +7,7 @@ from typing import Any, Mapping
 from urllib.parse import urlsplit
 
 from .cloudflare_github_identity_http import _session_user, _redirect, _write_user
-from .cloudflare_product_read import _header
+from .cloudflare_principal import _header
 
 PAID = {"pro": 1, "max": 2}
 PATHS = {"/billing/checkout-sessions", "/billing/change-interval",

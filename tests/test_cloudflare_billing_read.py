@@ -1,11 +1,10 @@
-"""Candidate Billing read keeps payment history and product usage in one snapshot."""
+"""Billing read keeps payment facts separate from ledger expenses."""
 import asyncio
 import json
 
 from pullwise_server.cloudflare_http_contract import handle_http_request
-from pullwise_server.entitlements import product_usage_payload
-from pullwise_server.product_billing_projection import billing_account_dto
-from pullwise_server.product_entitlement_rules import PLAN_ENTITLEMENTS
+from pullwise_server.billing_projection import billing_account_dto
+from pullwise_server.account_cycle_rules import effective_user_plan
 from test_cloudflare_account_adapter import D1ShapedSQLite
 from test_cloudflare_product_reads import TOKEN, _seed_auth
 from test_cloudflare_server_mapping import seed
@@ -14,7 +13,7 @@ from test_cloudflare_server_mapping import seed
 def seed_public_catalog(fixture):
     payload = {"provider": "disabled", "enabled": False, "currency": "USD",
         "plans": [{"id": plan, "name": plan.title(),
-                   "entitlements": dict(PLAN_ENTITLEMENTS[plan]),
+                   "entitlements": None,
                    "prices": {"month": {"amount": None, "configured": False}}}
                   for plan in ("free", "pro", "max")]}
     with fixture.store._immediate() as db:
@@ -43,7 +42,8 @@ def test_billing_cookie_read_matches_product_and_payment_projection(tmp_path):
     assert status == 200 and payload["page"]["id"] == "billing"
     user = json.loads(frozen)
     expected = billing_account_dto(user,
-        product_usage_payload(fixture.store, user, timestamp=fixture.now), [])
+        {"plan": effective_user_plan(user, timestamp=fixture.now),
+         "entitlements": None, "usage": None, "runtimeUsage": None}, [])
     assert payload["account"] == expected
     assert binding.batch_count == 1
     assert get(binding, {"Authorization": f"Bearer {TOKEN}"}, fixture.now)[0] == 401
@@ -83,7 +83,7 @@ def test_public_plan_uses_fresh_saved_catalog_and_cookie_account_snapshot(tmp_pa
     assert "account" not in public
     status, personal = asyncio.run(read({"Cookie": "pw_session=session-local"}))
     assert status == 200 and personal["account"]["plan"] == "pro"
-    assert personal["plans"] == catalog["plans"]
+    assert all(plan["entitlements"] is None for plan in personal["plans"])
     assert binding.batch_count == 2
 
 
@@ -121,5 +121,5 @@ def test_public_plan_drops_account_if_cookie_revoked_before_combined_batch(tmp_p
         read_body=no_body, binding=binding, creem_secret="",
         configured_products={}, now=fixture.now))
     assert status == 200 and "account" not in payload
-    assert payload["plans"][1]["entitlements"] == PLAN_ENTITLEMENTS["pro"]
+    assert payload["plans"][1]["entitlements"] is None
     assert binding.batch_count == 1

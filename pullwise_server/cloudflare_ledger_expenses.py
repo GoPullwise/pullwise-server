@@ -10,7 +10,7 @@ from typing import Any, Mapping
 
 from .cloudflare_ledger_api import _error, _live_repos, _param, _revision, _timestamp, _write_guard
 from .cloudflare_ledger_auth import ledger_principal, target_allowed
-from .cloudflare_product_read import ProductReadAuthError, _header
+from .cloudflare_principal import ProductReadAuthError, _header
 
 # ISO 4217 active alphabetic units; exponents are fixed here so Worker runtime
 # does not depend on the host locale or a floating point conversion library.

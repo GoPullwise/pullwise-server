@@ -178,10 +178,21 @@ paths:
     post:
       operationId: suggestExpense
       x-pullwise-scope: suggestions:use
-      description: Optional advice only; never writes an expense.
-      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [purpose], properties: {purpose: {type: string, maxLength: 500}, note: {type: string, maxLength: 4000}, target: {$ref: '#/components/schemas/Target'}}}}}}
+      description: Optional advice only; never writes an expense. Disabled unless explicitly evaluated and enabled. At most ten calls per account per UTC day by default.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [purpose, target], properties: {purpose: {type: string, maxLength: 500}, note: {type: string, maxLength: 1000}, occurredOn: {type: string, format: date}, amount: {type: string, description: Decimal amount in selected currency}, currency: {type: string, pattern: "^[A-Z]{3}$"}, target: {$ref: '#/components/schemas/Target'}}}}}}
       responses:
-        '200': {description: Candidates, uncertainty and possible duplicates, content: {application/json: {schema: {type: object, properties: {categoryId: {type: [string, 'null']}, probability: {type: [number, 'null']}, uncertain: {type: boolean}, possibleDuplicates: {type: array, items: {type: string}}}}}}}
+        '200': {description: Status, optional suggestionId, candidates and probabilities; never an expense write, content: {application/json: {schema: {type: object, properties: {status: {type: string, enum: [available, uncertain, unavailable]}, suggestionId: {type: string}, questionVersion: {type: string}, modelVersion: {type: [string, 'null']}, suggestions: {type: object, properties: {categoryId: {type: string}, targetKind: {type: string}, duplicateExpenseId: {type: string}}}, probabilities: {type: object}}}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {description: Per-account daily suggestion budget exhausted}
+  /api/v1/expense-suggestions/{id}/decision:
+    post:
+      operationId: recordExpenseSuggestionDecision
+      x-pullwise-scope: suggestions:use
+      description: Record the user's selected category and target after reviewing a suggestion; never writes an expense.
+      parameters: [{$ref: '#/components/parameters/Id'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [categoryId, target], properties: {categoryId: {type: string}, target: {$ref: '#/components/schemas/Target'}}}}}}
+      responses:
+        '204': {description: Decision recorded}
         '403': {$ref: '#/components/responses/Forbidden'}
 components:
   securitySchemes:

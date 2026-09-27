@@ -31,8 +31,13 @@ def _request(binding, *, method, path, raw=b"", signature=None, secret="syntheti
 
 
 def _seed_health_read_tables(db):
-    db.execute("CREATE TABLE api_keys(id TEXT PRIMARY KEY,key_hash TEXT)")
-    db.execute("CREATE TABLE billing_public_catalog(id INTEGER PRIMARY KEY)")
+    for table in ("ledger_projects", "expense_categories", "expenses", "expense_events",
+                  "expense_create_idempotency", "expense_suggestion_budget",
+                  "expense_suggestion_events", "api_keys", "billing_public_catalog",
+                  "d1_command_guard", "account_entitlement_authority",
+                  "billing_webhook_receipts", "processing_usage_buckets",
+                  "processing_usage_ledger", "provider_attempts"):
+        db.execute(f'CREATE TABLE IF NOT EXISTS "{table}" (id TEXT PRIMARY KEY)')
 
 
 def test_candidate_webhook_uses_raw_signature_and_existing_ack_shape(tmp_path):
@@ -72,7 +77,7 @@ def test_candidate_worker_has_read_only_health_and_authenticated_repository_list
     assert status == 200 and health["ok"] is True and health["service"] == "pullwise-server"
     assert reads == [] and binding.batch_count == before
     (status, payload), reads = _request(binding, method="GET", path="/api/v1/repositories")
-    assert status == 401 and reads == [] and binding.batch_count == before
+    assert status == 404 and reads == [] and binding.batch_count == before
 
 
 def test_health_rejects_incomplete_d1_auth_schema(tmp_path):
@@ -82,61 +87,9 @@ def test_health_rejects_incomplete_d1_auth_schema(tmp_path):
     assert status == 503 and payload["ok"] is False
 
 
-def test_health_rejects_missing_watch_table_for_routed_reads(tmp_path):
-    fixture, _, _ = seed(tmp_path / "domain.db")
-    with fixture.store._immediate() as db:
-        _seed_health_read_tables(db)
-        db.execute("DROP TABLE update_watches")
-    status, payload = _get_health(D1ShapedSQLite(fixture.store))
-    assert status == 503 and payload["ok"] is False
-
-
-def test_health_rejects_missing_source_table_for_routed_reads(tmp_path):
-    fixture, _, _ = seed(tmp_path / "domain.db")
-    with fixture.store._immediate() as db:
-        _seed_health_read_tables(db)
-        db.execute("DROP TABLE source_assessment_publications")
-    status, payload = _get_health(D1ShapedSQLite(fixture.store))
-    assert status == 503 and payload["ok"] is False
-
-
-def test_health_rejects_missing_item_table_for_routed_reads(tmp_path):
-    fixture, _, _ = seed(tmp_path / "domain.db")
-    with fixture.store._immediate() as db:
-        _seed_health_read_tables(db)
-        db.execute("DROP TABLE item_handling_events")
-    status, payload = _get_health(D1ShapedSQLite(fixture.store))
-    assert status == 503 and payload["ok"] is False
-
-
-def test_health_rejects_missing_job_table_for_routed_reads(tmp_path):
-    fixture, _, _ = seed(tmp_path / "domain.db")
-    with fixture.store._immediate() as db:
-        _seed_health_read_tables(db)
-        db.execute("DROP TABLE background_jobs")
-    status, payload = _get_health(D1ShapedSQLite(fixture.store))
-    assert status == 503 and payload["ok"] is False
-
-
-def test_health_rejects_missing_repository_service_table_for_job_reads(tmp_path):
-    fixture, _, _ = seed(tmp_path / "domain.db")
-    with fixture.store._immediate() as db:
-        _seed_health_read_tables(db)
-        db.execute("DROP TABLE repository_services")
-    status, payload = _get_health(D1ShapedSQLite(fixture.store))
-    assert status == 503 and payload["ok"] is False
-
-
-def test_health_rejects_missing_public_billing_catalog(tmp_path):
-    fixture, _, _ = seed(tmp_path / "domain.db")
-    with fixture.store._immediate() as db:
-        db.execute("CREATE TABLE api_keys(id TEXT PRIMARY KEY,key_hash TEXT)")
-    status, payload = _get_health(D1ShapedSQLite(fixture.store))
-    assert status == 503 and payload["ok"] is False
-
-
-@pytest.mark.parametrize("table", ["processing_controls", "discovery_targets"])
-def test_health_rejects_missing_watch_write_table(tmp_path, table):
+@pytest.mark.parametrize("table", ["ledger_projects", "expenses", "expense_events",
+                                   "expense_suggestion_events", "billing_public_catalog"])
+def test_health_rejects_missing_required_table(tmp_path, table):
     fixture, _, _ = seed(tmp_path / "domain.db")
     with fixture.store._immediate() as db:
         _seed_health_read_tables(db)
@@ -145,7 +98,7 @@ def test_health_rejects_missing_watch_write_table(tmp_path, table):
     assert status == 503 and payload["ok"] is False
 
 
-def test_same_site_none_cookie_patch_requires_trusted_origin_before_body(tmp_path):
+def test_retired_key_patch_is_unavailable(tmp_path):
     fixture, _, _ = seed(tmp_path / "domain.db")
     binding = D1ShapedSQLite(fixture.store)
 
@@ -153,12 +106,12 @@ def test_same_site_none_cookie_patch_requires_trusted_origin_before_body(tmp_pat
         raise AssertionError("untrusted Cookie request must not read body")
 
     status, payload = asyncio.run(handle_http_request(method="PATCH",
-        path="/api/v1/items/item-local", headers={"Cookie": "pw_session=session-local",
+        path="/api-keys/key-local", headers={"Cookie": "pw_session=session-local",
             "Origin": "https://evil.example", "Content-Length": "2"},
         read_body=no_body, binding=binding, creem_secret="",
         configured_products={}, now=fixture.now,
         cookie_same_site="None", trusted_origins={"https://app.example"}))
-    assert status == 403 and payload["error"]["code"] == "UNTRUSTED_ORIGIN"
+    assert status == 404 and payload["error"]["code"] == "NOT_FOUND"
     assert binding.batch_count == 0
 
 

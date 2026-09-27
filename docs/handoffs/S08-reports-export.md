@@ -17,3 +17,7 @@ Status: Local implementation complete with the export limit below; continued to 
 ## Next entry
 
 S09 Web: use `src/api/ledger.js` to build project selection, descriptions, categories, and lost-GitHub-access history views. Keep platform billing separate from user expenses.
+
+## S17 follow-up (2026-09-27)
+
+The 10,000-row in-memory export cap was replaced by `CsvExport` in `cloudflare_ledger_reports.py`, which queries 250 rows per page and yields CSV chunks. `tests/test_ledger_routes.py` now covers an export across two data pages (260 rows). `cloudflare/server/src/entry.py` bridges the async chunks to a Worker `ReadableStream`; that FFI bridge still requires local workerd validation before S17 can be marked complete. The original S08 limitation above records the state at handoff time.

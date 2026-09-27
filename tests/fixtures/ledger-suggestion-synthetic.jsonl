@@ -1,0 +1,4 @@
+{"language":"en","expectedCategoryId":"cat_tools","expectedTargetKind":"project","predictedCategoryId":"cat_tools","predictedTargetKind":"project","uncertainty":false}
+{"language":"zh","expectedCategoryId":"cat_hosting","expectedTargetKind":"shared","predictedCategoryId":"cat_hosting","predictedTargetKind":"shared","uncertainty":false}
+{"language":"en","expectedCategoryId":"cat_travel","expectedTargetKind":"project","predictedCategoryId":null,"predictedTargetKind":null,"uncertainty":true}
+{"language":"zh","expectedCategoryId":"cat_tools","expectedTargetKind":"shared","predictedCategoryId":"cat_hosting","predictedTargetKind":"shared","uncertainty":false}

@@ -15,9 +15,9 @@ from urllib.parse import urlencode, urlsplit
 from .cloudflare_oauth_state_adapter import D1OAuthStates
 from .cloudflare_session_adapter import D1SessionTransactions
 from .cloudflare_account_adapter import D1AccountTransactions
-from .cloudflare_product_read import _cookie_sessions, _header
+from .cloudflare_principal import _cookie_sessions, _header
 from .cloudflare_ledger_auth import ledger_principal
-from .cloudflare_product_read import ProductReadAuthError
+from .cloudflare_principal import ProductReadAuthError
 
 SESSION_AGE = 7 * 86400
 

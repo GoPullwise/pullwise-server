@@ -6,7 +6,7 @@ from typing import Any, Mapping
 
 from .api_key_dto_rules import ALLOWED_SCOPES
 from .cloudflare_ledger_auth import ledger_principal
-from .cloudflare_product_read import ProductReadAuthError, _bearer, _header
+from .cloudflare_principal import ProductReadAuthError, _bearer, _header
 
 
 async def read_ledger_me(*, binding: Any, headers: Mapping[str, object], now: int) -> tuple[int, dict]:

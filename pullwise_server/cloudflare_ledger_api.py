@@ -8,7 +8,7 @@ from datetime import date, datetime, timezone
 from typing import Any, Mapping
 
 from .cloudflare_ledger_auth import ledger_principal, target_allowed
-from .cloudflare_product_read import ProductReadAuthError, _header
+from .cloudflare_principal import ProductReadAuthError, _header
 
 
 def _error(status: int, code: str):
@@ -114,8 +114,16 @@ async def _live_repos(user: dict, gateway: Any) -> dict[int, str]:
 
 async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path: str,
                                 headers: Mapping[str, object], params: Mapping[str, object],
-                                body: object, now: int) -> tuple[int, object] | None:
+                                body: object, now: int, suggestion_gateway=None) -> tuple[int, object] | None:
     """Return None for non-ledger paths; structured status and payload otherwise."""
+    if path.startswith("/api/v1/expense-suggestions/") and path.endswith("/decision"):
+        from .cloudflare_ledger_suggestions import handle_suggestion_decision
+        return await handle_suggestion_decision(binding=binding, method=method, path=path,
+            headers=headers, body=body, now=now)
+    if path == "/api/v1/expense-suggestions":
+        from .cloudflare_ledger_suggestions import handle_suggestion_request
+        return await handle_suggestion_request(binding=binding, method=method, headers=headers,
+            body=body, now=now, gateway=suggestion_gateway)
     if path.startswith("/api/v1/reports/") or path == "/api/v1/expenses/export":
         from .cloudflare_ledger_reports import handle_report_request
         return await handle_report_request(binding=binding, method=method, path=path,

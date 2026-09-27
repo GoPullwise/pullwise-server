@@ -4,7 +4,6 @@ from __future__ import annotations
 import re
 from decimal import Decimal
 
-from .product_entitlement_rules import PLAN_ENTITLEMENTS
 
 
 def _price(product: dict, interval: str) -> dict:
@@ -58,20 +57,17 @@ def verified_public_catalog(configured_ids: dict,
             found[plan][interval] = product
     currency = currency or "USD"
     plans = [{"id": "free", "name": "Free",
-        "description": "Follow PR feedback, CI failures and upstream releases.",
-        "currency": currency, "entitlements": dict(PLAN_ENTITLEMENTS["free"]),
+        "description": "Record project and shared expenses.",
+        "currency": currency, "entitlements": None,
         "prices": {"month": {"amount": "0", "currency": currency,
                              "interval": "month", "configured": True}}}]
     for plan, title in (("pro", "Pullwise Pro"), ("max", "Pullwise Max")):
         products = found[plan]
         product = products.get("month") or products.get("year") or {}
         name = product.get("name") if isinstance(product.get("name"), str) else title
-        default_description = ("Higher-capacity PR, CI and Updates follow-up for production teams."
-            if plan == "max" else "PR, CI and Updates follow-up for production teams.")
-        description = product.get("description") if isinstance(product.get("description"), str) else default_description
         plans.append({"id": plan, "name": name.strip() or title,
-            "description": description.strip() + " Intelligent processing is shared across PR, CI and Updates.",
-            "currency": currency, "entitlements": dict(PLAN_ENTITLEMENTS[plan]),
+            "description": "Pullwise project expense ledger subscription.",
+            "currency": currency, "entitlements": None,
             "prices": {interval: (_price(products[interval], interval)
                                    if interval in products else _unconfigured(interval, currency))
                        for interval in ("month", "year")}})

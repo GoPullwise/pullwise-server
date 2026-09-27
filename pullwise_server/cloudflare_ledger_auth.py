@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from .api_key_dto_rules import parse_api_key_restrictions
-from .cloudflare_product_read import (
+from .cloudflare_principal import (
     ProductReadAuthError, _bearer, _header, _principal, _resource_auth_snapshot,
 )
 

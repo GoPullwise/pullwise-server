@@ -1,248 +1,27 @@
-# Candidate Server Worker, local validation only
+# Pullwise Server Worker
 
-## Ledger transition through S05
+`src/entry.py` is the Cloudflare Python Worker for the project expense ledger. It routes GitHub sign-in and App authorization, account API keys, Creem subscription and webhook requests, `/api/v1` ledger resources, per-currency reports, paginated CSV export, and optional Jev suggestions. PR/CI/Updates collection and analysis routes are not mounted.
 
-The new `wrangler.preview.jsonc` and `wrangler.production.jsonc` apply
-`migrations/0001_ledger.sql` followed by `0002_identity_billing_keys.sql` on
-separate D1 databases. The Worker now handles GitHub login/App callbacks,
-session Cookies, current authorized repository listing, Creem subscription
-mutations and webhook facts, API-key creation/revocation, ledger scopes, and
-`GET /api/v1/me`. The Web proxy removes its first `/api` prefix before forwarding
-`/api/v1/*` to this Worker. Project/category/expense/report routes start at S06.
+## Source and database
 
-Required secrets before later deployment: `PULLWISE_GITHUB_CLIENT_ID`,
-`PULLWISE_GITHUB_CLIENT_SECRET`, `PULLWISE_GITHUB_TOKEN_KEY`,
-`PULLWISE_CREEM_API_KEY`, `PULLWISE_CREEM_WEBHOOK_SECRET`, and
-`PULLWISE_CREEM_PRODUCT_IDS_JSON` (configured `pro`/`max` product IDs for
-`month`/`year`). The configured GitHub OAuth callback is the Web `/api/auth/github/callback`.
-Local S01–S05 checks do not call GitHub, Creem, Wrangler, or Cloudflare; real
-integration and migration remain gated until S18.
+`sync_server_modules.py` copies only Worker-reachable `pullwise_server` modules into `src/pullwise_server`; run it after changing Server source and run `--check` in CI. Do not edit the mirrored files directly.
 
-The older runtime notes below describe routes that are still present during
-transition. Ledger `/api/v1/me` and `/api/v1/repositories` take precedence over
-their older product versions.
+Migrations apply in order: `0001_ledger.sql`, `0002_identity_billing_keys.sql`, then `0003_ledger_suggestions.sql`. Preview and production use different D1 databases. The health check requires the ledger, identity, key, billing and suggestion tables.
 
-This is the first real Server HTTP entry candidate. It exposes `/health`,
-authenticated `GET /api/v1/me`, `GET /api/v1/usage`, `GET /api/v1/watches`,
-`GET /api/v1/repositories` from a complete fresh owner directory,
-`GET /api/v1/usage/events` for owner successful-processing history,
-session-only `GET /api-keys` for redacted owner API-key metadata,
-session-only `DELETE /api-keys/{id}` for guarded revocation,
-session-only `POST /api-keys` for one-time token issuance,
-session-only `GET /billing` for product usage and saved payment history,
-public `GET /billing/plan` from a fresh trusted D1 catalog projection,
-`GET /api/v1/watches/{id}`,
-`GET /api/v1/sources` and `GET /api/v1/sources/{id}`, and
-`GET /api/v1/items`, `GET /api/v1/items/{id}`, `GET /api/v1/items/overview` and
-`PATCH /api/v1/items/{id}` for handling, and
-`PATCH /api/v1/watches/{id}` and `DELETE /api/v1/watches/{id}` for owner public
-watch configuration/archive, and
-`POST /api/v1/watches` for an owner public upstream with a fresh trusted
-resolution proof and atomic Idempotency-Key replay, and
-`PUT /api/v1/repositories/{id}/service` for an existing owner service with a
-current GitHub App account item and repository discovery proof, and
-`GET /api/v1/repositories/{id}/service` for a currently authorized owner
-service with a fresh D1 repository proof, and
-`POST /webhooks/creem`; other routes return 404 until the shared product-v1 REST
-contract has been adapted. It has no probe/reset route,
-no cron, no public route or Workers subdomain, and a synthetic `remote: false`
-D1 binding. Do not deploy it or put real credentials or payment data into its
-local state.
+## Configuration
 
-The service PUT takes installation ID only from the saved service, requires
-If-Match and current account/proof/credential checks in the D1 write batch,
-and returns the new revision ETag. HTTP creation and installation switching
-remain closed pending fresh GitHub App authority binding.
-All candidate `/api/v1/*` responses send `Cache-Control: no-store` and private
-identity Vary headers. Versioned detail and handling responses retain their
-ETag. Run `verify_local_http.py --private-headers-only` against synthetic
-local workerd state to check the headers.
+`wrangler.preview.jsonc` and `wrangler.production.jsonc` intentionally contain placeholder database IDs, domains and GitHub App slugs. Replace these with reviewed environment-specific values. Supply `PULLWISE_GITHUB_CLIENT_ID`, `PULLWISE_GITHUB_CLIENT_SECRET`, `PULLWISE_GITHUB_TOKEN_KEY`, Creem credentials and `TYPESAFE_API_KEY` only through Cloudflare Secrets. Keep `PULLWISE_JEV_SUGGESTIONS_ENABLED=0` and `PULLWISE_JEV_SUGGESTIONS_EVALUATED=0` until a real anonymized offline sample meets the evaluation gate.
 
-The package also contains a trusted, currently unmounted
-`D1RepositoryTransactions.put_service` mapping. It guards owner/capacity and
-revision, cancels queued repository analysis, releases reservations and fences
-Source configuration in one D1 batch. Parent changes also fence linked shared
-watches; changing installation revokes their current authorization. Real GitHub
-App repository authority remains a prerequisite for a write route.
-The detail GET also requires the persisted account's GitHub App repository
-item bound to the service installation and any API-key repositoryIds scope.
-It reads account, service and discovery proof in one D1 snapshot and emits
-the saved revision ETag. The repository list reads a complete owner manifest
-containing individual GitHub App accessibility proofs, current account/session/key and
-owner services in one D1 batch. Missing, expired or inconsistent proof returns
-503 rather than a partial list. It includes authorized repositories without a
-service, using `service: null`. A trusted injected page collector requires a
-closed cursor chain and exact total before atomic publication, with 500-item,
-ten-page and 300-second caps. Real GitHub discovery refresh remains unconnected.
-The full-list D1 row-read cost and request rate must be bounded before any
-remote exposure; the user's current D1 cost pause prohibits Wrangler/workerd
-and D1 commands until explicit reauthorization. No repository creation route
-is exposed.
-Manual fact-sync queue routes were retired because the candidate runtime has no
-Job consumer. GitHub fact updates require scheduled discovery before launch.
+The Web Worker removes its first `/api` prefix. The browser sends `/api/api/v1/*` on the production host, and this Worker receives `/api/v1/*`. The OAuth callback is the Web `/api/auth/github/callback` proxy to this Worker's `/auth/github/callback`.
 
-`src/entry.py` calls Server-owned `cloudflare_http_contract.py`. The latter
-requires raw request bytes, checks the 64 KiB bound and signature before D1,
-and returns the existing `{"received": true}` webhook ACK only after the
-trusted D1 composition has committed or parked the verified receipt. A
-post-settlement projection failure returns 503; exact provider redelivery can
-complete the refresh without charging or applying payment twice.
-The product GETs resolve persisted `pw_session` cookies or hashed Pullwise
-API keys with the required read scope. Mixed identities, revoked/expired keys,
-missing GitHub session tokens and audit-bundle restrictions fail closed. They
-read saved entitlements, buckets and attempts without invoking GitHub/Jev or
-writing D1. Profile, usage and watch reads recheck current identity in the
-same D1 batch as their response rows; usage counts share that batch. The
-usage-events page also shares that identity snapshot and exposes only consumed
-owner rows with module/cursor/limit filters; charge keys stay private. The
-legacy API-key list also rechecks Cookie/user in one batch, excludes revoked
-rows and sends no-store headers. DELETE rechecks the exact Cookie session and
-stored user in its D1 write batch, applies the SameSite=None Origin rule,
-and returns 404 for a duplicate. POST stores only SHA-256 hash/prefix and
-metadata in a guarded D1 batch; the random `pwk_` token appears only in the
-201 response. Local Server and Worker share scope/restriction/public DTO rules.
-Python Workers obtains the token's 32 random bytes from
-[`crypto.getRandomValues`](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/)
-through its JS FFI; local CPython tests use `secrets.token_bytes`.
-The existing local Server updates API-key `last_used_at` on access;
-this candidate deliberately leaves it untouched on GET to avoid write charges.
-A bounded operational last-used policy is still needed before migration.
-Billing GET rechecks Cookie/user with usage bucket, consumed module counts,
-owner-cycle attempts and the newest 20 successful processing events in one
-read-only D1 batch. It shares the pure account/payment DTO with local Server,
-preserves subscription history, sends no-store and rejects API keys. Public
-plan GET never calls Creem: it requires a non-expired verified catalog row,
-overlays shared product capacities, and adds a Cookie account from the same
-D1 snapshot only when authority remains current. Missing/stale catalog
-returns 503. The local fixture contains only synthetic disabled pricing;
-trusted live catalog refresh and payment-provider mutations remain unported.
-The watch list uses the same Server-owned DTO projection as ProductStore,
-filters to the current billing owner, and applies API-key `watchIds` scope.
-Source list/detail rechecks the API key or Cookie session and stored user in
-the same read-only D1 batch as Source rows and publication/dependency fences.
-Linked watch Source and Item reads also require their parent repository
-service active under the billing owner in that batch; a disabled parent hides
-the content even before the old watch authorization lease expires. Item
-handling rechecks the parent inside its write transaction.
-It shares Source DTO and filter rules with local REST, including watch and
-repository key restrictions. GET never writes usage or schedules model work.
-Item list/detail uses the same identity proof and reads current ItemVersion,
-source/context fences and handling events in one D1 batch. A stale secondary
-source or permission revision hides the old Item. Handling PATCH requires
-`itemVersion` and `If-Match`; one guarded D1 write batch commits the event and
-revision together while rechecking identity and all dependencies. Overview
-combines principal, Source and Item SELECTs in one D1 snapshot before counting.
-Job GET rechecks identity and current watch/repository-service ownership with
-the row and excludes `analyze_source`. It also applies API-key repository/watch
-restrictions and hides shared-watch Jobs when the parent repository service is
-inactive; these checks share the read batch.
-Public watch PATCH/DELETE recheck Cookie/API-key, stored user, owner, resource
-restriction and revision in the read snapshot and guarded write batch. They
-do not enqueue analysis. Private/shared watch writes remain unported.
-Owner-public creation requires a trusted `public_upstream_proofs` row valid
-for at most 300 seconds; its HTTP read never calls GitHub. It rejects
-resource-restricted keys for a personal watch, checks Cookie Origin under
-SameSite=None, and commits the watch with its 201 replay response in one
-guarded batch. The real GitHub resolver that would stage these proofs is not
-connected. No workerd/D1 check of this route was run after the user's cost
-pause.
-The local proof refresher accepts exactly one injected repository read per
-attempt, validates canonical owner/name and numeric stable GitHub ID, and
-atomically replaces an older positive proof with a negative one on private,
-renamed, missing, limited or malformed results. It makes no live GitHub call.
-This fences new POSTs; existing watch content still needs a D1 revocation path.
-Local Python/SQLite tests cover this refresh; CF2/CF3 remain pending.
-Successful Item/watch detail and handling responses include revision `ETag`
-for the shared If-Match contract.
-When `PULLWISE_COOKIE_SAME_SITE=None`, Cookie Item/watch writes require an Origin or
-Referer matching `PULLWISE_ALLOWED_ORIGINS` or `PULLWISE_APP_URL` before the
-request body is read. The local probe used synthetic loopback values.
-`/health` checks that the D1 tables required by the currently routed HTTP
-slice exist; this is a narrow readiness check, not a full schema or CF2 gate.
+## Checks and deployment
 
-## Local reproduction
+From the Server repository root:
 
-Use the already installed Wrangler 4.136.3 and Python Worker modules from the
-sibling isolated probe. The copy below reuses its pinned local dependencies;
-it does not install or upgrade packages. Keep the Server source package in the
-ignored candidate directory byte-identical:
-
-```powershell
-# From F:/Pullwise/pullwise-server
-D:/Python313/python.exe cloudflare/server/sync_server_modules.py
-D:/Python313/python.exe cloudflare/server/sync_server_modules.py --check
-if (-not (Test-Path cloudflare/server/python_modules)) {
-  Copy-Item -LiteralPath cloudflare/probe/python_modules -Destination cloudflare/server/python_modules -Recurse
-}
-$env:TEMP='F:/Pullwise/.test-tmp/discovery'
-$env:TMP=$env:TEMP
-D:/Python313/python.exe cloudflare/server/export_local_fixture.py
-node cloudflare/probe/node_modules/wrangler/wrangler-dist/cli.js d1 execute pullwise-cf1-local-only --config cloudflare/server/wrangler.jsonc --local --persist-to cloudflare/server/.wrangler/server-http-catalog-state --file cloudflare/server/.wrangler/local-seed.sql
+```bash
+python3 scripts/check-ledger-s01.py --allow-placeholders
+python3 cloudflare/server/sync_server_modules.py --check
+bash -n scripts/deploy-cloudflare.sh
 ```
 
-Start the Worker with **synthetic** test values and run its local HTTP driver:
-
-```powershell
-node cloudflare/probe/node_modules/wrangler/wrangler-dist/cli.js dev --config cloudflare/server/wrangler.jsonc --local --ip 127.0.0.1 --port 8797 --persist-to cloudflare/server/.wrangler/server-http-catalog-state --var='PULLWISE_CREEM_WEBHOOK_SECRET:synthetic-secret' --var='PULLWISE_CREEM_PRODUCT_IDS_JSON:{}' --var='PULLWISE_COOKIE_SAME_SITE:None' --var='PULLWISE_ALLOWED_ORIGINS:http://127.0.0.1:5173'
-D:/Python313/python.exe cloudflare/server/verify_local_http.py --watch-only --delete-watch --same-site-none
-```
-
-Stop Wrangler and restart it with the same local persist directory, then run
-the watch-only driver again; the two runs archive the two synthetic watches.
-Read-only D1 inspection should find zero active watches, `reserved=0`, a
-cancelled synthetic sync Job, revoked Source context, no provider attempt and
-no API-key last-used write. Use a fresh ignored state directory before repeating the
-two-run sequence.
-For the usage-event cursor probe, seed another fresh ignored directory such as
-`.wrangler/server-http-usage-cursor-state` and run
-`verify_local_http.py --watch-only --same-site-none` before and after restart.
-Its two historical consumed rows must page in order, reject cursor reuse under
-another module, and leave provider attempts and key last-used unchanged.
-The same watch-only driver checks session-only `/api-keys` redaction and
-no-store headers before and after restart.
-To check revocation separately, seed a fresh ignored directory and run
-`verify_local_http.py --key-delete-only --same-site-none`, restart workerd,
-then run `verify_local_http.py --key-delete-only --after-restart --same-site-none`.
-For synthetic issue/use/revoke, seed a fresh ignored directory and run
-`verify_local_http.py --key-create-only --same-site-none`, restart, then
-`verify_local_http.py --key-create-only --after-restart --same-site-none`.
-The fixture exporter
-opens only temporary synthetic SQLite
-data; it never opens an account database. Preserve existing `.wrangler` state
-directories as local evidence.
-The `server-http-job-restrictions-state` local probe used this synthetic fixture
-to check an in-scope key's sync Job GET, then changed that key's local D1
-`watchIds` to an unrelated ID while workerd was stopped. After restart the
-key received 404 and the Cookie owner still received 200. This is local
-authorization evidence only.
-In a separate fresh `server-http-parent-read-state`, Source and Item HTTP
-reads compiled and returned saved data with the linked-parent SQL present.
-The full HTTP driver hit one local ProxyWorker connection loss during its Item
-PATCH; a direct retry returned 200 and saved the handling event. This is
-local runtime evidence rather than a full clean HTTP driver pass.
-The separate `server-http-repository-detail-state` uses
-`export_local_fixture.py --repository-read` to seed only synthetic GitHub App
-account access, service and repository proof. Cookie and scoped API-key GETs
-returned the same service and `ETag: "1"`; anonymous GET returned 401. The
-Cookie read passed again after a real local workerd restart. The default
-fixture is unchanged.
-The isolated `server-http-repository-list-permission-state` used
-`export_local_fixture.py --repository-list`. Its synthetic Cookie and scoped
-API-key list, no-service row and anonymous denial passed before and after a
-local workerd restart. This was completed before the user's D1 cost pause;
-the restart covered the earlier separate-row draft. The current packed
-directory is verified by Python/SQLite tests only. No further Wrangler/workerd
-or D1 probes are authorized.
-
-## Remaining gates
-
-- Repository creation, private/shared watch creation and mutations,
-  visualization, sync and other
-  product-v1 REST paths are not routed yet. Session issuance, OAuth/App
-  lifecycle, bounded API-key last-used/rotation policy and complete authorization still need D1
-  adaptation. Web and external clients must share the eventual Server REST.
-- Real Creem secret and product-ID binding, checkout/account writer coverage,
-  pending reconciliation invocation, receipt retention, encrypted account
-  runtime, migration and remote Cloudflare validation remain open.
-- Production GitHub ingestion and Jev are disabled. No Cloudflare cron may be
-  configured or enabled for this project.
+The stage handoffs record the focused pytest suite and outstanding remote checks. `scripts/deploy-cloudflare.sh` prints intended steps by default and requires explicit execution for remote D1 migration and Worker deployment. Production needs separate review of migration, config and rollback.

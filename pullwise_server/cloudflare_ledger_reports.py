@@ -7,9 +7,40 @@ from typing import Mapping
 import csv
 import io
 
+
+EXPORT_COLUMNS = ("id", "target_kind", "project_id", "occurred_on", "amount_minor",
+                  "currency", "category_id", "purpose", "note", "quantity_decimal", "unit")
+EXPORT_HEADER = ("id", "target", "projectId", "occurredOn", "amountMinor", "currency",
+                 "categoryId", "purpose", "note", "quantity", "unit")
+EXPORT_PAGE_SIZE = 250
+
+
+class CsvExport:
+    """A page-at-a-time CSV body. The Worker turns chunks into a ReadableStream."""
+
+    def __init__(self, first_rows, next_page):
+        self.first_rows = first_rows
+        self.next_page = next_page
+
+    async def chunks(self):
+        output = io.StringIO(newline="")
+        csv.writer(output).writerow(EXPORT_HEADER)
+        yield output.getvalue()
+        rows = self.first_rows
+        while rows:
+            output = io.StringIO(newline="")
+            writer = csv.writer(output)
+            for row in rows:
+                writer.writerow([_csv_cell(row[column]) for column in EXPORT_COLUMNS])
+            yield output.getvalue()
+            if len(rows) < EXPORT_PAGE_SIZE:
+                break
+            last = rows[-1]
+            rows = await self.next_page(last["occurred_on"], last["id"])
+
 from .cloudflare_ledger_api import _error, _param
 from .cloudflare_ledger_auth import ledger_principal, target_allowed
-from .cloudflare_product_read import ProductReadAuthError
+from .cloudflare_principal import ProductReadAuthError
 
 
 def expense_filter(params: Mapping[str, object], *, paged: bool = False):
@@ -98,8 +129,9 @@ async def handle_report_request(*, binding, method, path, headers, params, now):
             return _error(403, "TARGET_FORBIDDEN")
         restricted, restricted_values = restriction_filter(restrictions)
         if is_export:
-            sql = ("SELECT * FROM expenses WHERE owner_id=? AND deleted_at IS NULL " + where +
-                   " " + restricted + " ORDER BY occurred_on,id LIMIT 10001")
+            base_sql = ("SELECT * FROM expenses WHERE owner_id=? AND deleted_at IS NULL " + where +
+                        " " + restricted)
+            sql = base_sql + f" ORDER BY occurred_on,id LIMIT {EXPORT_PAGE_SIZE}"
         else:
             bucket_sql = "substr(occurred_on,1,7)" if bucket == "month" else "occurred_on"
             if name == "summary":
@@ -120,17 +152,15 @@ async def handle_report_request(*, binding, method, path, headers, params, now):
     except ProductReadAuthError as exc:
         return _error(exc.status, exc.code)
     if is_export:
-        if len(rows) > 10000:
-            return _error(413, "EXPORT_TOO_LARGE")
-        output = io.StringIO(newline="")
-        writer = csv.writer(output)
-        writer.writerow(("id", "target", "projectId", "occurredOn", "amountMinor", "currency",
-                         "categoryId", "purpose", "note", "quantity", "unit"))
-        for row in rows:
-            writer.writerow([_csv_cell(row[column]) for column in ("id", "target_kind", "project_id",
-                "occurred_on", "amount_minor", "currency", "category_id", "purpose", "note",
-                "quantity_decimal", "unit")])
-        return 200, output.getvalue()
+        async def next_page(after_date, after_id):
+            page_sql = (base_sql + " AND (occurred_on>? OR (occurred_on=? AND id>?))" +
+                        f" ORDER BY occurred_on,id LIMIT {EXPORT_PAGE_SIZE}")
+            commands = [*auth, binding.prepare(page_sql).bind(user["id"], *values,
+                *restricted_values, after_date, after_date, after_id)]
+            page = await binding.batch(commands)
+            validate([part.results for part in page[:len(auth)]])
+            return page[-1].results
+        return 200, CsvExport(rows, next_page)
     groups = {}
     for row in rows:
         target = row["target_kind"]

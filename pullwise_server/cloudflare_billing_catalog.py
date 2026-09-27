@@ -4,11 +4,11 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from .cloudflare_billing_read import billing_account_from_parts, billing_statements
-from .cloudflare_product_read import (
+from .cloudflare_principal import (
     ProductReadAuthError, _cookie_sessions, _header, _principal,
     _resource_auth_snapshot,
 )
-from .product_public_catalog_rules import catalog_payload as _catalog_payload
+from .billing_catalog_rules import catalog_payload as _catalog_payload
 
 
 _CATALOG_SQL = """SELECT payload_json,expires_at,source_revision

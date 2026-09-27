@@ -121,13 +121,35 @@ class LedgerRoutesTests(unittest.TestCase):
         status, daily = self.call("GET", "/api/v1/reports/timeseries", params={"target": "shared"})
         self.assertEqual(status, 200)
         self.assertEqual(daily["groups"][0]["bucket"], "2026-09-27")
-        status, csv = self.call("GET", "/api/v1/expenses/export")
+        status, export = self.call("GET", "/api/v1/expenses/export")
         self.assertEqual(status, 200)
+        async def collect():
+            return "".join([chunk async for chunk in export.chunks()])
+        csv = asyncio.run(collect())
         self.assertIn("'=SUM(1,2)", csv)
         status, page = self.call("GET", "/api/v1/expenses", params={"limit": "1"})
         self.assertEqual(status, 200)
         self.assertEqual(len(page["items"]), 1)
         self.assertIsNotNone(page["nextCursor"])
+
+    def test_export_reads_multiple_pages_without_a_row_cap(self):
+        _, category = self.call("POST", "/api/v1/categories", {"name": "Hosting"})
+        with self.store.connect() as db:
+            owner = db.execute("SELECT owner_id FROM expense_categories WHERE id=?",
+                (category["id"],)).fetchone()[0]
+            db.executemany("""INSERT INTO expenses(id,owner_id,target_kind,category_id,
+                occurred_on,amount_minor,currency,purpose,created_at,updated_at)
+                VALUES(?,?,'shared',?,'2026-09-27',100,'USD','Hosting',?,?)""",
+                [(f"exp_bulk_{number}", owner, category["id"],
+                  "2026-09-27T00:00:00Z", "2026-09-27T00:00:00Z")
+                 for number in range(260)])
+        status, export = self.call("GET", "/api/v1/expenses/export")
+        self.assertEqual(status, 200)
+        async def collect():
+            return [chunk async for chunk in export.chunks()]
+        chunks = asyncio.run(collect())
+        self.assertEqual(len(chunks), 3)
+        self.assertEqual(sum(chunk.count("exp_bulk_") for chunk in chunks), 260)
 
     def test_lost_github_access_preserves_history_but_blocks_new_project_expense(self):
         _, project = self.call("POST", "/api/v1/projects", {"githubRepoId": 202})

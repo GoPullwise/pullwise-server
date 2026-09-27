@@ -8,51 +8,37 @@ from pathlib import Path
 MODULES = (
     "account_cycle_rules",
     "api_key_dto_rules",
-    "billing_account_rules",
+    "billing_catalog_rules",
+    "billing_projection",
     "cloudflare_account_adapter",
     "cloudflare_api_key_read",
     "cloudflare_api_key_write",
-    "cloudflare_billing_read",
     "cloudflare_billing_catalog",
-    "cloudflare_billing_catalog_write",
     "cloudflare_billing_catalog_refresh",
+    "cloudflare_billing_catalog_write",
     "cloudflare_billing_mutations",
+    "cloudflare_billing_read",
     "cloudflare_creem_gateway",
-    "creem_public_catalog_rules",
     "cloudflare_creem_handler",
     "cloudflare_d1_batch",
-    "cloudflare_d1_mapping",
     "cloudflare_github_gateway",
     "cloudflare_github_identity_http",
-    "cloudflare_ledger_auth",
-    "cloudflare_ledger_profile",
-    "cloudflare_ledger_api",
-    "cloudflare_ledger_expenses",
-    "cloudflare_ledger_reports",
     "cloudflare_http_contract",
+    "cloudflare_jev_gateway",
+    "cloudflare_ledger_api",
+    "cloudflare_ledger_auth",
+    "cloudflare_ledger_expenses",
+    "cloudflare_ledger_profile",
+    "cloudflare_ledger_reports",
+    "cloudflare_ledger_suggestions",
     "cloudflare_oauth_state_adapter",
+    "cloudflare_principal",
     "cloudflare_session_adapter",
-    "cloudflare_product_read",
-    "cloudflare_item_read",
-    "cloudflare_item_handling",
-    "cloudflare_watch_adapter",
-    "cloudflare_repository_adapter",
-    "cloudflare_repository_directory",
-    "cloudflare_public_upstream",
-    "cloudflare_source_read",
     "cloudflare_webhook_receipts",
     "creem_event_rules",
+    "creem_public_catalog_rules",
     "creem_signature",
-    "product_entitlement_rules",
-    "product_dto_rules",
-    "product_domain",
-    "product_item_filters",
-    "product_repository_access",
-    "product_billing_projection",
-    "product_public_catalog_rules",
-    "product_source_filters",
-    "product_usage_events",
-    "update_filter",
+    "typesafe_client",
 )
 
 
@@ -66,6 +52,13 @@ def main() -> None:
     if not args.check:
         target.mkdir(parents=True, exist_ok=True)
         (target / "__init__.py").write_bytes(b"")
+    stale = [item for item in target.glob("*.py")
+             if item.stem not in MODULES and item.name != "__init__.py"]
+    if args.check and stale:
+        raise SystemExit("obsolete Worker modules: " + ", ".join(item.name for item in stale))
+    if not args.check:
+        for item in stale:
+            item.unlink()
     for module in MODULES:
         source_bytes = (source / f"{module}.py").read_bytes()
         destination = target / f"{module}.py"

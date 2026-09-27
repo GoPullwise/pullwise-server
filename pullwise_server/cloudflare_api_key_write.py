@@ -13,7 +13,7 @@ from .api_key_dto_rules import (
     requested_api_key_scopes, _text, _timestamp,
 )
 
-from .cloudflare_product_read import (
+from .cloudflare_principal import (
     ProductReadAuthError, _bearer, _cookie_sessions, _header,
     _principal, _resource_auth_snapshot,
 )
