@@ -52,7 +52,9 @@ class GitHubFactReader:
 def build_github_fact_sync(store: ProductStore, *, credentials: GitHubCredentialResolver,
                           processing_budget: Callable, app_id: str, webhook_secret: str,
                           get_json: Callable | None = None, pr_thread_reader=None,
-                          ci_log_reader: Callable | None = None, pr_review_reader=None) -> ProductFactSync:
+                          ci_log_reader: Callable | None = None, pr_review_reader=None,
+                          analysis_admission_enabled: bool = True,
+                          seed_targets: Callable | None = None) -> ProductFactSync:
     if credentials.app_id != app_id:
         raise ValueError("GITHUB_APP_BINDING_MISMATCH")
     transport = get_json if get_json is not None else GitHubRESTTransport()
@@ -63,4 +65,6 @@ def build_github_fact_sync(store: ProductStore, *, credentials: GitHubCredential
     checker = GitHubAuthorizationChecker(get_json=transport, resolve_binding=credentials.resolve_binding)
     return ProductFactSync(store, read_page=reader.read_page, read_scheduled_page=reader.read_scheduled_page,
                            refresh_authorization=checker,
-                           processing_budget=processing_budget, app_id=app_id, webhook_secret=webhook_secret)
+                           processing_budget=processing_budget, app_id=app_id, webhook_secret=webhook_secret,
+                           analysis_admission_enabled=analysis_admission_enabled,
+                           seed_targets=seed_targets)

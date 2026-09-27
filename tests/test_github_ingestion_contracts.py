@@ -107,7 +107,7 @@ class GitHubIngestionContractsTest(unittest.TestCase):
             identities_for_user=lambda account: [{"id": "identity", "userId": "usr_1", "githubUserId": "7",
                                                    "accessToken": "fixture-token", "status": "active"}],
             installation_access_for_user=Mock(side_effect=AssertionError("personal watch has no installation")),
-            repository_for_account=lambda account, repository_id: {"id": 123, "fullName": "acme/lib"},
+            repository_for_account=lambda account, repository_id, target, role: {"id": 123, "fullName": "acme/lib"},
             app_id="7", app_token=Mock(side_effect=AssertionError("not needed")),
             installation_token=Mock(side_effect=AssertionError("not needed")), clock=lambda: self.now)
 

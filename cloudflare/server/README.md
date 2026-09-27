@@ -39,9 +39,6 @@ public `GET /billing/plan` from a fresh trusted D1 catalog projection,
 watch configuration/archive, and
 `POST /api/v1/watches` for an owner public upstream with a fresh trusted
 resolution proof and atomic Idempotency-Key replay, and
-`GET /api/v1/jobs/{id}` for requester-owned manual sync status,
-`POST /api/v1/watches/{id}/sync` for owner public watches and
-`POST /api/v1/repositories/{id}/sync` for managed owner repositories, and
 `PUT /api/v1/repositories/{id}/service` for an existing owner service with a
 current GitHub App account item and repository discovery proof, and
 `GET /api/v1/repositories/{id}/service` for a currently authorized owner
@@ -81,22 +78,8 @@ The full-list D1 row-read cost and request rate must be bounded before any
 remote exposure; the user's current D1 cost pause prohibits Wrangler/workerd
 and D1 commands until explicit reauthorization. No repository creation route
 is exposed.
-The package also carries unmounted `D1ManualSyncTransactions` for an owner
-public watch or managed repository. It checks the exact persisted account,
-active resource and logical Job, plus the GitHub App account item and fresh
-installation proof for repository sync, then enqueues a fact-only Job without
-a model attempt or processing reservation. Member sync and private/shared
-watches remain unported.
-The trusted enqueue accepts a validated Cookie/API-key proof and rechecks the
-exact session/key and account in the D1 write batch. It rejects expired proofs
-and keys without read plus `sync:write` scope or the resource restriction;
-product POST routing and idempotency are still unmounted.
-The trusted `request_idempotent` command now commits the fact-only Job and
-completed response row atomically. Same-key replay returns the saved response;
-another key reuses the active Job. Candidate POST sync now requires `{}` and
-`Idempotency-Key`, validates current Cookie/API-key and resource permissions,
-enforces SameSite=None Origin for Cookie requests, then returns the saved 202
-response. It never enqueues model work or increments processing usage.
+Manual fact-sync queue routes were retired because the candidate runtime has no
+Job consumer. GitHub fact updates require scheduled discovery before launch.
 
 `src/entry.py` calls Server-owned `cloudflare_http_contract.py`. The latter
 requires raw request bytes, checks the 64 KiB bound and signature before D1,

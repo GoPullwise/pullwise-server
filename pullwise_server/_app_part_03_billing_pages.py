@@ -3,6 +3,7 @@ from __future__ import annotations
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
 from . import _app_part_02_http_auth_settings as _previous_app_part
+from . import account_cycle_rules
 from ._app_imports import import_compat_globals as _import_compat_globals
 from .api_key_dto_rules import api_key_public_payload as _pure_api_key_public_payload
 from .api_key_dto_rules import requested_api_key_scopes as _pure_requested_api_key_scopes
@@ -18,20 +19,12 @@ from .product_billing_projection import (
 _import_compat_globals(vars(_previous_app_part), globals())
 del _import_compat_globals, _previous_app_part
 
-def idempotency_key_reused_payload(scan: dict | None) -> dict:
-    payload = {"message": IDEMPOTENCY_KEY_REUSED_MESSAGE, "code": "IDEMPOTENCY_KEY_REUSED"}
-    if isinstance(scan, dict):
-        if repo_id := clean_github_access_text(scan.get("repoId"), allow_int=True):
-            payload["repoId"] = repo_id
-    return payload
 
 
-def current_review_usage_period(timestamp: int | None = None) -> str:
-    return quota.current_period(timestamp or now())
 
 
 def effective_billing_plan(user: dict | None) -> str:
-    return quota.effective_user_plan(user)
+    return account_cycle_rules.effective_user_plan(user)
 
 
 def user_billing_state(user: dict) -> dict:
@@ -46,74 +39,10 @@ def non_negative_int(value: object) -> int:
     return max(0, candidate)
 
 
-def billing_usage_for_user(user: dict, plan_id: str, *, timestamp: int | None = None, mutate: bool = False) -> dict:
-    period = current_review_usage_period(timestamp)
-    current = user.get("billingUsage") if isinstance(user.get("billingUsage"), dict) else {}
-    used = non_negative_int(current.get("used"))
-    if current.get("period") != period or current.get("plan") != plan_id:
-        usage = {"period": period, "plan": plan_id, "used": 0}
-    else:
-        usage = {"period": period, "plan": plan_id, "used": used}
-    if mutate:
-        user["billingUsage"] = usage
-        mark_state_dirty()
-        return user["billingUsage"]
-    return usage
 
 
-def billing_entitlement_for_user(user: dict | None, *, timestamp: int | None = None, mutate: bool = False) -> dict:
-    current = user_billing_state(user) if user else {}
-    if user:
-        usage = quota.quota_payload_for_user(user, timestamp=timestamp)
-    else:
-        entitlement = quota.quota_entitlement_for_user(None, timestamp=timestamp)
-        usage = {
-            "period": entitlement["period"],
-            "plan": entitlement["plan"],
-            "used": 0,
-            "reserved": 0,
-            "limit": entitlement["userLimit"],
-            "remaining": entitlement["userLimit"],
-        }
-    plan_id = usage["plan"]
-    return {
-        "plan": plan_id,
-        "interval": current.get("interval") if plan_id in billing.PAID_PLAN_IDS else "month",
-        "period": usage["period"],
-        "used": usage["used"],
-        "reserved": usage.get("reserved", 0),
-        "limit": usage["limit"],
-        "remaining": usage["remaining"],
-    }
 
 
-def consume_review_quota(user: dict) -> tuple[bool, dict]:
-    entitlement = quota.quota_entitlement_for_user(user)
-    bucket = quota.ensure_quota_bucket(
-        scope_type="user",
-        scope_id=str(user["id"]),
-        period=entitlement["period"],
-        plan=entitlement["plan"],
-        limit=entitlement["userLimit"],
-        reset_at=entitlement["resetAt"],
-    )
-    payload = quota.quota_payload(bucket, scope="user")
-    if payload["remaining"] <= 0:
-        return False, billing_entitlement_for_user(user)
-    connection = db.connect()
-    try:
-        with connection:
-            connection.execute(
-                """
-                UPDATE quota_buckets
-                SET used = used + 1, updated_at = strftime('%s', 'now')
-                WHERE id = ? AND used + reserved < quota_limit
-                """,
-                (bucket["id"],),
-            )
-    finally:
-        connection.close()
-    return True, billing_entitlement_for_user(user)
 
 
 def billing_subscription_event_payload(record: dict) -> dict:
@@ -127,178 +56,14 @@ def billing_subscription_events_payload(user: dict) -> list[dict]:
 BILLING_QUOTA_ACTIVITY_LIMIT = 100
 
 
-def signed_int(value: object) -> int:
-    try:
-        return int(value or 0)
-    except (OverflowError, TypeError, ValueError):
-        return 0
 
 
-def billing_quota_scan_payload(scan: dict | None) -> dict:
-    if not isinstance(scan, dict):
-        return {}
-    payload = scan_payload(scan)
-    allowed = (
-        "id",
-        "repo",
-        "branch",
-        "commit",
-        "status",
-        "createdAt",
-        "queuedAt",
-        "startedAt",
-        "completedAt",
-        "updatedAt",
-        "quotaState",
-        "quotaReservedAt",
-        "quotaConsumedAt",
-        "quotaReleasedAt",
-        "quotaReleaseReason",
-        "time",
-        "quotaRefunded",
-    )
-    return {key: payload[key] for key in allowed if key in payload}
 
 
-def billing_scan_consumed_quota(scan: dict | None) -> bool:
-    if not isinstance(scan, dict):
-        return False
-    quota_state = public_issue_text(scan.get("quotaState"))
-    if quota_state in {"consumed", "refunded"}:
-        return True
-    if quota_state in {"reserved", "released"}:
-        return False
-    if pull_request_timestamp(scan.get("quotaConsumedAt")):
-        return True
-    bucket_ids = scan.get("quotaBucketIds") if isinstance(scan.get("quotaBucketIds"), dict) else {}
-    if bucket_ids.get("user"):
-        return True
-    return isinstance(scan.get("billingUsage"), dict) or isinstance(scan.get("repoUsage"), dict)
 
 
-def billing_quota_activity_item(
-    *,
-    action: str,
-    scan: dict | None,
-    scan_id: str,
-    event_at: object,
-    reason: object = None,
-    request_id: object = None,
-    ledger_id: object = None,
-    delta: int = 0,
-    amount: int = 1,
-) -> dict:
-    scan_info = billing_quota_scan_payload(scan)
-    public_scan_id = public_issue_text(scan_info.get("id") or scan_id)
-    if not public_scan_id:
-        return {}
-    normalized_action = action if action in {"consumed", "refunded", "reserved", "released"} else "consumed"
-    normalized_amount = non_negative_int(amount) or 1
-    normalized_delta = signed_int(delta)
-    if normalized_delta == 0:
-        normalized_delta = -normalized_amount if normalized_action == "refunded" else normalized_amount
-    item = {
-        "id": public_issue_text(ledger_id) or f"{public_scan_id}:{normalized_action}:{public_issue_text(request_id) or public_issue_text(reason) or 'scan'}",
-        "action": normalized_action,
-        "delta": normalized_delta,
-        "amount": normalized_amount,
-        "scanId": public_scan_id,
-        "repo": public_issue_text(scan_info.get("repo")),
-        "branch": public_issue_text(scan_info.get("branch")) or "main",
-        "commit": public_issue_text(scan_info.get("commit")) or "pending",
-        "status": public_issue_text(scan_info.get("status")) or "queued",
-        "createdAt": pull_request_timestamp(scan_info.get("createdAt")) or 0,
-        "eventAt": pull_request_timestamp(event_at) or pull_request_timestamp(scan_info.get("createdAt")) or 0,
-    }
-    if request_id := public_issue_text(request_id):
-        item["requestId"] = request_id
-    if reason := public_billing_text(reason):
-        item["reason"] = reason
-    return item
 
 
-def billing_quota_activity_payload(user: dict) -> list[dict]:
-    scans = user_scans({"userId": user.get("id")})
-    scans_by_id = {public_issue_text(scan.get("id")): scan for scan in scans if public_issue_text(scan.get("id"))}
-    items: list[dict] = []
-    consumed_scan_ids: set[str] = set()
-
-    for row in quota.quota_ledger_rows_for_user(user, scope_type="user", limit=BILLING_QUOTA_ACTIVITY_LIMIT):
-        scan_id = public_issue_text(row.get("scan_id"))
-        if not scan_id:
-            continue
-        delta = signed_int(row.get("delta"))
-        if delta == 0:
-            continue
-        reason = public_billing_text(row.get("reason"))
-        if reason == "scan_reserved":
-            action = "reserved"
-        elif reason == "scan_reservation_released":
-            action = "released"
-        else:
-            action = "refunded" if delta < 0 else "consumed"
-        if action == "consumed":
-            consumed_scan_ids.add(scan_id)
-        item = billing_quota_activity_item(
-            action=action,
-            scan=scans_by_id.get(scan_id),
-            scan_id=scan_id,
-            event_at=row.get("created_at"),
-            reason=reason,
-            request_id=row.get("request_id"),
-            ledger_id=row.get("id"),
-            delta=delta,
-            amount=abs(delta),
-        )
-        if item:
-            items.append(item)
-
-    for scan in scans:
-        scan_id = public_issue_text(scan.get("id"))
-        if not scan_id:
-            continue
-        scan_info = billing_quota_scan_payload(scan)
-        if scan_id not in consumed_scan_ids and billing_scan_consumed_quota(scan):
-            item = billing_quota_activity_item(
-                action="consumed",
-                scan=scan,
-                scan_id=scan_id,
-                event_at=scan_info.get("createdAt") or scan_info.get("queuedAt"),
-                reason="scan_created",
-                request_id=scan.get("requestId"),
-                delta=1,
-                amount=1,
-            )
-            if item:
-                items.append(item)
-                consumed_scan_ids.add(scan_id)
-        refunded = scan_info.get("quotaRefunded") if isinstance(scan_info.get("quotaRefunded"), dict) else {}
-        if not non_negative_int(refunded.get("ledgerRows")):
-            continue
-        item = billing_quota_activity_item(
-            action="refunded",
-            scan=scan,
-            scan_id=scan_id,
-            event_at=scan_info.get("completedAt") or scan_info.get("updatedAt") or scan_info.get("createdAt"),
-            reason=refunded.get("reason") or "quota_refunded",
-            request_id=scan.get("requestId"),
-            delta=-1,
-            amount=1,
-        )
-        if item:
-            item["ledgerRows"] = non_negative_int(refunded.get("ledgerRows"))
-            item["bucketRows"] = non_negative_int(refunded.get("bucketRows"))
-            items.append(item)
-
-    items.sort(
-        key=lambda item: (
-            non_negative_int(item.get("eventAt")),
-            1 if item.get("action") == "refunded" else 0,
-            public_issue_text(item.get("id")),
-        ),
-        reverse=True,
-    )
-    return items[:BILLING_QUOTA_ACTIVITY_LIMIT]
 
 
 def billing_account_payload(user: dict) -> dict:
@@ -328,21 +93,8 @@ def requested_api_key_scopes(value: object, *, provided: bool) -> tuple[list[str
     return _pure_requested_api_key_scopes(value, provided=provided)
 
 
-def scan_request_id_from_body(body: dict) -> str:
-    for key in ("requestId", "idempotencyKey"):
-        value = clean_github_access_text(body.get(key), allow_int=True)
-        if value and "\x00" not in value:
-            return value[:128]
-    return ""
 
 
-def scan_commit_from_body(body: dict) -> tuple[str, str | None]:
-    commit = clean_github_access_text(body.get("commit"))
-    if not commit or commit.lower() == "pending":
-        return "pending", None
-    if SCAN_REQUEST_COMMIT_SHA_RE.fullmatch(commit):
-        return commit.lower(), None
-    return "", "Scan commit must be a 7-40 character hexadecimal SHA."
 
 
 def parse_api_key_scopes(value: object) -> list[str]:
@@ -404,143 +156,10 @@ def billing_page_payload(user: dict) -> dict:
     }
 
 
-def subscription_plan_agent_configs_payload() -> dict:
-    agent_configs = {plan_id: billing.review_agent_config(plan_id) for plan_id in billing.PLAN_IDS}
-    plan_names = {"free": "Free", "pro": "Pro", "max": "Max"}
-    return {
-        "page": {"id": "subscription-plans", "title": "Pullwise subscription plans"},
-        "plans": [
-            {
-                "id": plan_id,
-                "name": plan_names[plan_id],
-                "reviewLimit": billing.review_limit(plan_id),
-                "repositoryLimits": billing.repository_limits(plan_id),
-                "agentConfig": agent_configs[plan_id],
-            }
-            for plan_id in billing.PLAN_IDS
-        ],
-        "agentConfigs": agent_configs,
-    }
 
 
-def api_docs_payload() -> dict:
-    return {
-        "page": {"id": "api", "title": "Pullwise API"},
-        "baseUrl": "https://api.pull-wise.com",
-        "website": "https://pull-wise.com",
-        "contact": "contact@pull-wise.com",
-        "subscriptionPlans": {"method": "GET", "href": "/docs/subscription-plans"},
-        "serverConfig": {"method": "GET", "href": "/docs/server-config"},
-        "authentication": {
-            "type": "apiKey",
-            "headers": ["Authorization: Bearer <api_key>", "X-Pullwise-Api-Key: <api_key>"],
-            "createKey": {"method": "POST", "href": "/api-keys"},
-            "scopes": API_KEY_DEFAULT_SCOPES,
-        },
-        "endpoints": [
-            {
-                "method": "GET",
-                "path": "/docs/subscription-plans",
-                "scope": None,
-                "description": "Read server-configured subscription plan agent settings, account quotas, repository quotas, and checkout limits for public docs.",
-            },
-            {
-                "method": "GET",
-                "path": "/docs/server-config",
-                "scope": None,
-                "description": "Read public server configuration for docs, including plan limits, scan queue limits, public REST API rate limits, and billing catalog status.",
-            },
-            {
-                "method": "GET",
-                "path": "/api/v1/repositories",
-                "scope": "repositories:read",
-                "description": "List repositories authorized for the API key, including repoId, repository quota, and scan action links.",
-            },
-            {
-                "method": "POST",
-                "path": "/api/v1/repositories/{repoId}/scans",
-                "scope": "scans:write",
-                "description": "Start a scan for an authorized repository. Optional JSON fields are branch, commit SHA, requestId, and idempotencyKey.",
-            },
-            {
-                "method": "POST",
-                "path": "/api/v1/repositories/{repoId}/scans/stop",
-                "scope": "scans:write",
-                "description": "Cancel the latest queued or running scan for the repository.",
-            },
-            {
-                "method": "GET",
-                "path": "/api/v1/repositories/{repoId}/scans/current",
-                "scope": "scans:read",
-                "description": "Read the latest scan status for the repository. Completed scan payloads include agentFixPrompt for automation.",
-            },
-            {
-                "method": "GET",
-                "path": "/api/v1/repositories/{repoId}/scans/{scanId}/audit-bundle.zip",
-                "scope": "scans:read",
-                "description": "Download the audit bundle ZIP for a scan in this repository. The website /scans/{scanId}/audit-bundle.zip URL also accepts a scans:read API key for the owning account.",
-            },
-            {
-                "method": "GET",
-                "path": "/api/v1/repositories/{repoId}/quota",
-                "scope": "quota:read",
-                "description": "Read remaining account and repository scan quota.",
-            },
-        ],
-        "errors": [
-            {"status": 400, "description": "Malformed JSON, invalid scope, invalid repoId, invalid commit SHA, unavailable branch, or invalid request body."},
-            {"status": 401, "description": "Missing or invalid Pullwise API key."},
-            {"status": 403, "description": "API key is valid but lacks the required scope."},
-            {"status": 404, "description": "Route not found, repository not authorized, or no active scan exists."},
-            {"status": 409, "description": "requestId was reused for a different repository."},
-            {"status": 402, "description": "Scan quota is exhausted."},
-            {"status": 413, "description": "Request body is too large."},
-            {"status": 429, "description": "Rate limit exceeded when rate limiting is enabled. Responses include X-RateLimit-Limit, X-RateLimit-Remaining, and X-RateLimit-Reset headers."},
-            {"status": 502, "description": "Requested branch validation failed against GitHub."},
-            {"status": 503, "description": "Review provider is not configured."},
-        ],
-    }
 
 
-def dashboard_overview_payload(session: dict) -> dict:
-    user = USERS.get(session["userId"])
-    user_id = public_issue_text(session.get("userId"))
-    recent_page = db.list_user_scan_jobs_page(user_id, limit=10, offset=0)
-    if recent_page["total"] == 0 and db.count_user_scan_jobs(user_id) == 0:
-        scans = [scan_payload(scan) for scan in user_scans_for_read(session)]
-        recent_scans = scans[:10]
-        status_counts: dict[str, int] = {}
-        for scan in scans:
-            status = scan.get("status") or "unknown"
-            status_counts[status] = status_counts.get(status, 0) + 1
-        scan_total = len(scans)
-    else:
-        recent_scans = [scan_payload(scan) for scan in hydrate_scan_jobs_for_read(recent_page["items"])]
-        status_counts = db.count_user_scan_jobs_by_public_status(user_id)
-        scan_total = recent_page["total"]
-    repository_page = (
-        paginated_repository_items_for_response(
-            user,
-            user.get("githubRepositoryAccess") if user else None,
-            {"limit": 10, "offset": 0},
-        )
-        if user
-        else {"items": [], "total": 0, "hasMore": False}
-    )
-    return {
-        "breadcrumbs": [{"label": "Overview", "href": "/dashboard/overview"}],
-        "scanTotals": {
-            "total": scan_total,
-            "byStatus": status_counts,
-        },
-        "authorizedRepositories": {
-            "count": repository_page["total"],
-            "href": "/repositories",
-            "items": repository_page["items"],
-            "hasMore": repository_page["hasMore"],
-        },
-        "recentScans": recent_scans,
-    }
 
 
 def public_billing_text(value: object) -> str | None:

@@ -17,13 +17,11 @@ from .cloudflare_source_read import D1SourceReads
 from .cloudflare_item_read import D1ItemReads
 from .cloudflare_item_handling import D1ItemHandling
 from .cloudflare_watch_adapter import D1WatchTransactions
-from .cloudflare_manual_sync import D1ManualSyncTransactions
 from .cloudflare_repository_adapter import D1RepositoryTransactions
 from .cloudflare_public_upstream import lookup_key
 from .product_source_filters import apply_source_restrictions, filter_sources
 from .product_item_filters import apply_item_restrictions, filter_items
 from .product_usage_events import parse_usage_events_query, usage_events_page
-from .product_job_filters import job_resource_allowed
 from .product_repository_access import account_can_read_repository_service
 
 SESSION_COOKIE = "pw_session"
@@ -422,15 +420,14 @@ async def read_product(*, binding: Any, path: str, headers: Mapping[str, object]
     source_path = path == "/api/v1/sources" or path.startswith("/api/v1/sources/")
     item_path = path == "/api/v1/items" or path.startswith("/api/v1/items/")
     watch_path = path.startswith("/api/v1/watches/")
-    job_path = path.startswith("/api/v1/jobs/")
     repository_service_path = (path.startswith("/api/v1/repositories/")
                                and path.endswith("/service"))
-    if path not in {"/api/v1/me", "/api/v1/usage", "/api/v1/usage/events", "/api/v1/watches", "/api/v1/repositories"} and not source_path and not item_path and not job_path and not watch_path and not repository_service_path:
+    if path not in {"/api/v1/me", "/api/v1/usage", "/api/v1/usage/events", "/api/v1/watches", "/api/v1/repositories"} and not source_path and not item_path and not watch_path and not repository_service_path:
         return 404, {"error": {"code": "NOT_FOUND"}}
     scope = ("profile:read" if path.endswith("/me") else "usage:read"
              if path in {"/api/v1/usage", "/api/v1/usage/events"}
              else "repositories:read" if repository_service_path or path == "/api/v1/repositories"
-             else "items:read" if source_path or item_path or job_path else "watches:read")
+             else "items:read" if source_path or item_path else "watches:read")
     try:
         user, restrictions = await _principal(binding, headers, scope=scope, now=now)
     except ProductReadAuthError as error:
@@ -501,52 +498,6 @@ async def read_product(*, binding: Any, path: str, headers: Mapping[str, object]
                 "requestId": f"req_{uuid.uuid4().hex}"}
         watch = next((entry for entry in watches["items"] if entry["id"] == watch_id), None)
         return (200, watch) if watch else (404, {"error": {"code": "NOT_FOUND"}})
-    if job_path:
-        job_id = path[len("/api/v1/jobs/"):]
-        if not job_id or "/" in job_id:
-            return 404, {"error": {"code": "NOT_FOUND"}}
-        auth, validate = _resource_auth_snapshot(binding, headers, user,
-            restrictions, now, "items:read")
-        result = await binding.batch([*auth, binding.prepare("""SELECT id,job_type,
-            state,attempt,requester_id,logical_key,
-            CASE WHEN job_type='sync_watch' THEN
-                (SELECT w.target_repository_id FROM update_watches w
-                  WHERE w.id=substr(logical_key,length('sync_watch:')+1))
-            ELSE NULL END AS target_repository_id,
-            CASE WHEN job_type='sync_watch' THEN EXISTS(
-                SELECT 1 FROM update_watches w WHERE w.id=substr(logical_key,length('sync_watch:')+1)
-                  AND w.billing_owner_id=? AND w.archived_at IS NULL
-                  AND (w.target_repository_id IS NULL OR EXISTS(
-                    SELECT 1 FROM repository_services s
-                    WHERE s.repository_id=w.target_repository_id
-                      AND s.billing_owner_id=w.billing_owner_id
-                      AND s.enabled=1 AND s.status='active')))
-            WHEN job_type='sync_repository' THEN EXISTS(
-                SELECT 1 FROM repository_services s
-                WHERE s.repository_id=substr(logical_key,length('sync_repository:')+1)
-                  AND s.billing_owner_id=? AND s.status='active')
-            ELSE 0 END AS resource_access
-            FROM background_jobs WHERE id=?""").bind(user["id"], user["id"], job_id)])
-        try:
-            validate([part.results for part in result[:len(auth)]])
-        except ProductReadAuthError as error:
-            return error.status, {"error": {"code": error.code,
-                "message": error.message, "retryable": False},
-                "requestId": f"req_{uuid.uuid4().hex}"}
-        rows = result[-1].results
-        job = rows[0] if len(rows) == 1 else None
-        if (job is None or job["requester_id"] != user["id"] or not job["resource_access"]
-                or job["job_type"] not in {"sync_repository", "sync_watch"}
-                or not job_resource_allowed(job_type=job["job_type"],
-                    resource_id=job["logical_key"].split(":", 1)[1],
-                    target_repository_id=job["target_repository_id"],
-                    restrictions=restrictions)):
-            return 404, {"error": {"code": "NOT_FOUND", "message": "Sync job was not found.",
-                "retryable": False}, "requestId": f"req_{uuid.uuid4().hex}"}
-        return 200, {"id": job["id"], "operation": job["job_type"],
-            "status": job["state"], "attempt": int(job["attempt"]),
-            "links": {"self": f"/api/v1/jobs/{job['id']}"},
-            "requestId": _header(headers, "X-Request-Id") or f"req_{uuid.uuid4().hex}"}
     if source_path:
         source_id = path[len("/api/v1/sources/"):] if path != "/api/v1/sources" else None
         if source_id is not None and (not source_id or "/" in source_id):
@@ -669,40 +620,6 @@ async def patch_item(*, binding: Any, item_id: str, headers: Mapping[str, object
         return error(412, "REVISION_MISMATCH", "Item or authority changed.")
     return await read_product(binding=binding, path=f"/api/v1/items/{item_id}",
                               headers=headers, now=now)
-
-
-async def post_manual_sync(*, binding: Any, resource_kind: str,
-                           resource_id: str, headers: Mapping[str, object],
-                           idempotency_key: str, now: int) -> tuple[int, dict]:
-    request_id = _header(headers, "X-Request-Id") or f"req_{uuid.uuid4().hex}"
-
-    def error(status: int, code: str, message: str) -> tuple[int, dict]:
-        return status, {"error": {"code": code, "message": message,
-            "retryable": False}, "requestId": request_id}
-
-    read_scope = "watches:read" if resource_kind == "watch" else "repositories:read"
-    try:
-        user, restrictions = await _principal(binding, headers,
-            scope="sync:write", now=now)
-        proof: dict = {}
-        auth, validate = _resource_auth_snapshot(binding, headers, user,
-            restrictions, now, (read_scope, "sync:write"), proof)
-        snapshot = await binding.batch(auth)
-        validate([part.results for part in snapshot])
-        payload = await D1ManualSyncTransactions(binding).request_idempotent(
-            resource_kind=resource_kind, resource_id=resource_id,
-            owner_id=user["id"], job_id=f"job_{uuid.uuid4().hex}", now=now,
-            idempotency_key=idempotency_key, request_id=request_id, proof=proof)
-    except ProductReadAuthError as failure:
-        return error(failure.status, failure.code, failure.message)
-    except ValueError as failure:
-        code = str(failure)
-        return error(409 if code.startswith("IDEMPOTENCY_") else 404,
-            code if code.startswith("IDEMPOTENCY_") else "NOT_FOUND",
-            "Manual sync request was not accepted.")
-    except Exception:
-        return error(409, "RESOURCE_CHANGED", "Manual sync resource changed.")
-    return 202, payload
 
 
 async def post_public_watch(*, binding: Any, headers: Mapping[str, object],

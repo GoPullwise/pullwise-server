@@ -136,12 +136,13 @@ class D1WatchTransactions:
             VALUES(?,'not_started',?)""").bind(scope_key, now))
         watch_id = f"watch_{uuid.uuid4().hex}"
         statements.append(self.binding.prepare("""INSERT INTO update_watches(
-            id,watch_scope_key,owner_id,target_repository_id,upstream_repository_id,
+            id,watch_scope_key,owner_id,target_repository_id,upstream_repository_id,upstream_full_name,
             billing_owner_id,context_version,context_hash,interests_json,
             include_prerelease,priority_order,enabled,analysis_enabled,revision,
             created_at,updated_at)
-            VALUES(?,?,?,NULL,?,?,?,?,?,?,?,?,?,1,?,?)""").bind(
+            VALUES(?,?,?,NULL,?,?,?,?,?,?,?,?,?,?,1,?,?)""").bind(
                 watch_id, scope_key, owner_id, resolved_public_repository_id,
+                public_resolution["full_name"] if public_resolution is not None else None,
                 owner_id, version, semantic_hash, interests_json,
                 int(include_prerelease), priority_order, int(enabled),
                 int(analysis_enabled), now, now))
@@ -410,10 +411,7 @@ class D1WatchTransactions:
                   WHERE """ + job_condition + ")").bind(now, watch_id)
         cancel_jobs = self.binding.prepare("""UPDATE background_jobs AS j
             SET state='cancelled',claim_token=NULL,claimed_until=NULL,updated_at=?
-            WHERE (""" + job_condition + """ OR
-                (j.job_type='sync_watch' AND j.logical_key=?
-                 AND j.state IN ('queued','running','retry_wait')))""").bind(
-                     now, watch_id, f"sync_watch:{watch_id}")
+            WHERE """ + job_condition).bind(now, watch_id)
         revoke_contexts = self.binding.prepare("""UPDATE source_contexts
             SET accessible=0,authorization_revision=authorization_revision+1,
                 authorization_valid_until=?,analysis_enabled=0,context_stale=1,

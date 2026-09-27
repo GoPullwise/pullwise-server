@@ -37,6 +37,19 @@ class ProductDiscoveryContractsTest(unittest.TestCase):
             upstream_repository_id="github:123", billing_owner_id="usr_1", interests=["OAuth"],
             enabled=True, analysis_enabled=True)
 
+    def test_fact_only_runtime_advances_checkpoint_without_analysis_reservation(self):
+        from pullwise_server.product_discovery import ProductFactSync
+        self.sync = ProductFactSync(self.store, read_page=self.reader,
+            processing_budget=Mock(side_effect=AssertionError("analysis must stay off")),
+            app_id="7", webhook_secret="fixture", analysis_admission_enabled=False)
+        self.assertEqual(self.poll([self.source(age=60)]), {"status": "completed", "sources": 1})
+        self.assertEqual(self.counts(), (0, 0))
+        self.assertEqual(self.status(self.source(age=60)), "provider_unavailable")
+        with closing(self.store.connect()) as connection:
+            checkpoint = connection.execute("SELECT discovery_cursor, high_watermark FROM processing_controls WHERE control_key=?",
+                (self.target,)).fetchone()
+        self.assertEqual(checkpoint["high_watermark"], "w1")
+
     def configure_permission_refresh(self, callback=None):
         from pullwise_server.product_discovery import DiscoveryAuthorizationProof, ProductFactSync
         self.refresher = Mock(side_effect=callback or (lambda **kwargs: DiscoveryAuthorizationProof(

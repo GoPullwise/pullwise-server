@@ -36,13 +36,22 @@ def resolve_upstream_repository(
     if response.status_code in {401, 403}:
         raise ValueError("GITHUB_REPOSITORY_UNAVAILABLE")
     response.raise_for_status()
+    if response.status_code != 200:
+        raise ValueError("GITHUB_REPOSITORY_UNAVAILABLE")
     payload = response.json()
-    if not isinstance(payload, Mapping) or isinstance(payload.get("id"), bool) or payload.get("id") is None:
+    full_name = payload.get("full_name") if isinstance(payload, Mapping) else None
+    parts = full_name.split("/") if isinstance(full_name, str) else []
+    if (not isinstance(payload, Mapping)
+            or type(payload.get("id")) is not int or payload["id"] <= 0
+            or type(payload.get("private")) is not bool
+            or len(parts) != 2
+            or any(part in {".", ".."} or not _REPOSITORY_PART.fullmatch(part) for part in parts)
+            or full_name.casefold() != f"{owner.strip()}/{repository.strip()}".casefold()):
         raise ValueError("GITHUB_REPOSITORY_INVALID_RESPONSE")
     return {
         "id": f"github:{payload['id']}",
-        "private": bool(payload.get("private")),
-        "fullName": _text(payload.get("full_name")) or f"{owner.strip()}/{repository.strip()}",
+        "private": payload["private"],
+        "fullName": full_name,
     }
 
 
@@ -184,6 +193,7 @@ def ci_failure_source(
             "workflowId": str(run.get("workflow_id") or ""),
             "headSha": _text(run.get("head_sha")),
             "jobName": _text(job.get("name")),
+            "matrix": dict(job["matrix"]) if isinstance(job.get("matrix"), Mapping) else None,
             "conclusion": conclusion,
             "completedAt": job.get("completed_at"),
             "steps": list(job.get("steps") or []),

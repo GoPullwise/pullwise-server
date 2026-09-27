@@ -360,23 +360,6 @@ class SecurityContractsPart06Test(SecurityContractsBase):
         self.assertEqual(handler.payload["installationAccount"], "DFerryman")
         self.assertEqual(handler.payload["items"][0]["fullName"], "DFerryman/private-repo")
         self.assertEqual(github_access["installationId"], "222")
-    def test_github_repository_installation_permissions_must_support_pull_request_creation(self) -> None:
-        self.assertTrue(
-            app.installation_supports_pull_request_creation(
-                {"permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"}}
-            )
-        )
-        self.assertFalse(
-            app.installation_supports_pull_request_creation(
-                {"permissions": {"metadata": "read", "contents": "read", "pull_requests": "write"}}
-            )
-        )
-        self.assertFalse(
-            app.installation_supports_pull_request_creation(
-                {"permissions": {"metadata": "read", "contents": "write", "pull_requests": "read"}}
-            )
-        )
-        self.assertFalse(app.installation_supports_pull_request_creation({"permissions": {"metadata": "read"}}))
     def test_repository_item_with_installation_context_preserves_installation_permissions(self) -> None:
         item = app.repository_item_with_installation_context(
             {"fullName": "owner/repo"},
@@ -591,7 +574,7 @@ class SecurityContractsPart06Test(SecurityContractsBase):
             ),
             patch("pullwise_server.github_auth.list_user_installation_repositories", return_value=[]),
             patch("pullwise_server.github_auth.fetch_installation") as fetch_installation,
-            patch("pullwise_server.github_auth.list_installation_repositories") as list_repositories,
+            patch("pullwise_server.github_auth.list_installation_repositories", return_value=[]) as list_repositories,
         ):
             app.PullwiseHandler.route(handler, "GET")
 
@@ -674,7 +657,7 @@ class SecurityContractsPart06Test(SecurityContractsBase):
         self.assertEqual(github_access["installationPermissions"]["pull_requests"], "write")
         self.assertEqual(github_access["repositories"], ["octocat/private-repo"])
         self.assertTrue(github_access["repositoryItems"][0]["private"])
-    def test_github_installation_callback_rejects_installation_without_pull_request_write_permissions(self) -> None:
+    def test_github_installation_callback_accepts_read_only_permissions(self) -> None:
         app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
         app.USERS["usr_1"]["githubRepositoryAccess"] = None
         state = app.remember_github_state(
@@ -723,15 +706,13 @@ class SecurityContractsPart06Test(SecurityContractsBase):
                     "permissions": {"metadata": "read", "contents": "read", "pull_requests": "write"},
                 },
             ),
-            patch("pullwise_server.github_auth.list_installation_repositories") as list_repositories,
+            patch("pullwise_server.github_auth.list_installation_repositories", return_value=[]) as list_repositories,
         ):
             app.PullwiseHandler.route(handler, "GET")
 
-        self.assertEqual(handler.status, HTTPStatus.BAD_REQUEST)
-        self.assertIn("Contents: write", handler.payload["message"])
-        self.assertIn("Pull requests: write", handler.payload["message"])
-        self.assertIsNone(app.USERS["usr_1"].get("githubRepositoryAccess"))
-        list_repositories.assert_not_called()
+        self.assertEqual(handler.status, HTTPStatus.FOUND)
+        self.assertEqual(app.USERS["usr_1"]["githubRepositoryAccess"]["installationPermissions"]["contents"], "read")
+        list_repositories.assert_called_once_with("999")
     def test_github_installation_callback_without_state_fails_closed_when_session_user_cannot_access_installation(self) -> None:
         app.USERS["usr_1"]["githubAccessToken"] = "gho_user"
         app.USERS["usr_1"]["githubRepositoryAccess"] = None

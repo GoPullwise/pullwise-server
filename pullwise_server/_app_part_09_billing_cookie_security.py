@@ -68,15 +68,6 @@ def billing_user_for_update(update: dict) -> dict | None:
     return None
 
 
-def ensure_billing_quota_bucket_for_user(user: dict) -> None:
-    entitlement = quota.quota_entitlement_for_user(user)
-    quota.ensure_quota_bucket(
-        scope_type="user", scope_id=str(user["id"]),
-        period=entitlement["period"], plan=entitlement["plan"],
-        limit=entitlement["userLimit"], reset_at=entitlement["resetAt"],
-    )
-
-
 def upsert_billing_subscription_record(user: dict, billing_state: dict) -> None:
     billing_rules.upsert_billing_subscription_record(user, billing_state, processed_at=now())
 
@@ -91,8 +82,6 @@ def append_billing_subscription_event(user: dict, update: dict, billing_state: d
 def apply_billing_update_to_user(user: dict, update: dict) -> bool:
     processed_at = now()
     decision = billing_rules.reduce_billing_update(user, update, processed_at=processed_at)
-    if decision["quotaRefresh"]:
-        ensure_billing_quota_bucket_for_user(decision["user"])
     user.clear()
     user.update(decision["user"])
     if decision["eventRecord"] is not None:
@@ -252,60 +241,3 @@ def decode_permissions(value: object) -> dict:
     except json.JSONDecodeError:
         return {}
     return decoded if isinstance(decoded, dict) else {}
-
-
-def api_repository_payload(row: dict, user: dict | None = None) -> dict:
-    repository = db.get_repository(str(row.get("id") or "")) if not row.get("github_repo_id") else row
-    repository = repository or row
-    payload = {
-        "id": public_issue_text(repository.get("id")),
-        "repoId": public_issue_text(repository.get("id")),
-        "githubRepoId": public_issue_text(repository.get("github_repo_id")),
-        "fullName": public_issue_text(repository.get("full_name")),
-        "ownerLogin": public_issue_text(repository.get("owner_login")),
-        "defaultBranch": public_issue_text(repository.get("default_branch")) or "main",
-        "private": bool(repository.get("private")),
-        "fork": bool(repository.get("fork")),
-        "htmlUrl": trusted_public_url(repository.get("html_url")),
-        "cloneUrl": trusted_public_url(repository.get("clone_url")),
-        "installationId": clean_github_access_text(row.get("github_app_installation_id"), allow_int=True),
-        "installationAccount": public_issue_text(row.get("installation_account")),
-        "repositorySelection": public_issue_text(row.get("repository_selection")),
-        "lastAuthorizedAt": pull_request_timestamp(row.get("last_authorized_at")),
-        "permissions": decode_permissions(row.get("permissions")),
-    }
-    if user and repository.get("id"):
-        payload["quota"] = quota.quota_payload_for_repository(repository, user)
-    return payload
-
-
-def latest_scan_for_user_repo(user_id: str, repo_id: str) -> dict | None:
-    job = db.get_latest_user_repo_scan_job(user_id, repo_id)
-    if job:
-        scans = hydrate_scan_jobs_for_read([job])
-        if scans:
-            with STATE_LOCK:
-                return remember_scan_snapshot_locked(scans[0])
-    with STATE_LOCK:
-        for scan in SCANS:
-            if scan.get("userId") == user_id and scan.get("repoId") == repo_id:
-                reconcile_scan_job_state_locked(scan)
-                return scan
-    return None
-
-
-def active_scan_for_user_repo(user_id: str, repo_id: str) -> dict | None:
-    job = db.get_latest_user_repo_scan_job(user_id, repo_id, active_only=True)
-    if job:
-        scans = hydrate_scan_jobs_for_read([job])
-        if scans:
-            with STATE_LOCK:
-                return remember_scan_snapshot_locked(scans[0])
-    with STATE_LOCK:
-        for scan in SCANS:
-            if scan.get("userId") != user_id or scan.get("repoId") != repo_id:
-                continue
-            reconcile_scan_job_state_locked(scan)
-            if scan.get("status") in {"queued", "running"}:
-                return scan
-    return None

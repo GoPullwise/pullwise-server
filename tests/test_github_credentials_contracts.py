@@ -23,7 +23,7 @@ def setup():
         current_account=lambda owner: deepcopy(state['account']),
         identities_for_user=lambda user: [deepcopy(state['identity'])],
         installation_access_for_user=lambda user, installation: deepcopy(state['access']),
-        repository_for_account=lambda user, repo: dict(id=repo, fullName='org/repo'),
+        repository_for_account=lambda user, repo, target, role: dict(id=repo, fullName='org/repo'),
         app_id='30', app_token=lambda: 'app-secret', installation_token=install,
         clock=lambda: state['now'])
     return resolver, state, deepcopy(target)

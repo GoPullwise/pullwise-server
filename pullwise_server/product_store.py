@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 import time
 import uuid
@@ -35,6 +36,7 @@ _UNIT_TYPES = frozenset(
     }
 )
 _UNSET = object()
+_UPSTREAM_NAME = re.compile(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}\Z")
 _MODULE_SOURCE_TYPES = {
     "pr": ("pr_state", "pr_comment", "pr_review_body", "pr_review_comment"),
     "ci": ("ci_failure",) * 4,
@@ -254,6 +256,7 @@ class ProductStore:
                     owner_id TEXT NOT NULL,
                     target_repository_id TEXT,
                     upstream_repository_id TEXT NOT NULL,
+                    upstream_full_name TEXT,
                     billing_owner_id TEXT NOT NULL,
                     context_version INTEGER NOT NULL CHECK (context_version >= 1),
                     context_hash TEXT NOT NULL,
@@ -517,6 +520,9 @@ class ProductStore:
                 for row in connection.execute("PRAGMA table_info(background_jobs)").fetchall()
             }
             delivery_columns = {row["name"] for row in connection.execute("PRAGMA table_info(github_delivery_targets)")}
+            watch_columns = {row["name"] for row in connection.execute("PRAGMA table_info(update_watches)")}
+            if "upstream_full_name" not in watch_columns:
+                connection.execute("ALTER TABLE update_watches ADD COLUMN upstream_full_name TEXT")
             if "pull_number" not in delivery_columns:
                 connection.execute("ALTER TABLE github_delivery_targets ADD COLUMN pull_number INTEGER")
             for column, definition in {
@@ -536,6 +542,51 @@ class ProductStore:
                     connection.execute(
                         f"ALTER TABLE background_jobs ADD COLUMN {column} {definition}"
                     )
+
+    def seed_discovery_targets(self, *, app_id: str, now: int) -> int:
+        """Add missing local targets as inaccessible; only remote renewal may grant access."""
+        if not isinstance(app_id, str) or not re.fullmatch(r"[1-9][0-9]*", app_id):
+            raise ValueError("invalid app_id")
+        count = 0
+        with self._immediate() as connection:
+            bound = ProductStore(self.database_path, _connection=connection)
+            services = connection.execute("SELECT repository_id, installation_id, modules_json FROM repository_services").fetchall()
+            for service in services:
+                repository_id = service["repository_id"]
+                if not repository_id.startswith("github:") or not repository_id[7:].isdigit():
+                    continue
+                modules = json.loads(service["modules_json"])
+                for module in ("pr", "ci"):
+                    if not modules.get(module):
+                        continue
+                    exists = connection.execute(
+                        "SELECT 1 FROM discovery_targets WHERE resource_kind='repository' AND resource_id=? AND module=?",
+                        (repository_id, module)).fetchone()
+                    if exists:
+                        continue
+                    bound.set_discovery_authorization(resource_kind="repository", resource_id=repository_id,
+                        module=module, github_repository_id=repository_id[7:],
+                        installation_id=service["installation_id"], app_id=app_id,
+                        authorization_revision=1, accessible=False, valid_until=now, observed_at=now)
+                    count += 1
+            watches = connection.execute(
+                "SELECT id, upstream_repository_id, target_repository_id FROM update_watches WHERE archived_at IS NULL AND enabled=1"
+            ).fetchall()
+            for watch in watches:
+                repository_id = watch["upstream_repository_id"]
+                if not repository_id.startswith("github:") or not repository_id[7:].isdigit():
+                    continue
+                exists = connection.execute(
+                    "SELECT 1 FROM discovery_targets WHERE resource_kind='watch' AND resource_id=? AND module='updates'",
+                    (watch["id"],)).fetchone()
+                if exists:
+                    continue
+                bound.set_discovery_authorization(resource_kind="watch", resource_id=watch["id"],
+                    module="updates", github_repository_id=repository_id[7:],
+                    installation_id=None, app_id=app_id if watch["target_repository_id"] else None,
+                    authorization_revision=1, accessible=False, valid_until=now, observed_at=now)
+                count += 1
+        return count
 
     def set_discovery_authorization(
         self, *, resource_kind: str, resource_id: str, module: str,
@@ -760,6 +811,7 @@ class ProductStore:
         owner_id: str,
         target_repository_id: str | None,
         upstream_repository_id: str,
+        upstream_full_name: str | None = None,
         billing_owner_id: str,
         interests: Sequence[str],
         enabled: bool,
@@ -768,6 +820,12 @@ class ProductStore:
         priority_order: int = 0,
         active_limit: int | None = None,
     ) -> dict:
+        if upstream_full_name is not None and (
+            not isinstance(upstream_full_name, str)
+            or not _UPSTREAM_NAME.fullmatch(upstream_full_name)
+            or any(part in {".", ".."} for part in upstream_full_name.split("/"))
+        ):
+            raise ValueError("invalid upstream_full_name")
         if isinstance(priority_order, bool) or not isinstance(priority_order, int) or priority_order < 0:
             raise ValueError("priority_order must be a non-negative integer")
         if active_limit is not None and (
@@ -851,10 +909,10 @@ class ProductStore:
                 """
                 INSERT INTO update_watches (
                     id, watch_scope_key, owner_id, target_repository_id,
-                    upstream_repository_id, billing_owner_id, context_version, context_hash,
+                    upstream_repository_id, upstream_full_name, billing_owner_id, context_version, context_hash,
                     interests_json, include_prerelease, priority_order, enabled,
                     analysis_enabled, revision, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 """,
                 (
                     watch_id,
@@ -862,6 +920,7 @@ class ProductStore:
                     _identifier(owner_id, "owner_id"),
                     target_repository_id,
                     _identifier(upstream_repository_id, "upstream_repository_id"),
+                    upstream_full_name,
                     _identifier(billing_owner_id, "billing_owner_id"),
                     context_version,
                     semantic_hash,
@@ -1225,12 +1284,11 @@ class ProductStore:
             active_jobs = connection.execute(
                 """SELECT j.* FROM background_jobs j
                    WHERE j.state IN ('queued','running','retry_wait')
-                     AND ((j.job_type='sync_watch' AND j.logical_key=?)
-                       OR (j.job_type='analyze_source' AND EXISTS (
+                     AND j.job_type='analyze_source' AND EXISTS (
                            SELECT 1 FROM source_contexts sc
                            WHERE sc.watch_id=? AND sc.source_id=j.source_id
-                             AND sc.context_id=j.context_id)))""",
-                (f"sync_watch:{watch_id}", watch_id),
+                             AND sc.context_id=j.context_id)""",
+                (watch_id,),
             ).fetchall()
             for job in active_jobs:
                 if job["reservation_id"]:
@@ -2311,8 +2369,16 @@ class ProductStore:
         observed_at: int,
         job_id: str | None = None,
         claim_token: str | None = None,
+        project_update_item: bool = False,
+        project_pr_comment_item: bool = False,
     ) -> dict:
         reservation_id = _identifier(reservation_id, "reservation_id")
+        if (type(project_update_item) is not bool
+                or type(project_pr_comment_item) is not bool
+                or (project_update_item and project_pr_comment_item)
+                or ((project_update_item or project_pr_comment_item)
+                    and (item_id is not None or job_id is None))):
+            raise ValueError("UPDATES_ITEM_PROJECTION_INVALID")
         if item_id is not None:
             item_id = _identifier(item_id, "item_id")
         elif expected_item_revision is not None or snapshot.get("actionTypes"):
@@ -2457,6 +2523,24 @@ class ProductStore:
                 semantic_thread = primary is not None and primary["source_type"] == "pr_review_comment"
                 if semantic_thread and any(dependency not in canonical_sources for dependency in dependencies):
                     raise ValueError("ASSESSMENT_DEPENDENCY_BINDING_MISMATCH")
+            if project_update_item:
+                update_source = connection.execute(
+                    "SELECT source_type FROM source_records WHERE latest_version=? AND source_id IN (%s)"
+                    % ",".join("?" for _ in canonical_sources),
+                    (assessment_fields["sourceVersionId"], *(s["sourceId"] for s in canonical_sources)),
+                ).fetchone()
+                if (assessment_fields["questionVersion"] != "updates-filter/v3"
+                        or update_source is None or update_source["source_type"] != "release"):
+                    raise ValueError("UPDATES_ITEM_PROJECTION_INVALID")
+            if project_pr_comment_item:
+                comment_source = connection.execute(
+                    "SELECT source_type FROM source_records WHERE latest_version=? AND source_id IN (%s)"
+                    % ",".join("?" for _ in canonical_sources),
+                    (assessment_fields["sourceVersionId"], *(s["sourceId"] for s in canonical_sources)),
+                ).fetchone()
+                if (assessment_fields["questionVersion"] != "pr-followup/v3"
+                        or comment_source is None or comment_source["source_type"] != "pr_comment"):
+                    raise ValueError("PR_COMMENT_ITEM_PROJECTION_INVALID")
             if job_id is not None:
                 claimed_job = connection.execute(
                     "SELECT * FROM background_jobs WHERE id = ?",
@@ -2505,9 +2589,11 @@ class ProductStore:
                     int(current_context["context_version"]) != int(claimed_job["context_version"])
                     or int(current_context["configuration_revision"])
                     != int(claimed_job["configuration_revision"])
+                    or bool(current_context["context_stale"])
                 ):
                     raise ValueError("STALE_CONTEXT")
-                if current_context["item_id"] != item_id and not semantic_thread:
+                if current_context["item_id"] != item_id and not (
+                        semantic_thread or project_update_item or project_pr_comment_item):
                     raise ValueError("STALE_CONTEXT")
                 primary_source = next(
                     (source for source in canonical_sources if source["sourceId"] == claimed_job["source_id"]),
@@ -2578,7 +2664,8 @@ class ProductStore:
                     raise ValueError("RESERVATION_OWNER_MISMATCH")
                 if not bool(current["analysis_enabled"]):
                     raise ValueError("ANALYSIS_DISABLED")
-                if item_id is None and current["item_id"] is not None and not semantic_thread:
+                if item_id is None and current["item_id"] is not None and not (
+                        semantic_thread or project_update_item or project_pr_comment_item):
                     raise ValueError("STALE_CONTEXT")
                 if (
                     int(current["authorization_revision"]) != fence["authorizationRevision"]
@@ -2589,6 +2676,7 @@ class ProductStore:
                 if (
                     int(current["context_version"]) != fence["contextVersion"]
                     or int(current["configuration_revision"]) != fence["configurationRevision"]
+                    or bool(current["context_stale"])
                 ):
                     raise ValueError("STALE_CONTEXT")
             existing_assessment = connection.execute(
@@ -2685,6 +2773,11 @@ class ProductStore:
                 "usage": assessment_dto["usage"],
                 "status": assessment_dto["status"],
             }
+            publication_coverage_json = (_json(snapshot["coverage"])
+                if isinstance(snapshot.get("coverage"), Mapping)
+                else connection.execute(
+                    "SELECT coverage_json FROM source_contexts WHERE source_id=? AND context_id=?",
+                    (primary_source["sourceId"], primary_fence["contextId"])).fetchone()[0])
             connection.execute(
                 """INSERT INTO source_assessment_publications(
                     source_id, context_id, source_version_id, context_version,
@@ -2704,8 +2797,7 @@ class ProductStore:
                  primary_fence["authorizationRevision"], ledger["billing_owner_id"],
                  _json(public_assessment), _json(snapshot_evidence),
                  _json(canonical_sources), _json(canonical_fences),
-                 connection.execute("SELECT coverage_json FROM source_contexts WHERE source_id=? AND context_id=?",
-                                    (primary_source["sourceId"], primary_fence["contextId"])).fetchone()[0]),
+                 publication_coverage_json),
             )
             connection.execute(
                 """UPDATE source_contexts SET processing_status='assessed', updated_at=?
@@ -2772,6 +2864,20 @@ class ProductStore:
                     source_id=primary_source["sourceId"], context_id=primary_fence["contextId"], now=observed_at)
                 if projected is not None:
                     item_id = projected["id"]
+            if project_update_item:
+                from .product_update_items import reconcile_update_item
+                item_id = reconcile_update_item(
+                    ProductStore(self.database_path, _connection=connection), connection,
+                    source=primary_source, fence=primary_fence,
+                    assessment=public_assessment, coverage=json.loads(publication_coverage_json),
+                    evidence=snapshot_evidence, observed_at=observed_at)
+            if project_pr_comment_item:
+                from .product_pr_comment_items import reconcile_pr_comment_item
+                item_id = reconcile_pr_comment_item(
+                    ProductStore(self.database_path, _connection=connection), connection,
+                    source=primary_source, fence=primary_fence,
+                    assessment=public_assessment, coverage=json.loads(publication_coverage_json),
+                    evidence=snapshot_evidence, observed_at=observed_at)
             bucket = connection.execute(
                 """
                 UPDATE processing_usage_buckets
@@ -2943,10 +3049,17 @@ class ProductStore:
         global_monthly_limit: int,
         owner_rolling_limit: int,
         global_rolling_limit: int,
+        job_id: str | None = None,
+        claim_token: str | None = None,
     ) -> dict:
         attempt_id = _identifier(attempt_id, "attempt_id")
         owner_id = _identifier(billing_owner_id, "billing_owner_id")
         input_key = _identifier(input_key, "input_key")
+        if (job_id is None) != (claim_token is None):
+            raise ValueError("job_id and claim_token must be provided together")
+        if job_id is not None:
+            job_id = _identifier(job_id, "job_id")
+            claim_token = _identifier(claim_token, "claim_token")
         if isinstance(occurred_at, bool) or not isinstance(occurred_at, int) or occurred_at < 0:
             raise ValueError("occurred_at must be a non-negative integer")
         limits = {
@@ -2963,6 +3076,30 @@ class ProductStore:
         period_utc = time.strftime("%Y-%m", time.gmtime(occurred_at))
         rolling_start = max(0, occurred_at - 59)
         with self._immediate() as connection:
+            if job_id is not None:
+                job = connection.execute("SELECT * FROM background_jobs WHERE id=?", (job_id,)).fetchone()
+                if (job is None or job["state"] != "running" or job["claim_token"] != claim_token
+                        or job["claimed_until"] is None or job["claimed_until"] <= occurred_at
+                        or job["billing_owner_id"] != owner_id):
+                    raise ValueError("JOB_CLAIM_LOST")
+                source = connection.execute("SELECT * FROM source_records WHERE source_id=?",
+                                            (job["source_id"],)).fetchone()
+                context = connection.execute("SELECT * FROM source_contexts WHERE source_id=? AND context_id=?",
+                                             (job["source_id"], job["context_id"])).fetchone()
+                reservation = connection.execute("SELECT * FROM processing_usage_ledger WHERE reservation_id=?",
+                                                 (job["reservation_id"],)).fetchone()
+                if (source is None or source["latest_version"] != job["source_version_id"]
+                        or source["source_revision"] != job["source_revision"]
+                        or source["processing_mode"] != "model" or source["lifecycle"] != "active"
+                        or context is None or not context["accessible"] or context["context_stale"]
+                        or context["authorization_valid_until"] <= occurred_at
+                        or context["authorization_revision"] != job["authorization_revision"]
+                        or context["context_version"] != job["context_version"]
+                        or context["configuration_revision"] != job["configuration_revision"]
+                        or not context["analysis_enabled"] or context["billing_owner_id"] != owner_id
+                        or reservation is None or reservation["state"] != "reserved"
+                        or reservation["billing_owner_id"] != owner_id):
+                    raise ValueError("JOB_CLAIM_LOST")
             existing = connection.execute(
                 "SELECT * FROM provider_attempts WHERE attempt_id = ?",
                 (attempt_id,),
@@ -3263,18 +3400,12 @@ class ProductStore:
         global_active_limit: int = 1000,
         owner_active_limit: int = 100,
     ) -> dict:
-        if job_type not in {
-            "sync_repository",
-            "sync_watch",
-            "analyze_source",
-            "reconcile_sources",
-            "retention_cleanup",
-        }:
+        if job_type != "analyze_source":
             raise ValueError("invalid job_type")
         logical_key = _identifier(logical_key, "logical_key")
         trusted_trigger = _identifier(trusted_trigger, "trusted_trigger")
         if requester_id is not None:
-            requester_id = _identifier(requester_id, "requester_id")
+            raise ValueError("analysis jobs have no requester")
         if job_type == "analyze_source":
             source_id = _identifier(source_id, "source_id")
             context_id = _identifier(context_id, "context_id")
@@ -3516,6 +3647,135 @@ class ProductStore:
             ).fetchone()
         return self._job_dto(row, reused=False) if row is not None else None
 
+    def read_claimed_analysis_input(self, *, job_id: str, claim_token: str, now: int) -> dict:
+        """Read one claim's source, authority and watch interests in one snapshot."""
+        job_id = _identifier(job_id, "job_id")
+        claim_token = _identifier(claim_token, "claim_token")
+        if type(now) is not int or now < 0:
+            raise ValueError("now must be a non-negative integer")
+        with self._read() as connection:
+            if self._connection is None:
+                connection.execute("BEGIN")
+            job = connection.execute("SELECT * FROM background_jobs WHERE id=?", (job_id,)).fetchone()
+            if (job is None or job["job_type"] != "analyze_source" or job["state"] != "running"
+                    or job["claim_token"] != claim_token):
+                raise ValueError("JOB_CLAIM_LOST")
+            if job["claimed_until"] is None or int(job["claimed_until"]) <= now:
+                raise ValueError("JOB_CLAIM_EXPIRED")
+            source = connection.execute("SELECT * FROM source_records WHERE source_id=?",
+                (job["source_id"],)).fetchone()
+            context = connection.execute(
+                "SELECT * FROM source_contexts WHERE source_id=? AND context_id=?",
+                (job["source_id"], job["context_id"])).fetchone()
+            if (source is None or source["processing_mode"] != "model"
+                    or source["lifecycle"] != "active"
+                    or source["latest_version"] != job["source_version_id"]
+                    or int(source["source_revision"]) != int(job["source_revision"])):
+                raise ValueError("STALE_SOURCE")
+            if (context is None or not bool(context["accessible"]) or bool(context["context_stale"])
+                    or int(context["authorization_valid_until"]) <= now
+                    or int(context["authorization_revision"]) != int(job["authorization_revision"])):
+                raise ValueError("STALE_AUTHORIZATION")
+            if (int(context["context_version"]) != int(job["context_version"])
+                    or int(context["configuration_revision"]) != int(job["configuration_revision"])):
+                raise ValueError("STALE_CONTEXT")
+            if not bool(context["analysis_enabled"]):
+                raise ValueError("ANALYSIS_DISABLED")
+            version = connection.execute("SELECT content_json FROM source_versions WHERE id=?",
+                (job["source_version_id"],)).fetchone()
+            ledger = connection.execute("SELECT * FROM processing_usage_ledger WHERE reservation_id=?",
+                (job["reservation_id"],)).fetchone()
+            if (version is None or ledger is None or ledger["state"] != "reserved"
+                    or ledger["billing_owner_id"] != context["billing_owner_id"]):
+                raise ValueError("RESERVATION_NOT_ACTIVE")
+            interests: list[str] = []
+            semantic_context_hash = f"{job['context_id']}:{job['context_version']}:{job['configuration_revision']}"
+            if source["source_type"] == "release":
+                watch = connection.execute("SELECT * FROM update_watches WHERE id=?",
+                    (context["watch_id"],)).fetchone()
+                if (watch is None or watch["archived_at"] is not None or not bool(watch["enabled"])
+                        or not bool(watch["analysis_enabled"])
+                        or watch["billing_owner_id"] != context["billing_owner_id"]
+                        or int(watch["context_version"]) != int(context["context_version"])):
+                    raise ValueError("STALE_CONTEXT")
+                interests = json.loads(watch["interests_json"])
+                semantic_context_hash = watch["context_hash"]
+            item_payload = None
+            if context["item_id"] is not None:
+                item = connection.execute("SELECT * FROM items WHERE id=?",
+                    (context["item_id"],)).fetchone()
+                if item is None or item["context_id"] != context["context_id"]:
+                    raise ValueError("STALE_CONTEXT")
+                item_version = connection.execute(
+                    "SELECT * FROM item_versions WHERE item_id=? AND item_version=?",
+                    (item["id"], item["current_item_version"])).fetchone()
+                if item_version is None:
+                    raise ValueError("ITEM_SNAPSHOT_UNAVAILABLE")
+                item_payload = {"id": item["id"], "revision": int(item["revision"]),
+                    "unitType": item["unit_type"], "unitKey": item["unit_key"],
+                    "snapshot": json.loads(item_version["snapshot_json"]),
+                    "sources": json.loads(item_version["sources_json"]),
+                    "contextFences": json.loads(item_version["context_fences_json"])}
+            dependencies: list[dict] = []
+            dependency_fences: list[dict] = []
+            source_facts = json.loads(source["source_facts_json"] or "{}")
+            if source["source_type"] == "pr_review_comment" and source_facts.get("inReplyToId"):
+                parent = connection.execute(
+                    """SELECT p.*, pc.context_version AS parent_context_version,
+                              pc.configuration_revision AS parent_configuration_revision,
+                              pc.authorization_revision AS parent_authorization_revision
+                       FROM source_records p JOIN source_contexts pc ON pc.source_id=p.source_id
+                       WHERE p.source_type='pr_review_comment' AND p.repository_id=?
+                         AND json_extract(p.source_facts_json,'$.commentId')=?
+                         AND pc.context_id=? AND pc.billing_owner_id=?
+                         AND pc.accessible=1 AND pc.context_stale=0
+                         AND pc.authorization_valid_until>?
+                       LIMIT 1""",
+                    (source["repository_id"], source_facts["inReplyToId"],
+                     context["context_id"], context["billing_owner_id"], now)).fetchone()
+                parent_facts = json.loads(parent["source_facts_json"] or "{}") if parent else {}
+                if (parent is None or parent["lifecycle"] != "active"
+                        or source_facts.get("associationVerified") is not True
+                        or parent_facts.get("associationVerified") is not True
+                        or parent_facts.get("threadId") != source_facts.get("threadId")
+                        or parent_facts.get("pullNumber") != source_facts.get("pullNumber")):
+                    raise ValueError("PR_PARENT_UNAVAILABLE")
+                dependencies.append({"sourceId": parent["source_id"],
+                    "sourceVersion": parent["latest_version"],
+                    "sourceRevision": int(parent["source_revision"])})
+                dependency_fences.append({"sourceId": parent["source_id"],
+                    "contextId": context["context_id"],
+                    "contextVersion": int(parent["parent_context_version"]),
+                    "configurationRevision": int(parent["parent_configuration_revision"]),
+                    "authorizationRevision": int(parent["parent_authorization_revision"])})
+            return {
+                "source": {"id": source["source_id"], "sourceVersion": source["latest_version"],
+                    "sourceRevision": int(source["source_revision"]), "sourceType": source["source_type"],
+                    "content": json.loads(version["content_json"]),
+                    "sourceFacts": source_facts,
+                    "completeness": source["completeness"]},
+                "context": {"id": context["context_id"],
+                    "billingOwnerId": context["billing_owner_id"],
+                    "contextVersion": int(context["context_version"]),
+                    "configurationRevision": int(context["configuration_revision"]),
+                    "authorizationRevision": int(context["authorization_revision"]),
+                    "contextHash": semantic_context_hash, "itemId": context["item_id"]},
+                "interests": interests, "module": ledger["module"], "item": item_payload,
+                "dependencies": dependencies, "dependencyFences": dependency_fences,
+            }
+
+    def require_claimed_provider_attempt(
+        self, *, job_id: str, claim_token: str, billing_owner_id: str, input_key: str,
+    ) -> None:
+        with self._read() as connection:
+            row = connection.execute(
+                "SELECT billing_owner_id,input_key FROM provider_attempts WHERE attempt_id=?",
+                (f"jev_{_identifier(job_id, 'job_id')}_{_identifier(claim_token, 'claim_token')}",)
+            ).fetchone()
+        if (row is None or row["billing_owner_id"] != _identifier(billing_owner_id, "billing_owner_id")
+                or row["input_key"] != _identifier(input_key, "input_key")):
+            raise ValueError("PROVIDER_ATTEMPT_NOT_ADMITTED")
+
     def claim_next_analysis_job(self, *, now: int, lease_seconds: int = 120) -> dict | None:
         for field, value in {"now": now, "lease_seconds": lease_seconds}.items():
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
@@ -3559,7 +3819,7 @@ class ProductStore:
                 stale_authorization = (
                     context is None
                     or not bool(context["accessible"])
-                    or int(context["authorization_valid_until"]) < now
+                    or int(context["authorization_valid_until"]) <= now
                     or int(context["authorization_revision"])
                     != int(candidate["authorization_revision"])
                 )
@@ -3569,6 +3829,7 @@ class ProductStore:
                         int(context["context_version"]) != int(candidate["context_version"])
                         or int(context["configuration_revision"])
                         != int(candidate["configuration_revision"])
+                        or bool(context["context_stale"])
                     )
                 )
                 analysis_disabled = context is not None and not bool(context["analysis_enabled"])

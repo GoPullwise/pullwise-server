@@ -8,7 +8,13 @@ CONTRACT = Path(__file__).parents[1] / "openapi" / "product-v1.yaml"
 
 
 class ProductOpenApiContractTest(unittest.TestCase):
-    def test_p1_contract_exposes_shared_lists_handling_sync_and_usage(self) -> None:
+    def test_ci_history_candidate_is_detail_only_and_source_linked(self) -> None:
+        text = CONTRACT.read_text(encoding="utf-8")
+        self.assertIn("historyCandidates: { type: array", text)
+        for field in ("itemId:", "sourceUrl:", "same_observed_symptom", "handledAt:"):
+            self.assertIn(field, text)
+
+    def test_p1_contract_exposes_shared_lists_handling_and_usage(self) -> None:
         text = CONTRACT.read_text(encoding="utf-8")
         for path in (
             "/api/v1/me:",
@@ -19,16 +25,15 @@ class ProductOpenApiContractTest(unittest.TestCase):
             "/api/v1/items:",
             "/api/v1/items/{itemId}:",
             "/api/v1/repositories/{repositoryId}/service:",
-            "/api/v1/repositories/{repositoryId}/sync:",
-            "/api/v1/watches/{watchId}/sync:",
             "/api/v1/usage:",
             "/api/v1/usage/events:",
-            "/api/v1/jobs/{jobId}:",
         ):
             self.assertIn(path, text)
         self.assertIn("cookieSession: []", text)
         self.assertIn("apiKey: []", text)
         self.assertIn("PageLimit:", text)
+        watch_create = text.split("operationId: createUpdateWatch", 1)[1].split("responses:", 1)[0]
+        self.assertIn("#/components/parameters/IdempotencyKey", watch_create)
 
     def test_contract_has_no_user_model_submission(self) -> None:
         text = CONTRACT.read_text(encoding="utf-8").lower()
@@ -66,7 +71,6 @@ class ProductOpenApiContractTest(unittest.TestCase):
             "repositories:manage",
             "items:read",
             "items:write",
-            "sync:write",
             "watches:read",
             "watches:write",
             "usage:read",
@@ -74,13 +78,12 @@ class ProductOpenApiContractTest(unittest.TestCase):
             self.assertIn(scope, text)
         self.assertNotIn("scans:write", text)
         self.assertNotIn("processing:write", text)
-
-    def test_sync_operations_explicitly_state_that_they_never_schedule_models(self) -> None:
-        text = CONTRACT.read_text(encoding="utf-8")
-        for operation in ("syncRepository", "syncWatch"):
-            start = text.index(f"operationId: {operation}")
-            description = text[start : start + 350]
-            self.assertIn("never schedules model work", description)
+        for retired in (
+            "sync:write", "/api/v1/repositories/{repositoryId}/sync:",
+            "/api/v1/watches/{watchId}/sync:", "/api/v1/jobs/{jobId}:",
+            "SyncJob:",
+        ):
+            self.assertNotIn(retired, text)
 
     def test_item_assessment_contract_includes_question_and_evidence_bindings(self) -> None:
         text = CONTRACT.read_text(encoding="utf-8")

@@ -11,8 +11,7 @@ from typing import Mapping
 from . import db
 from .entitlements import product_usage_payload
 from .github_sources import resolve_upstream_repository
-from .product_jobs import ProductJobScheduler
-from .product_job_filters import job_resource_allowed
+from .ci_history import error_signature, history_candidates
 from .product_store import ProductStore
 from .product_source_filters import apply_source_restrictions, filter_sources
 from .product_item_filters import apply_item_restrictions, filter_items, item_in_view
@@ -146,7 +145,6 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
         or segments == ["visualizations"]
         or segments == ["usage"]
         or segments == ["usage", "events"]
-        or (len(segments) == 2 and segments[0] == "jobs")
         or (len(segments) == 3 and segments[0] == "repositories" and segments[2] == "service")
         or (len(segments) == 2 and segments[0] in {"sources", "items"})
         or (len(segments) == 3 and segments[0] == "items" and segments[2] == "timeline")
@@ -224,43 +222,6 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
                    "Invalid repository pagination.")
             return True
         handler.json(page)
-        return True
-    if len(segments) == 2 and segments[0] == "jobs":
-        job = store.get_background_job(segments[1])
-        resource_id = (job["logicalKey"].split(":", 1)[1] if job and ":" in job["logicalKey"] else "")
-        watch = (store.get_watch(resource_id) if job and job["jobType"] == "sync_watch" else None)
-        parent = (store.get_repository_service(watch["targetRepositoryId"])
-                  if watch and watch["targetRepositoryId"] else None)
-        service = (store.get_repository_service(resource_id)
-                   if job and job["jobType"] == "sync_repository" else None)
-        if (
-            job is None
-            or job.get("requesterId") != user_id
-            or job.get("jobType") not in {"sync_repository", "sync_watch"}
-            or job["jobType"] == "sync_watch" and (
-                watch is None or watch["billingOwnerId"] != user_id
-                or watch["targetRepositoryId"] is not None and (
-                    parent is None or not parent["enabled"]
-                    or parent["billingOwnerId"] != user_id))
-            or job["jobType"] == "sync_repository" and (
-                service is None or not service["enabled"]
-                or service["billingOwnerId"] != user_id)
-            or not job_resource_allowed(job_type=job["jobType"], resource_id=resource_id,
-                target_repository_id=watch.get("targetRepositoryId") if watch else None,
-                restrictions=principal.get("restrictions") or {})
-        ):
-            _error(handler, HTTPStatus.NOT_FOUND, "NOT_FOUND", "Sync job was not found.")
-            return True
-        handler.json(
-            {
-                "id": job["id"],
-                "operation": job["jobType"],
-                "status": job["status"],
-                "attempt": job["attempt"],
-                "links": {"self": f"/api/v1/jobs/{job['id']}"},
-                "requestId": _request_id(handler),
-            }
-        )
         return True
     if len(segments) == 3 and segments[0] == "repositories" and segments[2] == "service":
         repository_context = handler.api_repository_context({"user": principal["user"]}, segments[1])
@@ -513,15 +474,24 @@ def handle_get(handler: object, segments: list[str], params: dict, users: Mappin
     if item is None:
         _error(handler, HTTPStatus.NOT_FOUND, "NOT_FOUND", "Item was not found.")
     else:
+        if item.get("module") == "ci":
+            # Re-read current Item and candidates under the same current-authority
+            # snapshot. The first read only avoids scanning history for other modules.
+            all_items = apply_item_restrictions(
+                store.list_items_for_billing_owner(user_id, include_history=True), restrictions)
+            item = next((candidate for candidate in all_items if candidate["id"] == segments[1]), None)
+            if item is None:
+                _error(handler, HTTPStatus.NOT_FOUND, "NOT_FOUND", "Item was not found.")
+                return True
+            item = {**item, "observedErrorSignature": error_signature(item),
+                    "historyCandidates": history_candidates(item, all_items)}
         handler.json(item, headers={"ETag": f'"{item["revision"]}"'})
     return True
 
 
 def handle_post(handler: object, segments: list[str], body: dict, users: Mapping[str, dict]) -> bool:
     is_create_watch = segments == ["watches"]
-    is_sync_watch = len(segments) == 3 and segments[0] == "watches" and segments[2] == "sync"
-    is_sync_repository = len(segments) == 3 and segments[0] == "repositories" and segments[2] == "sync"
-    if not (is_create_watch or is_sync_watch or is_sync_repository):
+    if not is_create_watch:
         return False
     if is_create_watch:
         principal = _authenticate(handler, users, required_scopes=("watches:write",))
@@ -621,6 +591,7 @@ def handle_post(handler: object, segments: list[str], body: dict, users: Mapping
                 owner_id=principal["user"]["id"],
                 target_repository_id=target_repository_id,
                 upstream_repository_id=resolved["id"],
+                upstream_full_name=resolved["fullName"],
                 billing_owner_id=principal["user"]["id"],
                 interests=interests,
                 enabled=body.get("enabled", True),
@@ -673,194 +644,6 @@ def handle_post(handler: object, segments: list[str], body: dict, users: Mapping
         )
         handler.json(response, HTTPStatus.CREATED, headers={"Location": response["links"]["self"]})
         return True
-    if is_sync_repository:
-        principal = _authenticate(
-            handler,
-            users,
-            required_scopes=("repositories:read", "sync:write"),
-        )
-        if principal is None:
-            return True
-        if not isinstance(body, dict) or body:
-            _error(handler, HTTPStatus.BAD_REQUEST, "INVALID_REQUEST", "Manual sync requires an empty JSON object.")
-            return True
-        idempotency_key = _header(handler, "Idempotency-Key")
-        if not idempotency_key or len(idempotency_key) > 128:
-            _error(
-                handler,
-                HTTPStatus.BAD_REQUEST,
-                "INVALID_REQUEST",
-                "Idempotency-Key is required and must be at most 128 characters.",
-            )
-            return True
-        repository_context = handler.api_repository_context({"user": principal["user"]}, segments[1])
-        if not repository_context:
-            return True
-        repository = repository_context[0]
-        restrictions = principal.get("restrictions") or {}
-        if restrictions and repository["id"] not in set(restrictions.get("repositoryIds") or ()):
-            _error(handler, HTTPStatus.NOT_FOUND, "NOT_FOUND", "Repository service was not found.")
-            return True
-        store = _store()
-        service = store.get_repository_service(repository["id"])
-        if service is None or not service["enabled"]:
-            _error(handler, HTTPStatus.NOT_FOUND, "NOT_FOUND", "Repository service was not found.")
-            return True
-        if service["billingOwnerId"] != principal["user"]["id"] and not service["allowMemberSync"]:
-            _error(handler, HTTPStatus.FORBIDDEN, "MEMBER_SYNC_DISABLED", "Member sync is disabled.")
-            return True
-        canonical_path = f"/api/v1/repositories/{repository['id']}/sync"
-        body_hash = hashlib.sha256(b"{}").hexdigest()
-        timestamp = int(time.time())
-        try:
-            idempotency = store.begin_idempotent_request(
-                subject_id=principal["subjectId"],
-                method="POST",
-                path=canonical_path,
-                idempotency_key=idempotency_key,
-                body_hash=body_hash,
-                timestamp=timestamp,
-            )
-        except ValueError as error:
-            if str(error) == "IDEMPOTENCY_CONFLICT":
-                _error(handler, HTTPStatus.CONFLICT, "IDEMPOTENCY_CONFLICT", "Idempotency-Key was reused with another request.")
-            else:
-                _error(handler, HTTPStatus.BAD_REQUEST, "INVALID_REQUEST", str(error))
-            return True
-        if idempotency["state"] == "replay":
-            handler.json(idempotency["response"], idempotency["statusCode"])
-            return True
-        if idempotency["state"] == "pending":
-            _error(handler, HTTPStatus.CONFLICT, "IDEMPOTENCY_IN_PROGRESS", "The same request is still in progress.", retryable=True)
-            return True
-        try:
-            job = ProductJobScheduler(store).request_manual_sync(
-                resource_kind="repository",
-                resource_id=repository["id"],
-                requester_id=principal["user"]["id"],
-            )
-        except BaseException:
-            store.abandon_idempotent_request(
-                subject_id=principal["subjectId"],
-                method="POST",
-                path=canonical_path,
-                idempotency_key=idempotency_key,
-                body_hash=body_hash,
-            )
-            raise
-        response = {
-            "id": job["id"],
-            "operation": "sync_repository",
-            "status": job["status"],
-            "links": {"self": f"/api/v1/jobs/{job['id']}"},
-            "requestId": _request_id(handler),
-        }
-        store.complete_idempotent_request(
-            subject_id=principal["subjectId"],
-            method="POST",
-            path=canonical_path,
-            idempotency_key=idempotency_key,
-            body_hash=body_hash,
-            status_code=int(HTTPStatus.ACCEPTED),
-            response=response,
-            timestamp=timestamp,
-        )
-        handler.json(response, HTTPStatus.ACCEPTED)
-        return True
-    principal = _authenticate(
-        handler,
-        users,
-        required_scopes=("watches:read", "sync:write"),
-    )
-    if principal is None:
-        return True
-    if not isinstance(body, dict) or body:
-        _error(
-            handler,
-            HTTPStatus.BAD_REQUEST,
-            "INVALID_REQUEST",
-            "Manual sync requires an empty JSON object.",
-        )
-        return True
-    idempotency_key = _header(handler, "Idempotency-Key")
-    if not idempotency_key or len(idempotency_key) > 128:
-        _error(
-            handler,
-            HTTPStatus.BAD_REQUEST,
-            "INVALID_REQUEST",
-            "Idempotency-Key is required and must be at most 128 characters.",
-        )
-        return True
-    store = _store()
-    watch = store.get_watch(segments[1])
-    if watch is None or watch["billingOwnerId"] != principal["user"]["id"]:
-        _error(handler, HTTPStatus.NOT_FOUND, "NOT_FOUND", "Watch was not found.")
-        return True
-    restrictions = principal.get("restrictions") or {}
-    if restrictions and watch["id"] not in set(restrictions.get("watchIds") or ()):
-        _error(handler, HTTPStatus.NOT_FOUND, "NOT_FOUND", "Watch was not found.")
-        return True
-    canonical_path = f"/api/v1/watches/{watch['id']}/sync"
-    body_hash = hashlib.sha256(
-        json.dumps(body, separators=(",", ":"), sort_keys=True).encode("utf-8")
-    ).hexdigest()
-    timestamp = int(time.time())
-    try:
-        idempotency = store.begin_idempotent_request(
-            subject_id=principal["subjectId"],
-            method="POST",
-            path=canonical_path,
-            idempotency_key=idempotency_key,
-            body_hash=body_hash,
-            timestamp=timestamp,
-        )
-    except ValueError as error:
-        if str(error) == "IDEMPOTENCY_CONFLICT":
-            _error(handler, HTTPStatus.CONFLICT, "IDEMPOTENCY_CONFLICT", "Idempotency-Key was reused with another request.")
-        else:
-            _error(handler, HTTPStatus.BAD_REQUEST, "INVALID_REQUEST", str(error))
-        return True
-    if idempotency["state"] == "replay":
-        handler.json(idempotency["response"], idempotency["statusCode"])
-        return True
-    if idempotency["state"] == "pending":
-        _error(handler, HTTPStatus.CONFLICT, "IDEMPOTENCY_IN_PROGRESS", "The same request is still in progress.", retryable=True)
-        return True
-    try:
-        job = ProductJobScheduler(store).request_manual_sync(
-            resource_kind="watch",
-            resource_id=watch["id"],
-            requester_id=principal["user"]["id"],
-        )
-    except BaseException:
-        store.abandon_idempotent_request(
-            subject_id=principal["subjectId"],
-            method="POST",
-            path=canonical_path,
-            idempotency_key=idempotency_key,
-            body_hash=body_hash,
-        )
-        raise
-    response = {
-        "id": job["id"],
-        "operation": "sync_watch",
-        "status": job["status"],
-        "links": {"self": f"/api/v1/jobs/{job['id']}"},
-        "requestId": _request_id(handler),
-    }
-    store.complete_idempotent_request(
-        subject_id=principal["subjectId"],
-        method="POST",
-        path=canonical_path,
-        idempotency_key=idempotency_key,
-        body_hash=body_hash,
-        status_code=int(HTTPStatus.ACCEPTED),
-        response=response,
-        timestamp=timestamp,
-    )
-    handler.json(response, HTTPStatus.ACCEPTED)
-    return True
-
 
 def handle_patch(handler: object, segments: list[str], body: dict, users: Mapping[str, dict]) -> bool:
     if not (len(segments) == 2 and segments[0] in {"items", "watches"}):

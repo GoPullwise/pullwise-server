@@ -140,6 +140,91 @@ class ProductApiRoutesTest(unittest.TestCase):
         )
         return token
 
+    def test_retired_worker_token_does_not_raise_request_body_limits(self) -> None:
+        handler = RouteHarness(
+            "/v1/review-runs/old/artifacts",
+            headers={
+                "Authorization": "Bearer retired-worker-token",
+                "Content-Encoding": "gzip",
+                "Content-Length": "1025",
+            },
+        )
+        with (
+            patch.dict(os.environ, {
+                "PULLWISE_MAX_BODY_BYTES": "1024",
+                "PULLWISE_MAX_DECOMPRESSED_BODY_BYTES": "4096",
+                "PULLWISE_MAX_UNAUTHENTICATED_DECOMPRESSED_BODY_BYTES": "1024",
+            }),
+            patch.object(handler, "current_session", return_value=None),
+            patch.object(handler, "current_api_key_context", return_value=None),
+            patch.object(app, "worker_token_record", return_value={"id": "old-worker"}, create=True) as old_worker,
+        ):
+            self.assertEqual(handler.request_decompressed_body_limit(), 1024)
+            with self.assertRaises(app.RequestBodyTooLarge):
+                handler.enforce_body_size_limit("POST", handler.path)
+            old_worker.assert_not_called()
+
+    def test_repository_authorization_list_has_no_scan_entitlements(self) -> None:
+        handler = RouteHarness("/repositories", cookie=f"{app.SESSION_COOKIE}=ses_1")
+        app.PullwiseHandler.route(handler, "GET")
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertNotIn("userQuota", handler.payload)
+        self.assertNotIn("repositoryLimits", handler.payload)
+        for repository in handler.payload.get("items", []):
+            self.assertNotIn("quota", repository)
+
+    def test_retired_scan_issue_and_agent_first_routes_are_unavailable(self) -> None:
+        cookie = f"{app.SESSION_COOKIE}=ses_1"
+        for method, path in (
+            ("GET", "/scans"),
+            ("POST", "/scans"),
+            ("GET", "/scans/old-scan"),
+            ("POST", "/scans/old-scan/cancel"),
+            ("GET", "/issues"),
+            ("PATCH", "/issues/old-issue/status"),
+            ("POST", "/issues/old-issue/fixes/preview"),
+            ("GET", "/dashboard/overview"),
+            ("GET", "/status/system"),
+            ("GET", "/admin/status"),
+            ("POST", "/admin/workers"),
+            ("GET", "/docs/subscription-plans"),
+            ("POST", "/v1/agent-first/tasks"),
+            ("POST", "/v1/workers/register"),
+            ("GET", "/v1/review-runs/run-1/artifacts/log"),
+            ("POST", "/api/v1/repositories/123/scans"),
+            ("GET", "/api/v1/repositories/123/scans/current"),
+        ):
+            with self.subTest(method=method, path=path):
+                handler = RouteHarness(path, cookie=cookie)
+                app.PullwiseHandler.route(handler, method)
+                self.assertEqual(handler.status, HTTPStatus.NOT_FOUND)
+                self.assertEqual(handler.payload, {"message": "Route not found"})
+
+        current = RouteHarness("/api/v1/items", cookie=cookie)
+        app.PullwiseHandler.route(current, "GET")
+        self.assertEqual(current.status, HTTPStatus.OK)
+
+    def test_public_health_does_not_advertise_retired_runtime(self) -> None:
+        handler = RouteHarness("/health")
+        app.PullwiseHandler.route(handler, "GET")
+        self.assertEqual(handler.status, HTTPStatus.OK)
+        self.assertTrue(handler.payload["ok"])
+        self.assertIn("github", handler.payload)
+        self.assertIn("billing", handler.payload)
+        for field in ("scanSystem", "reviewProvider", "limits"):
+            self.assertNotIn(field, handler.payload)
+
+    def test_state_bootstrap_does_not_load_retired_scans_or_issues(self) -> None:
+        app.STATE_LOADED = False
+        with (
+            patch.object(db, "list_scan_snapshots", side_effect=AssertionError("retired scan load"), create=True),
+            patch.object(db, "list_issue_snapshots", side_effect=AssertionError("retired issue load"), create=True),
+        ):
+            app.ensure_state_loaded()
+        self.assertTrue(app.STATE_LOADED)
+        self.assertEqual(app.SCANS, [])
+        self.assertEqual(app.ISSUES, [])
+
     def test_session_and_api_key_read_the_same_watch_contract(self) -> None:
         session = RouteHarness("/api/v1/watches", cookie=f"{app.SESSION_COOKIE}=ses_1")
         app.PullwiseHandler.route(session, "GET")
@@ -230,28 +315,13 @@ class ProductApiRoutesTest(unittest.TestCase):
         self.assertEqual([row["id"] for row in request.payload["items"]], ["res-one"])
         self.assertFalse(request.payload["hasMore"])
 
-    def test_manual_sync_from_session_and_key_never_creates_analysis_job(self) -> None:
-        session = RouteHarness(
-            f"/api/v1/watches/{self.watch['id']}/sync",
-            {},
-            cookie=f"{app.SESSION_COOKIE}=ses_1",
-            headers={"Origin": "https://app.pullwise.dev", "Idempotency-Key": "sync-1"},
-        )
-        with patch.object(app, "cookie_same_site", return_value="None"):
-            app.PullwiseHandler.route(session, "POST")
-
-        token = self.api_key(["watches:read", "sync:write"])
-        api_key = RouteHarness(
-            f"/v1/watches/{self.watch['id']}/sync",
-            {},
-            headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "sync-2"},
-        )
-        app.PullwiseHandler.route(api_key, "POST")
-
-        self.assertEqual(session.status, HTTPStatus.ACCEPTED)
-        self.assertEqual(api_key.status, HTTPStatus.ACCEPTED)
-        self.assertEqual(api_key.payload["id"], session.payload["id"])
-        self.assertEqual(ProductStore(self.db_path).count_jobs(job_type="analyze_source"), 0)
+    def test_manual_sync_routes_are_retired(self) -> None:
+        for path in (f"/api/v1/watches/{self.watch['id']}/sync",
+                     f"/api/v1/repositories/{self.repository['id']}/sync"):
+            request = RouteHarness(path, {}, cookie=f"{app.SESSION_COOKIE}=ses_1")
+            app.PullwiseHandler.route(request, "POST")
+            self.assertEqual(request.status, HTTPStatus.NOT_FOUND)
+        self.assertEqual(ProductStore(self.db_path).count_jobs(job_type="sync_watch"), 0)
 
     def test_mixed_session_and_api_key_identity_is_rejected(self) -> None:
         token = self.api_key(["watches:read"])
@@ -284,6 +354,7 @@ class ProductApiRoutesTest(unittest.TestCase):
         module: str,
         attention_state: str = "needs_action",
         source_facts: dict | None = None,
+        evidence: list[dict] | None = None,
     ) -> dict:
         source = self.store.upsert_source_snapshot(
             source_id=source_id,
@@ -340,6 +411,7 @@ class ProductApiRoutesTest(unittest.TestCase):
                 "module": module,
                 "sourceFacts": {"fixture": source_id, **(source_facts or {})},
                 "repositoryId": "repo-1" if module != "updates" else None,
+                "sourceUrl": f"https://github.com/acme/repo/{source_id}",
                 "watchId": self.watch["id"] if module == "updates" else None,
                 "title": f"{module} item",
                 "actionTypes": [
@@ -347,11 +419,47 @@ class ProductApiRoutesTest(unittest.TestCase):
                 ],
                 "attentionState": attention_state,
                 "lifecycle": "active",
-                "evidence": [{"id": f"ev-{source_id}", "sourceId": source_id, "text": "fixture evidence"}],
+                "evidence": evidence if evidence is not None else [{"id": f"ev-{source_id}", "sourceId": source_id, "text": "fixture evidence"}],
                 "nextActors": [],
             },
             observed_at=1_800_000_000,
         )
+
+    def test_ci_detail_historical_handling_requires_current_authority(self):
+        def failure(identifier, completed, text="AssertionError: expected 2"):
+            return self.seed_source_item(source_id=identifier, source_type="ci_failure",
+                unit_type="ci_job", module="ci", source_facts={"runId": identifier,
+                    "jobId": identifier, "workflowId": "10", "jobName": "test (py3.12)",
+                    "completedAt": completed, "windows": [{"windowId": "w1"}]},
+                evidence=[{"id": f"ev-{identifier}", "sourceId": identifier,
+                    "segmentAnchor": "w1", "status": "available", "text": text}])
+        previous = failure("1", "2026-09-20T00:00:00Z")
+        current = failure("2", "2026-09-28T00:00:00Z")
+        self.store.patch_item_handling(item_id=previous["id"], item_version=previous["itemVersion"],
+            expected_revision=previous["revision"], actor_id="usr_1", disposition="done", note="Updated lockfile")
+        path = f"/api/v1/items/{current['id']}"
+        detail = RouteHarness(path, cookie=f"{app.SESSION_COOKIE}=ses_1")
+        app.PullwiseHandler.route(detail, "GET")
+        self.assertEqual([row["itemId"] for row in detail.payload["historyCandidates"]], [previous["id"]])
+        self.assertEqual(detail.payload["observedErrorSignature"], "AssertionError: expected 2")
+        self.assertEqual(detail.payload["historyCandidates"][0]["relation"], "same_observed_symptom")
+        self.store.patch_item_handling(item_id=previous["id"], item_version=previous["itemVersion"],
+            expected_revision=previous["revision"] + 1, actor_id="usr_1", disposition="done", note="Pinned dependency")
+        changed = RouteHarness(path, cookie=f"{app.SESSION_COOKIE}=ses_1")
+        app.PullwiseHandler.route(changed, "GET")
+        self.assertEqual(changed.payload["historyCandidates"][0]["note"], "Pinned dependency")
+        # Resource-restricted keys and revoked source authority must not reveal history.
+        token = self.api_key(["items:read"], restrictions={"repositoryIds": ["other"]})
+        restricted = RouteHarness(path, headers={"Authorization": f"Bearer {token}"})
+        app.PullwiseHandler.route(restricted, "GET")
+        self.assertEqual(restricted.status, HTTPStatus.NOT_FOUND)
+        self.store.set_source_context(source_id="1", context_id="repo:repo-1",
+            billing_owner_id="usr_1", context_version=1, configuration_revision=1,
+            authorization_revision=2, authorization_valid_until=1_900_000_000,
+            accessible=False)
+        revoked = RouteHarness(path, cookie=f"{app.SESSION_COOKIE}=ses_1")
+        app.PullwiseHandler.route(revoked, "GET")
+        self.assertEqual(revoked.payload["historyCandidates"], [])
 
     def test_item_detail_returns_ordered_versioned_handling_history_only_to_authorized_readers(self):
         item = self.seed_source_item(source_id="history", source_type="pr_comment", unit_type="pr_comment", module="pr")
@@ -799,32 +907,10 @@ class ProductApiRoutesTest(unittest.TestCase):
         self.assertEqual(api_key.payload["usage"], session.payload["usage"])
         self.assertEqual(self.store.count_jobs(job_type="analyze_source"), before_jobs)
 
-    def test_me_and_sync_job_status_use_same_identity_contract(self) -> None:
-        session_me = RouteHarness("/api/v1/me", cookie=f"{app.SESSION_COOKIE}=ses_1")
-        app.PullwiseHandler.route(session_me, "GET")
-        profile_key = self.api_key(["profile:read"])
-        key_me = RouteHarness("/v1/me", headers={"Authorization": f"Bearer {profile_key}"})
-        app.PullwiseHandler.route(key_me, "GET")
-
-        sync = RouteHarness(
-            f"/api/v1/watches/{self.watch['id']}/sync",
-            {},
-            cookie=f"{app.SESSION_COOKIE}=ses_1",
-            headers={"Origin": "https://app.pullwise.dev", "Idempotency-Key": "sync-status"},
-        )
-        app.PullwiseHandler.route(sync, "POST")
-        job = RouteHarness(
-            f"/api/v1/jobs/{sync.payload['id']}",
-            cookie=f"{app.SESSION_COOKIE}=ses_1",
-        )
-        app.PullwiseHandler.route(job, "GET")
-
-        self.assertEqual(session_me.status, HTTPStatus.OK)
-        self.assertEqual(key_me.payload, session_me.payload)
-        self.assertNotIn("billing", session_me.payload)
-        self.assertEqual(job.status, HTTPStatus.OK)
-        self.assertEqual(job.payload["operation"], "sync_watch")
-        self.assertNotIn("trustedTrigger", job.payload)
+    def test_retired_job_status_route_is_not_available(self) -> None:
+        request = RouteHarness("/api/v1/jobs/job-old", cookie=f"{app.SESSION_COOKIE}=ses_1")
+        app.PullwiseHandler.route(request, "GET")
+        self.assertEqual(request.status, HTTPStatus.NOT_FOUND)
 
     def test_watch_patch_and_delete_keep_context_version_semantics(self) -> None:
         patch_watch = RouteHarness(
@@ -890,6 +976,7 @@ class ProductApiRoutesTest(unittest.TestCase):
         self.assertEqual(replay.status, HTTPStatus.CREATED)
         self.assertEqual(replay.payload, session.payload)
         self.assertEqual(session.payload["upstreamRepositoryId"], "github:999")
+        self.assertEqual(self.store.get_watch(session.payload["id"])["upstream"], "acme/toolkit")
         self.assertTrue(session.payload["analysisEnabled"])
         self.assertEqual(self.store.count_jobs(job_type="analyze_source"), 0)
 
@@ -910,6 +997,16 @@ class ProductApiRoutesTest(unittest.TestCase):
         )
         self.assertNotIn("scans:write", create.payload["scopes"])
         self.assertNotIn("sync:write", create.payload["scopes"])
+
+    def test_retired_api_key_capabilities_cannot_be_created(self) -> None:
+        for body in ({"scopes": ["scans:read"]}, {"scopes": ["sync:write"]},
+                     {"restrictions": {"kind": "audit_bundle", "scanId": "old"}}):
+            with self.subTest(body=body):
+                request = RouteHarness("/api-keys", body,
+                    cookie=f"{app.SESSION_COOKIE}=ses_1",
+                    headers={"Origin": "https://app.pullwise.dev"})
+                app.PullwiseHandler.route(request, "POST")
+                self.assertEqual(request.status, HTTPStatus.BAD_REQUEST)
 
     def test_repository_service_put_and_get_share_contract_without_model_submission(self) -> None:
         body = {
@@ -948,69 +1045,6 @@ class ProductApiRoutesTest(unittest.TestCase):
         self.assertEqual(session_list.payload["items"][0]["service"]["revision"], 1)
         self.assertEqual(self.store.count_jobs(job_type="analyze_source"), 0)
 
-    def test_repository_manual_sync_is_fact_only_and_shared_by_session_and_key(self) -> None:
-        self.store.put_repository_service(
-            repository_id=self.repository["id"],
-            installation_id="111",
-            billing_owner_id="usr_1",
-            expected_revision=0,
-            enabled=True,
-            modules={"pr": True, "ci": True},
-            analysis_enabled={"pr": True, "ci": True},
-            allow_member_sync=True,
-            default_assignee_id=None,
-            priority_order=0,
-        )
-        session = RouteHarness(
-            f"/api/v1/repositories/{self.repository['id']}/sync",
-            {},
-            cookie=f"{app.SESSION_COOKIE}=ses_1",
-            headers={"Origin": "https://app.pullwise.dev", "Idempotency-Key": "repo-sync"},
-        )
-        app.PullwiseHandler.route(session, "POST")
-        token = self.api_key(["repositories:read", "sync:write"])
-        key = RouteHarness(
-            f"/v1/repositories/{self.repository['id']}/sync",
-            {},
-            headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "repo-sync-key"},
-        )
-        app.PullwiseHandler.route(key, "POST")
-
-        self.assertEqual(session.status, HTTPStatus.ACCEPTED)
-        self.assertEqual(key.status, HTTPStatus.ACCEPTED)
-        self.assertEqual(session.payload["id"], key.payload["id"])
-        self.assertEqual(session.payload["operation"], "sync_repository")
-        self.assertEqual(self.store.count_jobs(job_type="analyze_source"), 0)
-
-    def test_sync_job_read_respects_api_key_resource_scope(self) -> None:
-        from pullwise_server.product_jobs import ProductJobScheduler
-        job = ProductJobScheduler(self.store).request_manual_sync(
-            resource_kind="watch", resource_id=self.watch["id"], requester_id="usr_1")
-        token = self.api_key(["items:read"], restrictions={"watchIds": ["another-watch"]})
-        handler = RouteHarness(f"/api/v1/jobs/{job['id']}",
-            headers={"Authorization": f"Bearer {token}"})
-        app.PullwiseHandler.route(handler, "GET")
-        self.assertEqual(handler.status, HTTPStatus.NOT_FOUND)
-
-    def test_sync_job_read_hides_disabled_repository_service(self) -> None:
-        from pullwise_server.product_jobs import ProductJobScheduler
-        self.store.put_repository_service(repository_id=self.repository["id"],
-            installation_id="111", billing_owner_id="usr_1", expected_revision=0,
-            enabled=True, modules={"pr": True, "ci": False},
-            analysis_enabled={"pr": False, "ci": False}, allow_member_sync=False,
-            default_assignee_id=None, priority_order=0)
-        job = ProductJobScheduler(self.store).request_manual_sync(
-            resource_kind="repository", resource_id=self.repository["id"], requester_id="usr_1")
-        path = f"/api/v1/jobs/{job['id']}"
-        current = RouteHarness(path, cookie=f"{app.SESSION_COOKIE}=ses_1")
-        app.PullwiseHandler.route(current, "GET")
-        self.assertEqual(current.status, HTTPStatus.OK)
-        with self.store._immediate() as connection:
-            connection.execute("UPDATE repository_services SET enabled=0,status='paused' WHERE repository_id=?",
-                (self.repository["id"],))
-        stale = RouteHarness(path, cookie=f"{app.SESSION_COOKIE}=ses_1")
-        app.PullwiseHandler.route(stale, "GET")
-        self.assertEqual(stale.status, HTTPStatus.NOT_FOUND)
 
 
 if __name__ == "__main__":

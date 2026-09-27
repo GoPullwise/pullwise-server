@@ -13,6 +13,7 @@ def watch_dto(row: Mapping[str, object]) -> dict:
         "ownerId": row["owner_id"],
         "targetRepositoryId": row["target_repository_id"],
         "upstreamRepositoryId": row["upstream_repository_id"],
+        "upstream": row["upstream_full_name"],
         "billingOwnerId": row["billing_owner_id"],
         "contextVersion": int(row["context_version"]),
         "contextHash": row["context_hash"],

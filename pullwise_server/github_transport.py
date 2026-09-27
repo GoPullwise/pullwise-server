@@ -87,9 +87,12 @@ class GitHubRESTTransport:
         if token:
             headers["Authorization"] = f"Bearer {token}"
         request = self.request
+        session = None
         if request is None:
             import requests
-            request = requests.get
+            session = requests.Session()
+            session.trust_env = False
+            request = session.get
         response = None
         try:
             response = request("https://api.github.com" + path, headers=headers,
@@ -125,3 +128,77 @@ class GitHubRESTTransport:
                     response.close()
                 except Exception:
                     pass
+            if session is not None:
+                session.close()
+
+
+class GitHubGraphQLTransport:
+    """Bounded read-only GraphQL JSON boundary for local PR observations."""
+
+    def __init__(self, *, request: Callable | None = None, clock: Callable = time.time,
+                 max_body_bytes: int = 1024 * 1024):
+        if type(max_body_bytes) is not int or not 1 <= max_body_bytes <= 1024 * 1024:
+            raise ValueError("GITHUB_BODY_LIMIT_INVALID")
+        self.request = request
+        self.clock = clock
+        self.max_body_bytes = max_body_bytes
+
+    def __call__(self, query: str, *, variables: Mapping, token: str) -> GitHubResponse:
+        if (not isinstance(query, str) or not 0 < len(query) <= 65536
+                or not query.lstrip().startswith("query ")
+                or not isinstance(variables, Mapping)
+                or not isinstance(token, str) or not token or not _TOKEN.fullmatch(token)):
+            raise GitHubUnavailable("GITHUB_GRAPHQL_INPUT_INVALID")
+        try:
+            body = json.dumps({"query": query, "variables": variables},
+                              allow_nan=False, separators=(",", ":")).encode("utf-8")
+        except (TypeError, ValueError, RecursionError):
+            raise GitHubUnavailable("GITHUB_GRAPHQL_INPUT_INVALID") from None
+        if len(body) > 256 * 1024:
+            raise GitHubUnavailable("GITHUB_GRAPHQL_INPUT_INVALID")
+        headers = {"Accept": "application/vnd.github+json", "Content-Type": "application/json",
+                   "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "Pullwise/1.4",
+                   "Authorization": "Bearer " + token}
+        session = response = None
+        request = self.request
+        if request is None:
+            import requests
+            session = requests.Session()
+            session.trust_env = False
+            request = session.post
+        try:
+            response = request("https://api.github.com/graphql", headers=headers,
+                               data=body, timeout=(5, 10), stream=True, allow_redirects=False)
+            metadata = {key.lower(): value for key, value in response.headers.items()
+                        if isinstance(key, str) and key.lower() in _METADATA and isinstance(value, str)}
+            status = response.status_code
+            if status == 429 or (status in {403, 503} and
+                    ("retry-after" in metadata or metadata.get("x-ratelimit-remaining") == "0")):
+                raise GitHubUnavailable("GITHUB_RATE_LIMITED", retry_at=_retry_at(metadata, int(self.clock())))
+            if status != 200:
+                raise GitHubUnavailable("GITHUB_GRAPHQL_UNAVAILABLE")
+            length = response.headers.get("Content-Length")
+            if length is not None and (not str(length).isascii() or not str(length).isdigit()
+                                       or int(length) > self.max_body_bytes):
+                raise GitHubUnavailable("GITHUB_BODY_LIMIT")
+            received = bytearray()
+            for chunk in response.iter_content(chunk_size=16384):
+                if not isinstance(chunk, bytes) or len(received) + len(chunk) > self.max_body_bytes:
+                    raise GitHubUnavailable("GITHUB_BODY_LIMIT")
+                received.extend(chunk)
+            payload = json.loads(received.decode("utf-8"), parse_constant=_reject_constant)
+            if not isinstance(payload, dict):
+                raise GitHubUnavailable("GITHUB_GRAPHQL_UNAVAILABLE")
+            return GitHubResponse(status=200, payload=payload, headers=metadata)
+        except GitHubUnavailable:
+            raise
+        except Exception:
+            raise GitHubUnavailable("GITHUB_GRAPHQL_UNAVAILABLE") from None
+        finally:
+            if response is not None:
+                try:
+                    response.close()
+                except Exception:
+                    pass
+            if session is not None:
+                session.close()

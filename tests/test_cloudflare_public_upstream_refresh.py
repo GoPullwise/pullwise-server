@@ -195,6 +195,33 @@ def test_private_refresh_pauses_existing_watch_and_hides_its_sources(tmp_path):
     assert _get(binding, "/api/v1/sources/1", headers, fixture.now + 2)[0] == 404
 
 
+def test_public_identity_replacement_revokes_existing_watch_authority(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture, scopes=("watches:read", "items:read"))
+    binding = D1ShapedSQLite(fixture.store)
+    proofs = D1PublicUpstreamProofs(binding)
+    asyncio.run(proofs.stage(owner="acme", repository="toolkit",
+        github_repo_id="github:101", full_name="acme/toolkit",
+        public_visible=True, private=False, source_revision=1,
+        observed_at=fixture.now, valid_until=fixture.now + 300))
+    watch = fixture.store.create_watch(owner_id="owner", target_repository_id=None,
+        upstream_repository_id="github:101", billing_owner_id="owner",
+        interests=["OAuth"], enabled=True, analysis_enabled=True)
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE source_contexts SET watch_id=? WHERE source_id='1'",
+            (watch["id"],))
+    headers = {"Cookie": "pw_session=session-local"}
+    assert _get(binding, "/api/v1/sources/1", headers, fixture.now)[0] == 200
+    asyncio.run(proofs.stage(owner="acme", repository="toolkit",
+        github_repo_id="github:202", full_name="acme/toolkit",
+        public_visible=True, private=False, source_revision=2,
+        observed_at=fixture.now + 1, valid_until=fixture.now + 301))
+    assert _get(binding, "/api/v1/sources/1", headers, fixture.now + 1)[0] == 404
+    status, paused = _get(binding, f"/api/v1/watches/{watch['id']}",
+        headers, fixture.now + 1)
+    assert status == 200 and paused["enabled"] is False
+
+
 def test_trusted_stage_refuses_unrelated_name_or_unstable_id(tmp_path):
     fixture, _, _ = seed(tmp_path / "domain.db")
     proofs = D1PublicUpstreamProofs(D1ShapedSQLite(fixture.store))

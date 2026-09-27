@@ -48,11 +48,18 @@ def test_requested_scopes_match_existing_local_account_rules(value, provided):
 
 @pytest.mark.parametrize("value", [
     {"watchIds": ["watch-a", "watch-a", 42]},
-    {"kind": "audit_bundle", "scanId": "scan-1", "repoId": 123},
-    "invalid-json", {},
+    {},
 ])
 def test_restriction_normalization_matches_existing_local_account_rules(value):
     assert parse_api_key_restrictions(value) == app.parse_api_key_restrictions(value)
+
+
+@pytest.mark.parametrize("value", [
+    {"kind": "audit_bundle", "scanId": "scan-1"}, "invalid-json",
+])
+def test_retired_api_key_restrictions_are_rejected(value):
+    with pytest.raises(ValueError, match="INVALID_RESTRICTION"):
+        parse_api_key_restrictions(value)
 
 
 def get(binding, headers, now):

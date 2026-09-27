@@ -51,7 +51,7 @@ def main():
         key = app.API_KEY_PREFIX + "synthetic_http_contract"
         db.create_api_key(dict(id="key-http", user_id="owner", name="Synthetic contract",
             key_prefix=app.api_key_prefix(key), key_hash=app.api_key_hash(key),
-            scopes=["items:read", "items:write", "sync:write"], restrictions={}))
+            scopes=["items:read", "items:write"], restrictions={}))
         before = f.store.processing_usage(billing_owner_id="owner", period="period")
         server = app.PullwiseThreadingHTTPServer(("127.0.0.1", 0), app.PullwiseHandler)
         runner = threading.Thread(target=server.serve_forever, daemon=True)

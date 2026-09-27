@@ -9,7 +9,6 @@ info:
     - repositories:manage
     - items:read
     - items:write
-    - sync:write
     - watches:read
     - watches:write
     - usage:read
@@ -236,26 +235,6 @@ paths:
             schema: { $ref: '#/components/schemas/RepositoryServiceInput' }
       responses:
         '200': { description: Repository service updated. }
-  /api/v1/repositories/{repositoryId}/sync:
-    post:
-      operationId: syncRepository
-      description: >
-        Performs bounded GitHub fact synchronization only and never schedules model work.
-        The request body must be an empty object and active jobs are deduplicated.
-      parameters:
-        - $ref: '#/components/parameters/RepositoryIdPath'
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { type: object, additionalProperties: false }
-      responses:
-        '202':
-          description: Fact synchronization accepted or reused.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/SyncJob' }
   /api/v1/watches:
     get:
       operationId: listUpdateWatches
@@ -270,6 +249,8 @@ paths:
               schema: { $ref: '#/components/schemas/Page' }
     post:
       operationId: createUpdateWatch
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -292,26 +273,6 @@ paths:
         - $ref: '#/components/parameters/IfMatch'
       responses:
         '204': { description: Watch archived; stable control and usage identity retained. }
-  /api/v1/watches/{watchId}/sync:
-    post:
-      operationId: syncWatch
-      description: >
-        Performs bounded GitHub Release fact synchronization only and never schedules model work.
-        New material waits for normal scheduled eligibility review.
-      parameters:
-        - $ref: '#/components/parameters/WatchIdPath'
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { type: object, additionalProperties: false }
-      responses:
-        '202':
-          description: Fact synchronization accepted or reused.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/SyncJob' }
   /api/v1/usage:
     get:
       operationId: getProductUsage
@@ -334,21 +295,6 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/UsageEventPage' }
-  /api/v1/jobs/{jobId}:
-    get:
-      operationId: getRequestedSyncJob
-      parameters:
-        - name: jobId
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        '200':
-          description: The authenticated requester's fact-sync job only.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/SyncJob' }
-        '404': { $ref: '#/components/responses/NotFound' }
 components:
   securitySchemes:
     cookieSession:
@@ -850,6 +796,7 @@ components:
         title: { type: string }
         sourceUrl: { type: [string, 'null'], format: uri }
         sourceFacts: { type: object, description: Saved GitHub facts for the handling unit. }
+        observedErrorSignature: { type: [string, 'null'], description: CI detail only; one normalized visible error line, not a cause. }
         nextActors:
           type: array
           items:
@@ -879,8 +826,20 @@ components:
         recoveryStatus: { type: string, enum: [unknown, not_observed, verified] }
         closureReason: { type: [string, 'null'] }
         handlingHistory: { type: array, description: Append-only records in insertion order; detail only., items: { $ref: '#/components/schemas/HandlingEvent' } }
+        historyCandidates: { type: array, description: Authorized CI detail only; same observed symptom, never a cause claim., items: { $ref: '#/components/schemas/CIHistoryCandidate' } }
         handling: { $ref: '#/components/schemas/Handling' }
         revision: { type: integer, minimum: 1 }
+    CIHistoryCandidate:
+      type: object
+      additionalProperties: false
+      required: [itemId, sourceUrl, relation, disposition, note, handledAt]
+      properties:
+        itemId: { type: string }
+        sourceUrl: { type: string, format: uri, description: GitHub URL of the prior failure. }
+        relation: { type: string, enum: [same_observed_symptom] }
+        disposition: { type: string, enum: [open, done, dismissed] }
+        note: { type: [string, 'null'] }
+        handledAt: { type: integer, description: Unix timestamp in seconds. }
     HandlingEvent:
       type: object
       additionalProperties: false
@@ -970,15 +929,6 @@ components:
         analysisEnabled: { type: boolean, default: false }
         enabled: { type: boolean, default: true }
         priorityOrder: { type: integer, minimum: 0, default: 0 }
-    SyncJob:
-      type: object
-      additionalProperties: false
-      required: [id, operation, status, links]
-      properties:
-        id: { type: string }
-        operation: { type: string, enum: [sync_repository, sync_watch] }
-        status: { type: string, enum: [queued, running, retry_wait, succeeded, failed, cancelled] }
-        links: { type: object }
     Usage:
       type: object
       additionalProperties: false

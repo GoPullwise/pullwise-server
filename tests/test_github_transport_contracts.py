@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from pullwise_server.github_transport import GitHubRESTTransport, GitHubUnavailable
 
@@ -24,6 +24,16 @@ class GitHubTransportContractsTest(unittest.TestCase):
         self.assertTrue(kwargs["stream"])
         self.assertFalse(kwargs["allow_redirects"])
         self.response.close.assert_called_once()
+
+    def test_default_request_ignores_environment_proxies_and_closes_session(self):
+        session = Mock()
+        session.get.return_value = self.response
+        with patch("requests.Session", return_value=session):
+            result = GitHubRESTTransport()("/repositories/123", token="fixture-token")
+        self.assertEqual(result.payload, {"id": 123})
+        self.assertFalse(session.trust_env)
+        self.assertFalse(session.get.call_args.kwargs["allow_redirects"])
+        session.close.assert_called_once()
 
     def test_path_rejects_external_origins_traversal_and_credentials(self):
         for path in ("https://evil.test/", "//evil.test/", "/../user", "/repos/%2e%2e/user",

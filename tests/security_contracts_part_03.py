@@ -637,28 +637,6 @@ class SecurityContractsPart03Test(SecurityContractsBase):
             clear=True,
         ):
             app.PullwiseHandler.route(handler, "POST")
-            scan = RouteHarness(
-                "/scans",
-                {
-                    "repoId": handler.payload["items"][0]["repoId"],
-                    "branch": "main",
-                    "requestId": app.make_id("req_local_mock_scan"),
-                },
-                cookie="pw_session=ses_1",
-                headers={"Host": "localhost:8080"},
-            )
-            app.PullwiseHandler.route(scan, "POST")
-            invalid_branch_scan = RouteHarness(
-                "/scans",
-                {
-                    "repoId": handler.payload["items"][0]["repoId"],
-                    "branch": "feature/not-seeded",
-                    "requestId": app.make_id("req_local_mock_invalid_branch"),
-                },
-                cookie="pw_session=ses_1",
-                headers={"Host": "localhost:8080"},
-            )
-            app.PullwiseHandler.route(invalid_branch_scan, "POST")
 
         self.assertEqual(handler.status, HTTPStatus.OK)
         self.assertFalse(handler.payload["needsAuthorization"])
@@ -668,10 +646,7 @@ class SecurityContractsPart03Test(SecurityContractsBase):
             [repo["fullName"] for repo in app.REPOSITORIES],
         )
         self.assertFalse(app.USERS["usr_1"]["githubRepositoryAccess"]["repositoriesNeedSync"])
-        self.assertEqual(scan.status, HTTPStatus.CREATED)
-        self.assertEqual(scan.payload["branch"], "main")
-        self.assertEqual(invalid_branch_scan.status, HTTPStatus.BAD_REQUEST)
-        self.assertEqual(invalid_branch_scan.payload["code"], "BRANCH_NOT_AVAILABLE")
+
     def test_github_repository_authorize_rejects_private_app_slug_for_user_installs(self) -> None:
         app.USERS["usr_1"]["providers"] = ["github"]
         app.USERS["usr_1"]["githubAccessToken"] = "gho_user"

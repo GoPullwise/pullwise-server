@@ -50,7 +50,6 @@ def main() -> None:
     sys.path.insert(0, str(server_root))
     sys.path.insert(0, str(server_root / "tests"))
     from test_cloudflare_server_mapping import seed
-    from pullwise_server.product_jobs import ProductJobScheduler
     from pullwise_server.product_entitlement_rules import PLAN_ENTITLEMENTS
 
     output = Path(__file__).resolve().parent / ".wrangler" / (
@@ -111,12 +110,6 @@ def main() -> None:
             expected_item_revision=item["revision"], sources=sources,
             context_fences=fences, snapshot={"module": "pr", "title": "Synthetic follow-up"},
             observed_at=fixture.now)
-        sync_job = ProductJobScheduler(fixture.store).request_manual_sync(
-            resource_kind="watch", resource_id=first_watch["id"],
-            requester_id="owner")
-        with fixture.store._immediate() as db:
-            db.execute("UPDATE background_jobs SET id='sync-local' WHERE id=?",
-                (sync_job["id"],))
         if options.repository_read or options.repository_list:
             fixture.store.put_repository_service(repository_id="repo",
                 installation_id="inst-1", billing_owner_id="owner", expected_revision=0,

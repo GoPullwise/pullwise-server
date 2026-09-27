@@ -570,173 +570,10 @@ class BillingRoutesTest(unittest.TestCase):
                 self.assertEqual(handler.status, HTTPStatus.BAD_GATEWAY)
                 self.assertNotIn("url", handler.payload)
 
-    def test_free_plan_blocks_scans_after_monthly_review_limit(self) -> None:
-        cookie = seed_session()
-        authorize_repo_for_seed_user()
-        first = HandlerHarness({"repo": "owner/repo", "requestId": "scan_req_1"}, cookie=cookie)
-        app.USERS["usr_1"]["githubRepositoryAccess"]["repositories"].append("owner/other")
-        app.USERS["usr_1"]["githubRepositoryAccess"]["repositoryItems"].append(
-            {
-                "id": "owner/other",
-                "githubRepoId": "456",
-                "name": "other",
-                "fullName": "owner/other",
-                "defaultBranch": "main",
-                "installationId": "123",
-                "installationAccount": "dev",
-                "repositorySelection": "selected",
-                "cloneUrl": "https://github.com/owner/other.git",
-                "private": True,
-            }
-        )
-        second = HandlerHarness({"repo": "owner/other", "requestId": "scan_req_2"}, cookie=cookie)
-
-        with (
-            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path}, clear=True),
-            patch("pullwise_server.system_config.config", return_value=creem_database_config(free_review_limit=1)),
-        ):
-            app.PullwiseHandler.handle_post(first, "/scans", {}, ["scans"])
-            app.PullwiseHandler.handle_post(second, "/scans", {}, ["scans"])
-            billing_payload = app.billing_account_payload(app.USERS["usr_1"])
-
-        self.assertEqual(first.status, HTTPStatus.CREATED)
-        self.assertEqual(second.status, HTTPStatus.PAYMENT_REQUIRED)
-        self.assertEqual(second.payload["code"], "QUOTA_EXCEEDED_USER")
-        self.assertEqual(first.payload["billingUsage"]["used"], 0)
-        self.assertEqual(first.payload["billingUsage"]["reserved"], 1)
-        self.assertEqual(billing_payload["usage"]["used"], 0)
-        self.assertEqual(billing_payload["usage"]["reserved"], 0)
-        self.assertEqual(billing_payload["usage"]["limit"], 200)
-        self.assertEqual(billing_payload["usage"]["remaining"], 200)
-        self.assertEqual(billing_payload["usage"]["metric"], "intelligent_processing")
-
-    def test_billing_plan_excludes_legacy_scan_quota_activity(self) -> None:
-        cookie = seed_session()
-        authorize_repo_for_seed_user()
-        consumed = HandlerHarness({"repo": "owner/repo", "requestId": "scan_req_used"}, cookie=cookie)
-        refunded = HandlerHarness({"repo": "owner/repo", "requestId": "scan_req_refund"}, cookie=cookie)
-
-        with (
-            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path}, clear=True),
-            patch("pullwise_server.system_config.config", return_value=creem_database_config(free_review_limit=5)),
-        ):
-            app.PullwiseHandler.handle_post(consumed, "/scans", {}, ["scans"])
-            consumed_job = app.db.get_scan_job_for_scan(consumed.payload["id"])
-            app.finalize_scan_quota_for_job(consumed_job, trigger="test")
-            app.SCANS[0]["status"] = "done"
-            app.SCANS[0]["completedAt"] = app.now() + 60
-
-            app.PullwiseHandler.handle_post(refunded, "/scans", {}, ["scans"])
-            refunded_scan = app.SCANS[0]
-            refunded_job = app.db.get_scan_job_for_scan(refunded.payload["id"])
-            app.finalize_scan_quota_for_job(refunded_job, trigger="test")
-            refunded_scan["status"] = "failed"
-            refunded_scan["completedAt"] = app.now() + 120
-            rollback = app.quota.rollback_scan_quota(
-                scan_id=refunded_scan["id"],
-                requested_by_user_id="usr_1",
-                request_id="scan_req_refund",
-            )
-            refunded_scan["billingUsage"] = app.quota.quota_payload_for_user(app.USERS["usr_1"])
-            refunded_scan["quotaRefunded"] = {
-                "reason": "REPOSITORY_TOO_LARGE",
-                "ledgerRows": rollback["ledgerRows"],
-                "bucketRows": rollback["bucketRows"],
-            }
-
-            handler = HandlerHarness(cookie=cookie)
-            app.PullwiseHandler.handle_get(handler, "/billing/plan", {}, ["billing", "plan"])
-
-        self.assertEqual(consumed.status, HTTPStatus.CREATED)
-        self.assertEqual(refunded.status, HTTPStatus.CREATED)
-        self.assertEqual(handler.status, HTTPStatus.OK)
-        self.assertEqual(handler.payload["account"]["processingActivity"], [])
-        self.assertNotIn("quotaActivity", handler.payload["account"])
-        self.assertEqual(handler.payload["account"]["usage"]["metric"], "intelligent_processing")
-
-    def test_quota_finalization_uses_durable_scan_when_memory_mirror_is_cold(self) -> None:
-        cookie = seed_session()
-        authorize_repo_for_seed_user()
-        created = HandlerHarness({"repo": "owner/repo", "requestId": "scan_req_cold"}, cookie=cookie)
-
-        with (
-            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path}, clear=True),
-            patch("pullwise_server.system_config.config", return_value=creem_database_config(free_review_limit=1)),
-        ):
-            app.PullwiseHandler.handle_post(created, "/scans", {}, ["scans"])
-            scan_id = created.payload["id"]
-            job = app.db.get_scan_job_for_scan(scan_id)
-            app.SCANS.clear()
-
-            result = app.finalize_scan_quota_for_job(job, trigger="test-cold-mirror")
-            durable_scan = app.db.get_user_scan_snapshot("usr_1", scan_id)
-            usage = app.quota.quota_payload_for_user(app.USERS["usr_1"])
-
-        self.assertTrue(result["consumed"])
-        self.assertEqual(durable_scan["requestId"], "scan_req_cold")
-        self.assertEqual(durable_scan["quotaState"], "consumed")
-        self.assertEqual(durable_scan["quotaConsumeTrigger"], "test-cold-mirror")
-        self.assertEqual(usage["used"], 1)
-        self.assertEqual(usage["reserved"], 0)
-
-    def test_refundable_worker_failure_uses_durable_quota_state_when_memory_is_cold(self) -> None:
-        cookie = seed_session()
-        authorize_repo_for_seed_user()
-        created = HandlerHarness(
-            {"repo": "owner/repo", "requestId": "scan_req_refundable_cold"},
-            cookie=cookie,
-        )
-
-        with (
-            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path}, clear=True),
-            patch(
-                "pullwise_server.system_config.config",
-                return_value=creem_database_config(free_review_limit=1),
-            ),
-        ):
-            app.PullwiseHandler.handle_post(created, "/scans", {}, ["scans"])
-            scan_id = created.payload["id"]
-            job = app.db.get_scan_job_for_scan(scan_id)
-            app.SCANS.clear()
-
-            result = app.rollback_scan_quota_for_refundable_worker_failure(
-                job,
-                {"error_code": "CODEX_QUOTA_EXHAUSTED"},
-                status="failed",
-            )
-            durable_scan = app.db.get_user_scan_snapshot("usr_1", scan_id)
-            usage = app.quota.quota_payload_for_user(app.USERS["usr_1"])
-
-        self.assertTrue(result["reservationReleased"])
-        self.assertEqual(durable_scan["requestId"], "scan_req_refundable_cold")
-        self.assertEqual(durable_scan["quotaState"], "released")
-        self.assertEqual(durable_scan["quotaReleaseReason"], "CODEX_QUOTA_EXHAUSTED")
-        self.assertEqual(usage["used"], 0)
-        self.assertEqual(usage["reserved"], 0)
-
-    def test_consume_review_quota_uses_db_backed_user_quota(self) -> None:
-        seed_session()
-
-        with (
-            patch.dict(os.environ, {"PULLWISE_DB_PATH": self.db_path}, clear=True),
-            patch("pullwise_server.system_config.config", return_value=creem_database_config(free_review_limit=1)),
-        ):
-            first_ok, first_payload = app.consume_review_quota(app.USERS["usr_1"])
-            second_ok, second_payload = app.consume_review_quota(app.USERS["usr_1"])
-            account_payload = app.billing_account_payload(app.USERS["usr_1"])
-
-        self.assertTrue(first_ok)
-        self.assertFalse(second_ok)
-        self.assertEqual(first_payload["used"], 1)
-        self.assertEqual(second_payload["used"], 1)
-        self.assertEqual(second_payload["remaining"], 0)
-        self.assertEqual(account_payload["usage"]["used"], 0)
-        self.assertNotIn("billingUsage", app.USERS["usr_1"])
-
     def test_billing_account_payload_ignores_non_finite_usage(self) -> None:
         seed_session()
         app.USERS["usr_1"]["billingUsage"] = {
-            "period": app.current_review_usage_period(),
+            "period": "retired-review-period",
             "plan": "free",
             "used": float("inf"),
         }
@@ -1514,7 +1351,7 @@ class BillingWebhookPersistenceTest(unittest.TestCase):
         self.config_patcher.start()
         self.addCleanup(self.config_patcher.stop)
 
-    def test_creem_webhook_persists_billing_and_refreshes_quota_bucket(self) -> None:
+    def test_creem_webhook_persists_billing_without_legacy_scan_quota(self) -> None:
         seed_session()
         app.USERS["usr_1"]["billingCheckout"] = {
             "provider": "creem",
@@ -1633,13 +1470,13 @@ class BillingWebhookPersistenceTest(unittest.TestCase):
         connection = app.db.connect()
         try:
             rows = connection.execute(
-                "SELECT scope_type, scope_id, plan, quota_limit, used FROM quota_buckets WHERE scope_type = 'user'"
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'quota_buckets'"
             ).fetchall()
         finally:
             connection.close()
-        self.assertEqual(rows, [("user", "usr_1", "pro", 60, 0)])
+        self.assertEqual(rows, [])
 
-    def test_creem_subscription_paid_webhook_refreshes_paid_quota_bucket(self) -> None:
+    def test_creem_subscription_paid_webhook_keeps_product_usage_without_scan_quota(self) -> None:
         seed_session()
         raw = json.dumps(
             {
@@ -1665,7 +1502,7 @@ class BillingWebhookPersistenceTest(unittest.TestCase):
             headers={"Content-Length": str(len(raw)), "creem-signature": signature},
         )
 
-        with patch("pullwise_server.quota.time.time", return_value=1781913600):
+        with patch("time.time", return_value=1781913600):
             app.PullwiseHandler.route(handler, "POST")
             billing_payload = app.billing_account_payload(app.USERS["usr_1"])
 
@@ -1678,11 +1515,11 @@ class BillingWebhookPersistenceTest(unittest.TestCase):
         connection = app.db.connect()
         try:
             rows = connection.execute(
-                "SELECT scope_type, scope_id, period, plan, quota_limit, used FROM quota_buckets WHERE scope_type = 'user'"
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'quota_buckets'"
             ).fetchall()
         finally:
             connection.close()
-        self.assertEqual(rows, [("user", "usr_1", "cycle:1780963200", "pro", 60, 0)])
+        self.assertEqual(rows, [])
 
     def test_creem_terminal_webhook_without_product_preserves_existing_plan(self) -> None:
         seed_session()

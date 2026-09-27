@@ -299,10 +299,9 @@ def main():
     status, restricted_items = call("/api/v1/items", extra_headers={
         "Authorization": "Bearer pwk_local_http_test"})
     assert status == 200 and restricted_items["items"] == []
-    status, sync_job = call("/api/v1/jobs/sync-local", extra_headers={
+    status, retired_job = call("/api/v1/jobs/sync-local", extra_headers={
         "Cookie": "pw_session=session-local"})
-    assert status == 200 and sync_job["operation"] == "sync_watch"
-    assert sync_job["status"] == "queued"
+    assert status == 404 and retired_job["error"]["code"] == "NOT_FOUND"
     assert call("/api/v1/me", extra_headers={
         "Cookie": "pw_session=session-local",
         "Authorization": "Bearer pwk_local_http_test"})[0] == 400

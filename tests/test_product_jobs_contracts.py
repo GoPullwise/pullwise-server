@@ -157,31 +157,13 @@ class ProductJobsContractsTest(unittest.TestCase):
             observed_at=observed_at,
         )
 
-    def test_manual_sync_can_only_enqueue_fact_sync(self) -> None:
-        job = self.scheduler.request_manual_sync(
-            resource_kind="repository",
-            resource_id="repo_1",
-            requester_id="usr_1",
-        )
-
-        self.assertEqual(job["jobType"], "sync_repository")
-        self.assertEqual(job["trustedTrigger"], "manual_sync")
-        self.assertEqual(self.store.count_jobs(job_type="analyze_source"), 0)
-
-    def test_manual_sync_reuses_active_resource_job_even_with_new_request(self) -> None:
-        first = self.scheduler.request_manual_sync(
-            resource_kind="watch",
-            resource_id="watch_1",
-            requester_id="usr_1",
-        )
-        second = self.scheduler.request_manual_sync(
-            resource_kind="watch",
-            resource_id="watch_1",
-            requester_id="usr_1",
-        )
-
-        self.assertEqual(second["id"], first["id"])
-        self.assertTrue(second["reused"])
+    def test_retired_manual_jobs_cannot_be_enqueued(self) -> None:
+        for kind in ("sync_repository", "sync_watch", "reconcile_sources", "retention_cleanup"):
+            with self.assertRaisesRegex(ValueError, "invalid job_type"):
+                self.store.enqueue_background_job(
+                    job_type=kind, logical_key=f"{kind}:resource",
+                    trusted_trigger="manual_sync", requester_id="usr_1")
+        self.assertEqual(self.store.count_jobs(), 0)
 
     def test_analysis_requires_non_forgeable_internal_trigger_enum(self) -> None:
         with self.assertRaisesRegex(ValueError, "trusted internal trigger"):
@@ -254,6 +236,38 @@ class ProductJobsContractsTest(unittest.TestCase):
         self.assertEqual(fresh_claim["id"], job["id"])
         self.assertEqual(fresh_claim["attempt"], 2)
         self.assertNotEqual(fresh_claim["claimToken"], stale_claim["claimToken"])
+
+    def test_context_marked_stale_after_claim_cannot_publish_or_consume(self) -> None:
+        source, item, _reservation, job = self.create_analysis_job()
+        executor = ProductJobExecutor(self.store)
+        claim = executor.claim_next_analysis(now=1_800_000_001)
+        self.store.set_source_context(
+            source_id=source["id"], context_id="watch:job", context_version=1,
+            configuration_revision=1, authorization_revision=1,
+            authorization_valid_until=1_900_000_000, accessible=True,
+            billing_owner_id="usr_1", item_id=item["id"], analysis_enabled=True,
+            context_stale=True)
+        with self.assertRaisesRegex(ValueError, "STALE_CONTEXT"):
+            self.publish_claimed_job(executor, claim=claim, source=source, item=item,
+                observed_at=1_800_000_002)
+        usage = self.store.processing_usage(billing_owner_id="usr_1",
+            period="cycle:1800000000")
+        self.assertEqual(usage["used"], 0)
+        self.assertEqual(usage["reserved"], 1)
+
+    def test_context_marked_stale_before_claim_releases_reservation(self) -> None:
+        source, item, _reservation, job = self.create_analysis_job()
+        self.store.set_source_context(
+            source_id=source["id"], context_id="watch:job", context_version=1,
+            configuration_revision=1, authorization_revision=1,
+            authorization_valid_until=1_900_000_000, accessible=True,
+            billing_owner_id="usr_1", item_id=item["id"], analysis_enabled=True,
+            context_stale=True)
+        self.assertIsNone(ProductJobExecutor(self.store).claim_next_analysis(now=1_800_000_001))
+        self.assertEqual(self.store.get_background_job(job["id"])["status"], "superseded")
+        usage = self.store.processing_usage(billing_owner_id="usr_1",
+            period="cycle:1800000000")
+        self.assertEqual(usage["reserved"], 0)
 
     def test_claim_recheck_cancels_disabled_analysis_and_releases_reservation(self) -> None:
         source, item, _reservation, job = self.create_analysis_job()
@@ -624,6 +638,82 @@ class ProductJobsContractsTest(unittest.TestCase):
         after = self.store.count_jobs(job_type="analyze_source")
 
         self.assertEqual(before, after)
+
+    def test_provider_attempt_requires_current_claim_and_rechecks_authority(self) -> None:
+        source, _item, _reservation, job = self.create_analysis_job("provider")
+        executor = ProductJobExecutor(self.store)
+        claim = executor.claim_next_analysis(now=1_800_000_001)
+        limits = dict(owner_monthly_limit=10, global_monthly_limit=20,
+                      owner_rolling_limit=5, global_rolling_limit=10)
+        with self.assertRaisesRegex(ValueError, "JOB_CLAIM_LOST"):
+            executor.admit_claimed_provider_attempt(job_id=job["id"], claim_token="wrong",
+                input_key="input-provider", now=1_800_000_002, **limits)
+        self.assertEqual(self.store.count_provider_attempts(billing_owner_id="usr_1",
+            started_at=1_800_000_000, ended_at=1_800_000_010), 0)
+        admitted = executor.admit_claimed_provider_attempt(job_id=job["id"],
+            claim_token=claim["claimToken"], input_key="input-provider",
+            now=1_800_000_002, **limits)
+        self.assertFalse(admitted["reused"])
+        self.assertTrue(executor.admit_claimed_provider_attempt(job_id=job["id"],
+            claim_token=claim["claimToken"], input_key="input-provider",
+            now=1_800_000_003, **limits)["reused"])
+        self.assertEqual(self.store.count_provider_attempts(billing_owner_id="usr_1",
+            started_at=1_800_000_000, ended_at=1_800_000_010), 1)
+        self.store.set_source_context(source_id=source["id"], context_id="watch:provider",
+            context_version=1, configuration_revision=1, authorization_revision=2,
+            authorization_valid_until=1_900_000_000, accessible=False,
+            billing_owner_id="usr_1", item_id=None, processing_status="pending",
+            analysis_enabled=True, coverage={})
+        with self.assertRaisesRegex(ValueError, "JOB_CLAIM_LOST"):
+            executor.admit_claimed_provider_attempt(job_id=job["id"],
+                claim_token=claim["claimToken"], input_key="input-provider",
+                now=1_800_000_004, **limits)
+
+    def test_expired_claim_cannot_admit_provider_attempt(self) -> None:
+        _source, _item, _reservation, job = self.create_analysis_job("expired-provider")
+        executor = ProductJobExecutor(self.store)
+        claim = executor.claim_next_analysis(now=1_800_000_001, lease_seconds=1)
+        with self.assertRaisesRegex(ValueError, "JOB_CLAIM_LOST"):
+            executor.admit_claimed_provider_attempt(job_id=job["id"],
+                claim_token=claim["claimToken"], input_key="input-expired",
+                now=1_800_000_002, owner_monthly_limit=10, global_monthly_limit=20,
+                owner_rolling_limit=5, global_rolling_limit=10)
+        self.assertEqual(self.store.count_provider_attempts(billing_owner_id="usr_1",
+            started_at=1_800_000_000, ended_at=1_800_000_010), 0)
+
+    def test_changed_source_cannot_admit_provider_attempt(self) -> None:
+        source, _item, _reservation, job = self.create_analysis_job("changed-provider")
+        executor = ProductJobExecutor(self.store)
+        claim = executor.claim_next_analysis(now=1_800_000_001)
+        self.store.upsert_source_snapshot(source_id=source["id"], source_type="release",
+            external_key="github:release:changed-provider", repository_id="upstream-1",
+            content={"body": "Different release content."},
+            source_facts={"releaseId": "changed-provider"},
+            source_url="https://github.com/acme/upstream/releases/tag/changed-provider",
+            processing_mode="model", completeness="complete", lifecycle="active",
+            observed_at=1_800_000_002)
+        with self.assertRaisesRegex(ValueError, "JOB_CLAIM_LOST"):
+            executor.admit_claimed_provider_attempt(job_id=job["id"],
+                claim_token=claim["claimToken"], input_key="input-changed",
+                now=1_800_000_003, owner_monthly_limit=10, global_monthly_limit=20,
+                owner_rolling_limit=5, global_rolling_limit=10)
+        self.assertEqual(self.store.count_provider_attempts(billing_owner_id="usr_1",
+            started_at=1_800_000_000, ended_at=1_800_000_010), 0)
+
+    def test_stale_context_cannot_admit_provider_attempt(self) -> None:
+        source, item, _reservation, job = self.create_analysis_job("stale-provider")
+        executor = ProductJobExecutor(self.store)
+        claim = executor.claim_next_analysis(now=1_800_000_001)
+        self.store.set_source_context(source_id=source["id"], context_id="watch:stale-provider",
+            context_version=1, configuration_revision=1, authorization_revision=1,
+            authorization_valid_until=1_900_000_000, accessible=True,
+            billing_owner_id="usr_1", item_id=item["id"], processing_status="pending",
+            analysis_enabled=True, context_stale=True, coverage={})
+        with self.assertRaisesRegex(ValueError, "JOB_CLAIM_LOST"):
+            executor.admit_claimed_provider_attempt(job_id=job["id"],
+                claim_token=claim["claimToken"], input_key="input-stale",
+                now=1_800_000_002, owner_monthly_limit=10, global_monthly_limit=20,
+                owner_rolling_limit=5, global_rolling_limit=10)
 
     def test_initialize_upgrades_pre_claim_background_job_table(self) -> None:
         legacy_path = os.path.join(self.temp_dir.name, "pre-claim.sqlite3")

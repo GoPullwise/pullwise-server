@@ -2,12 +2,55 @@ from __future__ import annotations
 
 import json
 import math
+import sys
+import types
 import unittest
+from unittest.mock import patch
 
-from pullwise_server.typesafe_client import DEFAULT_JEV_MODEL, build_request, validate_response
+from pullwise_server.typesafe_client import DEFAULT_JEV_MODEL, build_request, run_jev_sdk, validate_response
 
 
 class TypeSafeClientContractsTest(unittest.TestCase):
+    def test_sdk_boundary_pins_model_disables_retries_and_validates_raw_response(self) -> None:
+        calls = []
+
+        class RetryPolicy:
+            def __init__(self, *, max_retries: int) -> None:
+                self.max_retries = max_retries
+
+        class Client:
+            def system_one(self, **kwargs):
+                calls.append(kwargs)
+                raw = types.SimpleNamespace(content=json.dumps(self_response).encode())
+                return types.SimpleNamespace(raw_http_response=raw, request_id="jev-request-1")
+
+        self_response = self.valid_response()
+        question = {"s0_question": {"type": "choice", "instructions": "Evaluate text.",
+                                    "criteria": {"present": "yes", "absent": "no", "unclear": "unknown"}}}
+        with patch.dict(sys.modules, {"typesafe_sdk": types.SimpleNamespace(RetryPolicy=RetryPolicy)}):
+            result = run_jev_sdk(Client(), state={"segments": [{"text": "Please fix this."}]},
+                                 questions=question)
+        self.assertEqual(result["requestId"], "jev-request-1")
+        self.assertEqual(result["answers"]["s0_question"]["choice"], "present")
+        self.assertEqual(calls[0]["model"], DEFAULT_JEV_MODEL)
+        self.assertEqual(calls[0]["retry"].max_retries, 0)
+        self.assertEqual(calls[0]["questions"], question)
+
+        self_response["model"] = "jev-latest"
+        with patch.dict(sys.modules, {"typesafe_sdk": types.SimpleNamespace(RetryPolicy=RetryPolicy)}):
+            with self.assertRaisesRegex(ValueError, "returned model"):
+                run_jev_sdk(Client(), state="text", questions=question)
+
+    def test_sdk_boundary_rejects_invalid_input_before_provider_call(self) -> None:
+        class Client:
+            def system_one(self, **kwargs):
+                self.fail("provider must not be called")
+
+        with self.assertRaisesRegex(ValueError, "text-only"):
+            run_jev_sdk(Client(), state={"image": "https://example.com/x.png"},
+                        questions={"q": {"type": "choice", "instructions": "Classify.",
+                                         "criteria": {"yes": "yes", "no": "no"}}})
+
     def test_current_model_is_exactly_jev_1_13(self) -> None:
         self.assertEqual(DEFAULT_JEV_MODEL, "jev-1.13.0")
         with self.assertRaisesRegex(ValueError, "fixed model"):

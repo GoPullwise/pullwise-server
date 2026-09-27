@@ -124,6 +124,8 @@ class GitHubCILogReader:
                     response.close()
         except GitHubUnavailable as error:
             raise GitHubUnavailable("GITHUB_CI_LOG_UNAVAILABLE", retry_at=error.retry_at) from None
+        except TimeoutError:
+            reason = "deadline"
         except Exception:
             reason = "unavailable"
         if reason:

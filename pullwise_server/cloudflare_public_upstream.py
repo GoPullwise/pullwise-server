@@ -15,6 +15,32 @@ def lookup_key(owner: str, repository: str) -> str:
     return f"{owner.casefold()}/{repository.casefold()}"
 
 
+def _pause_previous_watches(binding: Any, key: str, observed_at: int,
+                            replacing_id: str | None = None) -> list:
+    previous_id = "SELECT github_repo_id FROM public_upstream_proofs WHERE lookup_key=?"
+    values: tuple = (key,)
+    if replacing_id is not None:
+        previous_id += " AND github_repo_id<>?"
+        values += (replacing_id,)
+    return [
+        binding.prepare("""UPDATE update_watches SET enabled=0,
+            analysis_enabled=0,revision=revision+1,updated_at=?
+            WHERE target_repository_id IS NULL AND archived_at IS NULL
+              AND (enabled=1 OR analysis_enabled=1)
+              AND upstream_repository_id=(""" + previous_id + ")").bind(
+                observed_at, *values),
+        binding.prepare("""UPDATE source_contexts SET accessible=0,
+            analysis_enabled=0,context_stale=1,
+            authorization_revision=authorization_revision+1,
+            authorization_valid_until=?,updated_at=?
+            WHERE (accessible=1 OR analysis_enabled=1)
+              AND watch_id IN (SELECT id FROM update_watches
+                WHERE target_repository_id IS NULL AND archived_at IS NULL
+                  AND upstream_repository_id=(""" + previous_id + "))").bind(
+                    observed_at, observed_at, *values),
+    ]
+
+
 class D1PublicUpstreamProofs:
     def __init__(self, binding: Any) -> None:
         self.binding = binding
@@ -72,23 +98,7 @@ class D1PublicUpstreamProofs:
                 observed_at=excluded.observed_at,valid_until=excluded.valid_until""").bind(
                     key, "unverified", f"{owner}/{repository}",
                     source_revision, observed_at, observed_at),
-            self.binding.prepare("""UPDATE update_watches SET enabled=0,
-                analysis_enabled=0,revision=revision+1,updated_at=?
-                WHERE target_repository_id IS NULL AND archived_at IS NULL
-                  AND (enabled=1 OR analysis_enabled=1)
-                  AND upstream_repository_id=(SELECT github_repo_id
-                    FROM public_upstream_proofs WHERE lookup_key=?)""").bind(
-                    observed_at, key),
-            self.binding.prepare("""UPDATE source_contexts SET accessible=0,
-                analysis_enabled=0,context_stale=1,
-                authorization_revision=authorization_revision+1,
-                authorization_valid_until=?,updated_at=?
-                WHERE (accessible=1 OR analysis_enabled=1)
-                  AND watch_id IN (SELECT id FROM update_watches
-                    WHERE target_repository_id IS NULL AND archived_at IS NULL
-                      AND upstream_repository_id=(SELECT github_repo_id
-                        FROM public_upstream_proofs WHERE lookup_key=?))""").bind(
-                    observed_at, observed_at, key),
+            *_pause_previous_watches(self.binding, key, observed_at),
             self.binding.prepare("DELETE FROM d1_command_guard"),
         ])
 
@@ -110,6 +120,8 @@ class D1PublicUpstreamProofs:
                 NOT EXISTS(SELECT 1 FROM public_upstream_proofs
                   WHERE lookup_key=? AND source_revision>=?) THEN 1 ELSE 0 END)""").bind(
                     key, source_revision),
+            *_pause_previous_watches(self.binding, key, observed_at,
+                                     replacing_id=github_repo_id),
             self.binding.prepare("""INSERT INTO public_upstream_proofs
                 (lookup_key,github_repo_id,full_name,public_visible,private,
                  source_revision,observed_at,valid_until) VALUES(?,?,?,?,?,?,?,?)

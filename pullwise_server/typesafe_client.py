@@ -197,3 +197,36 @@ def validate_response(
             "outputTokens": _token_count(usage.get("output_tokens"), "usage.output_tokens"),
         },
     }
+
+
+def run_jev_sdk(client: object, *, state: object,
+                questions: Mapping[str, Mapping[str, object]]) -> dict:
+    """Evaluate a bounded request through an injected SDK client; no client is created here.
+
+    The caller owns credential, transport lifetime and the overall execution
+    deadline. Production use remains gated until that deadline is proven in the
+    target runtime. SDK retry is disabled so every call maps to one budgeted
+    provider attempt.
+    """
+    request = build_request(state=state, questions=questions, model=DEFAULT_JEV_MODEL)
+    from typesafe_sdk import RetryPolicy
+
+    result = client.system_one(
+        state=request["state"],
+        questions=request["questions"],
+        model=DEFAULT_JEV_MODEL,
+        retry=RetryPolicy(max_retries=0),
+    )
+    raw_response = getattr(result, "raw_http_response", None)
+    raw_body = getattr(raw_response, "content", None)
+    if not isinstance(raw_body, bytes):
+        raise ValueError("SDK response missing raw HTTP bytes")
+    request_id = getattr(result, "request_id", None)
+    if request_id is not None and not isinstance(request_id, str):
+        raise ValueError("SDK response request ID is invalid")
+    return validate_response(
+        raw_body,
+        expected_questions={key: tuple(question["criteria"]) for key, question in request["questions"].items()},
+        requested_model=DEFAULT_JEV_MODEL,
+        request_id=request_id,
+    )

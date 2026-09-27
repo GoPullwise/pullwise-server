@@ -42,20 +42,6 @@ real GitHub installation or repository write HTTP endpoint is enabled.
 a repository, confirms the Source is readable, pauses the parent without
 revoking the old watch proof/Source lease, then confirms the Source is hidden
 before and after a real workerd restart. No model or provider request occurs.
-`verify_manual_sync_mapping.py` uses fresh
-`.wrangler/server-map-manual-sync-state`, creates a synthetic public watch,
-enqueues one trusted `sync_watch`, replays it before and after workerd restart,
-and checks that provider attempts and processing reservations did not grow.
-The route is probe-only and does not invoke GitHub or Jev.
-`verify_repository_sync_mapping.py` uses fresh
-`.wrangler/server-map-repository-sync-state`: it rejects enqueue without a
-synthetic account/proof, then creates one owner repository fact-sync Job and
-checks replay and restart with zero provider attempts and no added processing
-reservation. These finite routes are not product HTTP sync endpoints.
-`verify_manual_sync_idempotency.py` uses fresh
-`.wrangler/server-map-manual-idempotency-state` and checks atomic Job plus
-completed response publication: one Job, two keys, saved same-key response,
-and identical rows after a real workerd restart. No model/provider work ran.
 Run `verify_repository_mapping.py` with the fresh
 `.wrangler/server-map-repository-parent-state` and again with
 `--after-restart` after restarting workerd. It creates a synthetic linked
@@ -250,9 +236,8 @@ snapshot contains encrypted synthetic GitHub tokens produced by Server
 and restart checks are still isolated validation, not a real Creem/Server
 runtime or CF2 completion.
 
-See [the transaction map](../../docs/cloudflare-domain-transaction-map.md) for
-the precise account/Creem boundary and remaining CF2 work. From Server, generate
-the ignored synthetic `src/server_fixture.py` using
+The old transaction map was removed with the retired product design. From Server,
+generate the ignored synthetic `src/server_fixture.py` using
 `tests/export_d1_server_fixture.py`; the generator never opens a user database.
 Start the same pinned local Wrangler on port 8796 with
 `--persist-to .wrangler/server-map-state`. Run `verify_server_mapping.py`, stop

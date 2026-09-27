@@ -2,452 +2,11 @@ from __future__ import annotations
 
 # Loaded by app.py; keep definitions in that module's globals for compatibility.
 
-from . import _app_part_07_issue_payloads as _previous_app_part
+from . import _app_part_03_billing_pages as _previous_app_part
 from ._app_imports import import_compat_globals as _import_compat_globals
 
 _import_compat_globals(vars(_previous_app_part), globals())
 del _import_compat_globals, _previous_app_part
-
-@contextmanager
-def preview_scan_lock(scan_id: str) -> Iterator[None]:
-    with PREVIEW_SCAN_LOCKS_GUARD:
-        entry = PREVIEW_SCAN_LOCKS.get(scan_id)
-        if entry is None:
-            entry = PreviewScanLockEntry()
-            PREVIEW_SCAN_LOCKS[scan_id] = entry
-        entry.refs += 1
-
-    entry.lock.acquire()
-    try:
-        yield
-    finally:
-        entry.lock.release()
-        with PREVIEW_SCAN_LOCKS_GUARD:
-            entry.refs -= 1
-            if entry.refs == 0 and PREVIEW_SCAN_LOCKS.get(scan_id) is entry:
-                PREVIEW_SCAN_LOCKS.pop(scan_id, None)
-
-
-def issue_scan_for_user(user_id: str, scan_id: str) -> dict:
-    job = db.get_scan_job_for_scan(scan_id)
-    if job and str(job.get("user_id") or "") != user_id:
-        raise ValueError("Scan does not belong to the signed-in user.")
-    memory_scan = memory_scan_by_id(scan_id)
-    if memory_scan and str(memory_scan.get("userId") or "") != user_id:
-        raise ValueError("Scan does not belong to the signed-in user.")
-    scan = user_scan_for_read({"userId": user_id}, scan_id)
-    if not scan:
-        raise ValueError("Scan not found for issue.")
-    if str(scan.get("userId") or "") != user_id:
-        raise ValueError("Scan does not belong to the signed-in user.")
-    return scan
-
-
-def preview_issue_fix_for_user(user: dict, issue: dict) -> dict:
-    scan_id = issue.get("scanId")
-    user_id = str(user.get("id") or "")
-    scan = issue_scan_for_user(user_id, str(scan_id or ""))
-    scan_id = str(scan.get("id") or scan_id or "")
-    if scan.get("status") != "done":
-        raise ValueError("Scan must be completed before previewing fixes.")
-
-    with preview_scan_lock(scan_id):
-        repo_path = scan.get("repoPath")
-        if repo_path:
-            repo_path = str(repo_path)
-            if not checkout.path_in_scan_workspace(repo_path, user_id, scan_id):
-                raise ValueError("Scan checkout path is outside the scan workspace.")
-            if os.path.exists(repo_path):
-                return fix_workflow.preview_issue_fix(repo_path, issue)
-
-        try:
-            repo_path = checkout.prepare_checkout(scan_id, scan, lambda: False)
-        except (RuntimeError, OSError, checkout.CheckoutCancelled, checkout.CheckoutTimedOut) as exc:
-            try:
-                checkout.cleanup_scan_workspace(user_id, scan_id)
-            except (RuntimeError, OSError) as cleanup_exc:
-                raise ValueError(f"Unable to clean up failed preview checkout: {cleanup_exc}") from cleanup_exc
-            raise ValueError(str(exc)) from exc
-
-        try:
-            repo_path = str(repo_path)
-            if not checkout.path_in_scan_workspace(repo_path, user_id, scan_id):
-                raise ValueError("Prepared checkout path is outside the scan workspace.")
-            return fix_workflow.preview_issue_fix(repo_path, issue)
-        finally:
-            try:
-                checkout.cleanup_scan_workspace(user_id, scan_id)
-            except (RuntimeError, OSError) as exc:
-                raise ValueError(f"Unable to clean up preview checkout: {exc}") from exc
-
-
-def create_issue_pull_request(user: dict, issue: dict) -> dict:
-    user_id = str(user.get("id") or "")
-    if not user_id or str(issue.get("userId") or "") != user_id:
-        raise ValueError("Issue does not belong to the signed-in user.")
-
-    scan_id = str(issue.get("scanId") or "")
-    scan = issue_scan_for_user(user_id, scan_id)
-
-    issue_id = clean_pull_request_issue_id(issue.get("id"))
-    issue_slug = issue_id
-    pr_scan_id = f"pr_{issue_slug}"
-
-    with preview_scan_lock(f"pull-request:{issue_slug}"):
-        if github_repository_authorization_pending(user):
-            raise ValueError("Complete GitHub repository authorization before creating a pull request.")
-        if scan.get("status") != "done":
-            raise ValueError("Scan must be completed before creating a pull request.")
-
-        github_access = user.get("githubRepositoryAccess")
-        if not github_repository_access_authorized_for_user(user, github_access):
-            raise ValueError("Authorize GitHub repositories before creating a pull request.")
-        if github_repositories_need_sync(github_access):
-            raise ValueError("Sync GitHub repositories before creating a pull request.")
-        existing = issue.get("pullRequest")
-        pending = issue.get("pullRequestPending") if not isinstance(existing, dict) else None
-        recovering_pending = isinstance(pending, dict) and pull_request_pending_is_stale(pending)
-        if isinstance(pending, dict) and not recovering_pending:
-            raise ValueError("Pull request creation is already in progress for this issue.")
-        if not github_auth.app_api_configured():
-            raise ValueError("GitHub App API is not configured for pull request creation.")
-        repo = clean_repository_full_name(issue.get("repo"), scan.get("repo"))
-        if not repo:
-            raise ValueError("Repository must be a GitHub full name like owner/repo.")
-        if not repository_is_authorized(github_access, repo):
-            raise ValueError("Repository is not authorized for this GitHub App installation.")
-
-        repo_meta = repository_item(github_access, repo) or {}
-        installation_permissions = repo_meta.get("installationPermissions") or github_access.get("installationPermissions")
-        if not isinstance(installation_permissions, dict) or not installation_supports_pull_request_creation({"permissions": installation_permissions}):
-            raise ValueError(github_app_write_permissions_message())
-        title = pull_request_title(issue, issue_id)
-
-        if isinstance(existing, dict):
-            safe_existing = safe_existing_pull_request(existing, issue_id=issue_id, fallback_title=title)
-            if safe_existing != existing:
-                store_issue_pull_request(issue, safe_existing)
-                return safe_existing
-            return existing
-
-        base_branch = (
-            clean_github_access_text(issue.get("branch"))
-            or clean_github_access_text(scan.get("branch"))
-            or clean_github_access_text(repo_meta.get("defaultBranch"))
-            or clean_github_access_text(github_access.get("defaultBranch"))
-            or "main"
-        )
-        installation_id = (
-            clean_github_access_text(repo_meta.get("installationId"), allow_int=True)
-            or clean_github_access_text(scan.get("installationId"), allow_int=True)
-            or clean_github_access_text(github_access.get("installationId"), allow_int=True)
-            or ""
-        )
-        if not installation_id:
-            raise ValueError("Repository is missing a GitHub App installation id.")
-        clone_url = trusted_github_web_url(repo_meta.get("cloneUrl"))
-        if not clone_url:
-            clone_url = trusted_github_web_url(scan.get("cloneUrl"))
-
-        recovery_token = ""
-        if recovering_pending:
-            branch = valid_stored_pull_request_branch(pending.get("branch"))
-            if not branch:
-                clear_pull_request_pending(issue)
-                raise ValueError("Stored pull request branch is invalid.")
-            recovery_token = installation_token(installation_id)
-            recovered = github_auth.find_pull_request_by_head(recovery_token, repo, head=branch)
-            if recovered:
-                pull_request = {
-                    "issueId": issue_id,
-                    "branch": branch,
-                    "url": recovered.get("url"),
-                    "number": recovered.get("number"),
-                    "title": recovered.get("title") or title,
-                }
-                store_issue_pull_request(issue, pull_request)
-                return pull_request
-
-            if github_auth.branch_exists(recovery_token, repo, branch):
-                body = (
-                    f"Automated deterministic fix for Pullwise issue {issue_id}.\n\n"
-                    f"Repository: {repo}\n"
-                    "Recovered from an existing Pullwise fix branch."
-                )
-                try:
-                    created = github_auth.create_pull_request(
-                        recovery_token,
-                        repo,
-                        title=title,
-                        head=branch,
-                        base=base_branch,
-                        body=body,
-                    )
-                except github_auth.GitHubError as exc:
-                    record_pull_request_pending_failure(issue, str(exc))
-                    raise
-                pull_request = {
-                    "issueId": issue_id,
-                    "branch": branch,
-                    "url": created.get("url"),
-                    "number": created.get("number"),
-                    "title": created.get("title") or title,
-                }
-                store_issue_pull_request(issue, pull_request)
-                return pull_request
-
-        if not recovering_pending:
-            random_token = safe_git_ref_component(make_id("fix").split("_", 1)[-1], "branch")[:16]
-            branch = f"pullwise/fix-{issue_slug}-{random_token}"
-        store_pull_request_pending(issue, issue_id, branch)
-
-        scan_payload = dict(scan)
-        scan_payload.update({
-            "id": pr_scan_id,
-            "userId": user_id,
-            "repo": repo,
-            "branch": base_branch,
-            "installationId": installation_id,
-            "cloneUrl": clone_url,
-        })
-
-        checkout_started = False
-        irreversible_started = False
-        try:
-            checkout_started = True
-            repo_path = checkout.prepare_checkout(pr_scan_id, scan_payload, lambda: False)
-            repo_path = str(repo_path)
-            if not checkout.path_in_scan_workspace(repo_path, user_id, pr_scan_id):
-                raise ValueError("Prepared checkout path is outside the pull request workspace.")
-
-            preview = fix_workflow.apply_issue_fix(repo_path, issue)
-            if not preview.get("valid"):
-                raise ValueError(str(preview.get("message") or "Issue fix could not be applied."))
-            fix_file = str(preview.get("file") or "")
-            if not fix_file:
-                raise ValueError("Issue fix did not report a file to commit.")
-
-            token = recovery_token or installation_token(installation_id)
-
-            body = (
-                f"Automated deterministic fix for Pullwise issue {issue_id}.\n\n"
-                f"Repository: {repo}\n"
-                f"File: {fix_file}"
-            )
-            git_env = checkout.git_auth_env(token)
-            git_env.update({
-                "GIT_AUTHOR_NAME": "Pullwise",
-                "GIT_AUTHOR_EMAIL": "pullwise@example.invalid",
-                "GIT_COMMITTER_NAME": "Pullwise",
-                "GIT_COMMITTER_EMAIL": "pullwise@example.invalid",
-            })
-            checkout.run_git(
-                ["git", "checkout", "-B", branch],
-                cwd=repo_path,
-                extra_env=git_env,
-                is_cancelled=lambda: False,
-                action="create fix branch",
-            )
-            checkout.run_git(
-                ["git", "add", "--", fix_file],
-                cwd=repo_path,
-                extra_env=git_env,
-                is_cancelled=lambda: False,
-                action="stage issue fix",
-            )
-            checkout.run_git(
-                ["git", "commit", "-m", title],
-                cwd=repo_path,
-                extra_env=git_env,
-                is_cancelled=lambda: False,
-                action="commit issue fix",
-            )
-            irreversible_started = True
-            checkout.run_git(
-                ["git", "push", "origin", f"HEAD:{branch}"],
-                cwd=repo_path,
-                extra_env=git_env,
-                is_cancelled=lambda: False,
-                action="push issue fix",
-            )
-            irreversible_started = True
-            created = github_auth.create_pull_request(
-                token,
-                repo,
-                title=title,
-                head=branch,
-                base=base_branch,
-                body=body,
-            )
-            pull_request = {
-                "issueId": issue_id,
-                "branch": branch,
-                "url": created.get("url"),
-                "number": created.get("number"),
-                "title": created.get("title") or title,
-            }
-            store_issue_pull_request(issue, pull_request)
-            return pull_request
-        except (RuntimeError, OSError, checkout.CheckoutCancelled, checkout.CheckoutTimedOut) as exc:
-            if irreversible_started:
-                record_pull_request_pending_failure(issue, str(exc))
-                raise github_auth.GitHubError(str(exc)) from exc
-            clear_pull_request_pending(issue)
-            if github_service_error(exc):
-                raise github_auth.GitHubError(str(exc)) from exc
-            raise ValueError(str(exc)) from exc
-        except github_auth.GitHubError as exc:
-            if irreversible_started:
-                record_pull_request_pending_failure(issue, str(exc))
-            else:
-                clear_pull_request_pending(issue)
-            raise
-        except Exception:
-            clear_pull_request_pending(issue)
-            raise
-        finally:
-            if checkout_started:
-                try:
-                    checkout.cleanup_scan_workspace(user_id, pr_scan_id)
-                except (RuntimeError, OSError) as exc:
-                    logger.warning("Unable to clean up pull request checkout workspace %s: %s", pr_scan_id, exc)
-
-
-def installation_token(installation_id: str) -> str:
-    token_payload = github_auth.create_installation_access_token(installation_id)
-    token = str(token_payload.get("token") or "")
-    if not token:
-        raise github_auth.GitHubError("GitHub did not return an installation access token.")
-    return token
-
-
-def repository_installation_id(github_access: dict | None, repo_meta: dict | None) -> str:
-    if not repo_meta:
-        return ""
-    return (
-        clean_github_access_text(repo_meta.get("installationId"), allow_int=True)
-        or clean_github_access_text((github_access or {}).get("installationId"), allow_int=True)
-        or ""
-    )
-
-
-def repository_branch_payload(github_access: dict | None, repo_meta: dict) -> dict:
-    repository = clean_repository_full_name(repo_meta.get("fullName"))
-    if not repository:
-        raise ValueError("Repository is not authorized for this GitHub App installation.")
-    installation_id = repository_installation_id(github_access, repo_meta)
-    if not installation_id:
-        raise ValueError("Repository is missing a GitHub App installation id.")
-
-    token = installation_token(installation_id)
-    branches = github_auth.list_repository_branches(token, repository)
-    default_branch = github_auth.clean_branch_name(repo_meta.get("defaultBranch")) or "main"
-    if default_branch and default_branch not in branches:
-        branches = [default_branch, *branches]
-    return {
-        "repoId": (
-            clean_github_access_text(repo_meta.get("repoId"), allow_int=True)
-            or clean_github_access_text(repo_meta.get("githubRepoId"), allow_int=True)
-            or clean_github_access_text(repo_meta.get("id"), allow_int=True)
-            or ""
-        ),
-        "githubRepoId": clean_github_access_text(repo_meta.get("githubRepoId"), allow_int=True) or "",
-        "repo": repository,
-        "defaultBranch": default_branch,
-        "branches": branches,
-    }
-
-
-def scan_branch_is_available(github_access: dict | None, repo_meta: dict, branch: str) -> bool:
-    if (
-        isinstance(github_access, dict)
-        and github_access.get("mode") == "local"
-        and local_github_mocks_enabled()
-    ):
-        available = {github_auth.clean_branch_name(repo_meta.get("defaultBranch")) or "main"}
-        raw_branches = repo_meta.get("branches")
-        if isinstance(raw_branches, list):
-            available.update(
-                clean_branch
-                for item in raw_branches
-                if (clean_branch := github_auth.clean_branch_name(item))
-            )
-        return branch in available
-    payload = repository_branch_payload(github_access, repo_meta)
-    return branch in set(payload["branches"])
-
-
-def pull_request_pending_is_stale(pending: dict) -> bool:
-    try:
-        started_at = int(pending.get("startedAt") or 0)
-    except (TypeError, ValueError):
-        started_at = 0
-    return started_at <= now() - pull_request_pending_stale_seconds()
-
-
-def pull_request_pending_stale_seconds() -> int:
-    return max(60, env_int("PULLWISE_PR_PENDING_STALE_SECONDS", 15 * 60))
-
-
-def valid_stored_pull_request_branch(branch: object) -> str | None:
-    value = str(branch or "")
-    if not value.startswith("pullwise/fix-"):
-        return None
-    if value.endswith("/") or value.endswith(".") or ".." in value or "//" in value or " " in value:
-        return None
-    if not re.match(r"^[A-Za-z0-9._/-]+$", value):
-        return None
-    parts = value.split("/")
-    if any(not part or part.startswith(".") or part.casefold().endswith(".lock") for part in parts):
-        return None
-    return value
-
-
-def store_pull_request_pending(issue: dict, issue_id: str, branch: str) -> None:
-    with STATE_LOCK:
-        issue["pullRequestPending"] = {
-            "issueId": issue_id,
-            "branch": branch,
-            "startedAt": now(),
-        }
-        db.upsert_issue(issue)
-        mark_state_dirty()
-        persist_state()
-
-
-def store_issue_pull_request(issue: dict, pull_request: dict) -> None:
-    with STATE_LOCK:
-        issue.pop("pullRequestPending", None)
-        issue["pullRequest"] = pull_request
-        db.upsert_issue(issue)
-        mark_state_dirty()
-        persist_state()
-
-
-def safe_existing_pull_request(value: dict, *, issue_id: str, fallback_title: str) -> dict:
-    number = value.get("number")
-    return {
-        "issueId": issue_id,
-        "branch": valid_stored_pull_request_branch(value.get("branch")) or "",
-        "url": trusted_github_web_url(value.get("url")),
-        "number": number if isinstance(number, int) and not isinstance(number, bool) else None,
-        "title": clean_pull_request_text(value.get("title")) or fallback_title,
-    }
-
-
-def safe_pending_pull_request(value: dict, *, issue_id: str) -> dict:
-    payload = {
-        "issueId": issue_id,
-        "branch": valid_stored_pull_request_branch(value.get("branch")) or "",
-        "startedAt": pull_request_timestamp(value.get("startedAt")) or 0,
-    }
-    if "lastError" in value:
-        payload["lastError"] = clean_pull_request_error(value.get("lastError"))
-    failed_at = pull_request_timestamp(value.get("failedAt"))
-    if failed_at is not None:
-        payload["failedAt"] = failed_at
-    return payload
-
 
 def pull_request_timestamp(value: object) -> int | None:
     if isinstance(value, bool):
@@ -461,88 +20,37 @@ def pull_request_timestamp(value: object) -> int | None:
     return None
 
 
-def record_pull_request_pending_failure(issue: dict, message: str) -> None:
-    with STATE_LOCK:
-        pending = issue.get("pullRequestPending")
-        if isinstance(pending, dict):
-            pending["lastError"] = clean_pull_request_error(message)
-            pending["failedAt"] = now()
-            db.upsert_issue(issue)
-        mark_state_dirty()
-        persist_state()
-
-
-def clear_pull_request_pending(issue: dict) -> None:
-    with STATE_LOCK:
-        issue.pop("pullRequestPending", None)
-        db.upsert_issue(issue)
-        mark_state_dirty()
-        persist_state()
-
-
-def remote_git_error(exc: BaseException) -> bool:
-    message = str(exc).lower()
-    return message.startswith("git clone") or message.startswith("git fetch") or message.startswith("git push")
-
-
-def github_service_error(exc: BaseException) -> bool:
-    message = str(exc).lower()
-    return remote_git_error(exc) or "installation access token" in message
-
-
-def github_app_write_permissions_message() -> str:
-    return "GitHub App installation must grant Contents: write and Pull requests: write for Pullwise to push fix branches and open pull requests."
-
-
-def clean_pull_request_error(value: object) -> str:
-    if not isinstance(value, str):
-        return "Pull request creation failed."
-    text = value.replace("\x00", "").splitlines()[0].strip()
-    return (text or "Pull request creation failed.")[:500]
-
-
-def installation_supports_pull_request_creation(installation: dict) -> bool:
-    permissions = installation.get("permissions") or {}
-    return permissions.get("contents") == "write" and permissions.get("pull_requests") == "write"
-
-
 def clean_repository_full_name(*values: object) -> str:
     for value in values:
         candidate = clean_github_access_text(value)
         if not candidate:
             continue
-        try:
-            return checkout.validate_repo_full_name(candidate)
-        except RuntimeError:
-            continue
+        if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", candidate):
+            return candidate
     return ""
 
 
-def pull_request_title(issue: dict, issue_id: str) -> str:
-    title = clean_pull_request_text(issue.get("title"))
-    fallback = clean_pull_request_text(issue_id) or safe_git_ref_component(issue_id, "issue")
-    return f"Fix {title or fallback}"
+def pagination_params(params: dict, *, default_limit: int = 50, max_limit: int = 200) -> tuple[int, int]:
+    try:
+        limit = int(params.get("limit") or default_limit)
+    except (TypeError, ValueError):
+        limit = default_limit
+    try:
+        offset = int(params.get("offset") or 0)
+    except (TypeError, ValueError):
+        offset = 0
+    return max(1, min(max_limit, limit)), max(0, offset)
 
 
-def clean_pull_request_issue_id(value: object) -> str:
-    if not isinstance(value, str):
-        return "issue"
-    text = value.replace("\x00", "").splitlines()[0].strip()
-    return safe_git_ref_component(text, "issue")
-
-
-def clean_pull_request_text(value: object) -> str:
-    if not isinstance(value, str):
-        return ""
-    if any(char in value for char in "\r\n\x00"):
-        return ""
-    return value.strip()
-
-
-def safe_git_ref_component(value: object, fallback: str) -> str:
-    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", str(value or "")).strip("-_")
-    slug = re.sub(r"-+", "-", slug).strip("-_")
-    return slug or fallback
+def paginated_page_response(page: list[dict], *, total: int, limit: int,
+                            offset: int, keys: tuple[str, ...]) -> dict:
+    next_offset = offset + len(page)
+    payload = {"items": page, "total": total, "limit": limit, "offset": offset,
+               "hasMore": next_offset < total,
+               "nextOffset": next_offset if next_offset < total else None}
+    for key in keys:
+        payload[key] = page
+    return payload
 
 
 def repository_item(github_access: dict | None, full_name: str) -> dict | None:
@@ -624,31 +132,17 @@ def sync_repository_access_for_user(user: dict | None, github_access: dict | Non
         logger.exception("Unable to sync repository access for user %s", user.get("id"))
 
 
-def repository_item_with_quota(item: dict, user: dict | None = None) -> dict:
+def repository_item_for_access(item: dict) -> dict:
     payload = dict(item)
-    repo_id = clean_github_access_text(payload.get("repoId"), allow_int=True)
-    if not repo_id:
-        github_repo_id = clean_github_access_text(payload.get("githubRepoId"), allow_int=True)
-        if github_repo_id:
-            repository = db.get_repository_by_github_repo_id(github_repo_id)
-            if repository:
-                repo_id = repository.get("id")
-                payload["repoId"] = repo_id
-    if repo_id and user:
-        repository = db.get_repository(repo_id)
-        if repository:
-            payload["quota"] = quota.quota_payload_for_repository(repository, user)
-    link_repo_id = clean_github_access_text(payload.get("repoId"), allow_int=True)
-    if link_repo_id:
-        payload["href"] = f"/repositories/{link_repo_id}"
-        payload["scanAction"] = {"method": "POST", "href": f"/api/v1/repositories/{link_repo_id}/scans"}
+    for retired in ("repoId", "quota", "scanAction", "href"):
+        payload.pop(retired, None)
     return payload
 
 
 def repository_items_for_response(user: dict | None, github_access: dict | None) -> list[dict]:
     if user and isinstance(github_access, dict):
         sync_repository_access_for_user(user, github_access)
-    return [repository_item_with_quota(item, user) for item in repository_items_for_payload(github_access)]
+    return [repository_item_for_access(item) for item in repository_items_for_payload(github_access)]
 
 
 def sync_repository_response_items_for_user(user: dict | None, items: list[dict]) -> None:
@@ -710,7 +204,7 @@ def paginated_repository_items_for_response(user: dict | None, github_access: di
     limit, offset = pagination_params(params, default_limit=100, max_limit=200)
     page_records = repository_items[offset : offset + limit]
     sync_repository_response_items_for_user(user, page_records)
-    page = [repository_item_with_quota(item, user) for item in page_records]
+    page = [repository_item_for_access(item) for item in page_records]
     return paginated_page_response(page, total=len(repository_items), limit=limit, offset=offset, keys=("repositories",))
 
 
@@ -1132,12 +626,8 @@ def github_repository_access_for_installation(
     app_api_configured = github_auth.app_api_configured()
     if app_api_configured:
         installation = github_auth.fetch_installation(installation_id)
-        if not installation_supports_pull_request_creation(installation):
-            raise ValueError(github_app_write_permissions_message())
         repository_items = github_auth.list_installation_repositories(installation_id)
     elif user_access_token:
-        if installation.get("permissions") and not installation_supports_pull_request_creation(installation):
-            raise ValueError(github_app_write_permissions_message())
         try:
             repository_items = github_auth.list_user_installation_repositories(user_access_token, installation_id)
         except Exception:

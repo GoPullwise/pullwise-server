@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import quota
 from .product_store import ProductStore
 from .product_entitlement_rules import (
     PLAN_ENTITLEMENTS, entitlements_for_user, product_usage_payload_from_usage,

@@ -1,8 +1,9 @@
 """Server-owned credential composition; no secret store, HTTP route or scheduler.
 
 Inject existing account helpers ``github_identities_for_user`` and
-``latest_installation_access_record``. ``repository_for_account(user, github_id)``
-reads account repository metadata (id/fullName), never public search. The checker
+``latest_installation_access_record``. ``repository_for_account(user, github_id,
+target, role)`` reads saved account repository metadata or the target watch's verified
+upstream identity, never public search. The checker
 still verifies remote user identity and maintenance authority; cached installation
 ``canAccess`` is only an identity selection fence, not maintenance proof.
 
@@ -10,7 +11,7 @@ Existing account identity persistence does not retain OAuth expiry or refresh
 tokens. This resolver does not claim to refresh them: remote uncertainty cannot
 renew a proof. Supplied ``expires_at`` is checked when present. Installation
 callbacks use existing create_installation_access_token's token/expires_at shape.
-App JWT issuance is an explicit server callback. Nothing is wired by default.
+App JWT issuance is an explicit server callback.
 """
 from __future__ import annotations
 
@@ -73,8 +74,8 @@ class GitHubCredentialResolver:
             self._reject()
         return value
 
-    def _repository(self, account: dict, repository_id: str) -> str:
-        record = self.repository_for_account(deepcopy(account), repository_id)
+    def _repository(self, account: dict, repository_id: str, target: dict, role: str) -> str:
+        record = self.repository_for_account(deepcopy(account), repository_id, deepcopy(target), role)
         if not isinstance(record, dict) or _id(record.get('id')) != repository_id:
             self._reject()
         name = record.get('fullName')
@@ -125,8 +126,8 @@ class GitHubCredentialResolver:
         github_user_id = _id(identity.get('githubUserId'))
         user_token = self._token(dict(token=identity.get('accessToken'), expires_at=identity.get('expires_at')))
         repository_id = _id(target['github_repository_id'])
-        name = self._repository(account, repository_id)
-        target_name = self._repository(account, target_repository_id) if target_repository_id else None
+        name = self._repository(account, repository_id, target, "upstream")
+        target_name = self._repository(account, target_repository_id, target, "target") if target_repository_id else None
         app_token = installation_token = None
         app_payload = installation_payload = None
         if installation_id is not None:

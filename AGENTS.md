@@ -9,19 +9,129 @@ The new ledger contract is `openapi/ledger-v1.yaml`; the old `product-v1.yaml` d
 The S03–S05 Worker entry uses `0002_identity_billing_keys.sql` for identity, billing and API-key runtime tables. Keep OAuth/installation metadata checks live and hide repositories on lost access. Initialize the account authority for new GitHub users before exposing a session. Payment mutations remain Cookie and trusted-Origin only; a checkout never grants paid entitlement before a signed Creem webhook. Ledger API keys use only scopes from `api_key_dto_rules.py`, with optional `projectIds` and explicit `shared` permission. Recheck key state and restrictions in the D1 batch that reads each future ledger resource; a project allowlist never grants shared-pool access. Run `cloudflare/server/sync_server_modules.py` after editing Server-owned Worker modules.
 
 <!-- PULLWISE_PRODUCT_TARGET_START -->
-## Current target — PR / CI / Updates design 1.4
+## Historical runtime notes — PR / CI / Updates
 
-Implement only the PR follow-up, GitHub Actions failure, and upstream Release
-filtering product defined by `../docs/design/pr-ci-updates/README.md` and
-01–07. The old full-repository Reviewer, Agent-first, Worker fleet, and Model
-Gateway rules below are historical cleanup evidence, not implementation
-authority. Do not restore their routes, runtime, entitlements, or contracts.
+The notes below describe the prior PR follow-up, GitHub Actions failure, and
+upstream Release filtering runtime. The old design documents have been removed;
+use the GitHub project expense ledger design above for the replacement product.
+The old full-repository Reviewer, Agent-first, Worker fleet, and Model Gateway
+rules below are historical cleanup evidence, not implementation authority.
 
 Keep GitHub access read-only. Web and external clients share product-v1 REST;
-GET and manual fact sync never schedule model work. Production Jev remains
+GET never schedules model work. The manual fact-sync queue is retired at both
+HTTP boundaries because the Cloudflare runtime has no consumer; do not expose
+POST /sync or GET /jobs again without a complete executable path. Production Jev remains
 disabled until the P0.5 quality and bounded-transport gates pass. Preserve
 account/session/GitHub authorization, Creem transaction facts, payment history,
 and their security tests while replacing old scan entitlements.
+API keys accept only product scopes; reject retired scan/sync scopes and
+audit-bundle restrictions on new key creation.
+GitHub installation repository responses are authorization metadata only;
+strip saved scan `repoId`, `quota`, `scanAction`, and old repository `href`
+before returning them. Do not query scan quota while listing GitHub access.
+For new local Updates watches, accept only a GitHub 200 repository response
+with a positive integer ID, boolean privacy flag, and canonical full name
+matching the requested owner/repository. Persist that verified name in
+`update_watches.upstream_full_name` and return it as `upstream`; existing rows
+without a verified name remain null until revalidated. Candidate public-watch
+writes copy the name from the fenced `public_upstream_proofs` row.
+The local Server fact worker starts only when App ID, App private key and
+webhook secret are configured. It seeds missing discovery targets as
+inaccessible, then uses independent remote authorization renewal before facts;
+seeding never grants access. Its repository identity callback uses saved App
+repository items for PR/CI and shared targets, and the verified watch upstream
+name for Updates. Keep upstream and shared target roles distinct even when
+their GitHub numeric IDs match. Null-name watches cannot yield read credentials.
+Local fact collection must keep `analysis_admission_enabled=False` until the
+Jev production gates and job consumer are complete; scheduled fact checkpoints
+may advance without creating analysis reservations.
+For CI, treat `ci-triage/v2` answers as visible per-window symptoms, never
+root-cause categories. Keep the provisional 0.8 symptom-publication threshold
+separate from any future notification policy; evaluate on human-labeled logs
+with window-selection misses and zero-label windows counted separately.
+`ci-auto-label/v1` owns that 0.8 default and records its version in CI Item
+facts. Historical CI handling candidates are local Item-detail projections:
+require current owner/resource authority, the same repository, workflow and
+full job name plus any known matrix, a single normalized visible error line,
+prior completion and an earlier explicit user handling event. Never use an
+evidence hash as a similarity key or call this a verified same cause. Current
+flaky status is unknown until comparable job/matrix pass/fail lineage exists.
+Evidence hashes bind exact source text, not historical similarity. Future
+flaky status requires verified comparable cross-run facts; historical same-cause
+claims require explicit human confirmation. See the implementation status for
+the phase 1 evaluation plan.
+The local PR worker composes `GitHubGraphQLTransport` with the thread and latest
+opinionated-review readers. Keep that transport on the fixed GitHub GraphQL
+endpoint with bounded JSON, redirects disabled and no credential-bearing URL.
+The default REST and GraphQL transports use sessions with environment proxies
+disabled, so GitHub App tokens are not routed through an ambient proxy.
+The local CI log reader uses an isolated HTTPS child process. It validates
+allowlisted hosts and public resolved/connected peers, and the parent enforces
+one monotonic total deadline across DNS, TLS and streaming. It is connected to
+local fact collection but remains unverified against live GitHub, so production
+CI evidence quality and platform behavior are still gated.
+Scheduled discovery selects only accessible, unexpired targets; authorization
+renewal owns inaccessible or expired targets so a failed proof does not create
+a once-per-second discovery loop.
+
+`typesafe_client.run_jev_sdk` accepts only an injected SDK client. It validates
+text-only input before import or call, passes fixed `jev-1.13.0` with zero SDK
+retries, and validates the raw HTTP response rather than trusting typed SDK
+projections. A caller must still own credential setup, provider-attempt
+admission, a proven total-exit deadline, job fences and publication; do not
+wire production calls before those gates pass.
+`ProductJobExecutor.admit_claimed_provider_attempt` now records one attempt per
+claim only after an immediate SQLite transaction rechecks the live claim,
+source version, context configuration, authorization and reserved processing
+unit, including a non-stale context. Keep admission before any provider request; a failed or reused attempt
+must not become an unbudgeted second request. The SDK execution loop and live
+quality gate remain unconnected.
+`ProductAnalysisRunner` now composes one claimed Job through saved-input
+preparation, fenced attempt admission, an injected raw-response callback and
+the matching PR/CI/Release publisher. A reused attempt must never invoke the
+provider again; invalid responses and pre-call failures release reservations,
+while provider exceptions enter bounded retry. The default runtime does not
+instantiate this runner. The injected provider still needs a proven total
+exit deadline and real quality checks before analysis admission can turn on.
+For local Python composition, wrap a spawn-safe raw provider callback in
+`BoundedJevRawTransport`: it validates text input, limits raw response bytes,
+and terminates a blocked child at one monotonic deadline. The real SDK is not
+installed in the current venv; this boundary has only synthetic child tests.
+Keep default analysis admission disabled until a real child SDK adapter and
+quality/credential gates pass.
+
+The local HTTP entry now returns 404 before dispatch for retired scans,
+issues, Agent-First, Worker, Model Gateway, Admin, legacy docs/status, settings
+and repository scan/quota routes. Keep the product-v1 REST path, OAuth,
+repository authorization and billing reachable. The local server startup no
+longer imports legacy scan/issue state or starts scan recovery; do not restore
+those side effects. The main handler no longer contains Admin/Worker/scan
+validation or debug methods and does not import Agent-First or Model Gateway
+HTTP modules. The scan, Worker/Admin, result, and Issue app parts are deleted;
+the read-only GitHub repository flow no longer imports checkout, fix workflow,
+review, scan logging, or system metrics. Old scan helpers inside remaining app
+parts still need physical dependency cleanup.
+The unused bootstrap scan recovery/resource-cleanup block and dead Admin user
+management functions have been removed. Account/session/GitHub/billing state
+loading and persistence remain in the bootstrap path; do not restore the old
+Admin or scan cleanup chain to manage current product records.
+Bootstrap import must not inspect an adjacent Worker package; its legacy
+package-version lookup and scan-memory index helpers are retired.
+Retired Worker bearer tokens must not grant larger HTTP request or decompressed
+body limits. Only a current session or product API Key may receive the
+authenticated decompression limit; obsolete review-run upload paths receive
+the ordinary raw-body limit.
+The standalone Model Gateway and Agent-first Python module/test closures,
+including the unreferenced generated Agent-first contract bundle, have been
+removed, along with their `db.initialize()` migrations. Do not restore
+those modules to satisfy old tests; product and protected account/billing tests
+are the current regression authority. The unused Worker alert module is also
+removed. `db.py` now retains only account state, rate limits, repository
+identity and API keys; its old scan/Worker/Reviewer/Issue tables and helper
+functions are removed. Existing local database files are not dropped or
+migrated by this cleanup. Creem updates must never create scan quota buckets,
+and repository authorization responses must not expose scan quota or checkout
+limits. Use product processing usage for current entitlements.
 
 Use stable `watchScopeKey` for domain identity and charging, `contextHash` for
 semantic cache reuse, and monotonic `contextVersion` plus `ItemVersion` for
@@ -95,7 +205,9 @@ revision; pending or incomplete assessment must not silently close an item.
   owner/name, and records a newer negative proof on private, renamed, missing,
   limited or malformed results. A negative proof atomically pauses active public
   watches for the saved GitHub ID and revokes their Source-context access;
-  authorization revisions advance so queued/running analysis cannot publish.
+  a newer positive proof with a different stable GitHub ID revokes the prior
+  ID's watches before replacing that proof. Authorization revisions advance so
+  queued/running analysis cannot publish.
   Re-enabling a paused watch requires a fresh positive proof, and that proof
   does not implicitly restore revoked Source-context authority. Queued analysis
   reservations are released when the next local claim rejects their stale
@@ -294,32 +406,9 @@ revision; pending or incomplete assessment must not silently close an item.
   in one D1 batch; changing the account before that batch fails closed.
   This detail route does not imply the repository list or write routes are
   mapped, and GET performs no provider/model work or D1 write.
-  `cloudflare_manual_sync.D1ManualSyncTransactions` is a trusted, unmounted
-  owner-only command for a saved public watch or managed repository. Its D1
-  guard rechecks the exact storage account, active resource and absence of an
-  active logical Job before enqueue; repository sync also requires current
-  account GitHub App item and matching fresh installation proof. An active Job
-  is reused only for the same requester. It creates `sync_watch` or
-  `sync_repository` with `manual_sync` trigger and no model reservation or
-  attempt. Private/shared watches, member sync, request idempotency and HTTP
-  authentication remain unmapped for this command.
-  When a caller supplies a Cookie/API-key proof, the trusted command validates
-  its expiry, required read plus `sync:write` scopes and resource restriction,
-  then rechecks the exact key/session/user in the D1 enqueue batch. The
-  authenticated read helper records the concrete session ID for that proof.
-  These checks prepare HTTP composition but do not themselves mount POST sync.
-  `request_idempotent` now commits a manual Job and completed
-  `request_idempotency` response in one guarded D1 batch. Same-key replay
-  returns the saved response; a second key can reuse one active Job and save
-  its own response. Archive/authority races roll back both rows. Candidate
-  `POST /api/v1/watches/{id}/sync` and
-  `POST /api/v1/repositories/{id}/sync` now bind that transaction to a current
-  Cookie or scoped API key. They require `{}` and `Idempotency-Key`, enforce
-  SameSite=None Origin for Cookie requests, and return 202 with a fact-only
-  Job. The Worker forwards `Idempotency-Key`. GET/manual sync never queues
-  analysis or spends intelligent-processing units. Owner public watches and
-  managed owner repositories are the routed scope; member/private/shared
-  sync remains closed.
+  Manual fact-sync HTTP and its unconsumed queue were retired. Do not expose
+  sync routes, sync jobs, or `sync:write` in product-v1 or restore the old D1
+  command without a complete executable ingestion path.
   Candidate `PUT /api/v1/repositories/{id}/service` is limited to an existing
   owner service. It derives installation ID from that saved row, requires
   If-Match, a matching current account GitHub App item and unexpired D1
@@ -471,8 +560,8 @@ revision; pending or incomplete assessment must not silently close an item.
   conflicting thread facts remain null; incomplete membership cannot prove
   reliable negatives. Optional local validate_thread_contract.py checks actual
   DTOs against OpenAPI with the already available PyYAML/jsonschema environment.
-- `docs/cloudflare-domain-transaction-map.md` maps actual domain tables to finite
-  local D1 batches. The synthetic account CAS/payment-fact preservation tests
+- The retired Cloudflare domain transaction mapping described finite local D1
+  batches. The synthetic account CAS/payment-fact preservation tests
   are not a Creem runtime adapter or a CF2 pass; production account/entitlement
   integration and all migration gates remain required.
 - The local D1 account mapping now freezes a monotonic owner entitlement
@@ -581,7 +670,7 @@ revision; pending or incomplete assessment must not silently close an item.
   still require the trusted browser Origin check; path aliases never grant a
   CSRF exemption.
 - Product-v1 scopes are `profile:read`, `repositories:read`,
-  `repositories:manage`, `items:read`, `items:write`, `sync:write`,
+  `repositories:manage`, `items:read`, `items:write`,
   `watches:read`, `watches:write`, and `usage:read`. Retired scan scopes never
   authorize a new product operation.
 - `product_store.py` owns new domain persistence. Source and Item publication
@@ -883,29 +972,6 @@ revision; pending or incomplete assessment must not silently close an item.
 - Verify exact source excerpts survive Worker finding serialization, the public
   issue projection, and exported issue Markdown. Worker `evidence[].text` and
   public `evidence[].summary` currently require explicit contract alignment.
-
-- Use `ops/local_debug_loop.py` from this repository to start Server, Web,
-  Admin, and the Worker's Watcher/service together. It owns only the child
-  processes it starts, uses a fresh database, and writes a redacted
-  `pullwise-local-debug-report/v1` under `.pullwise/local-debug/runs/`.
-- Explicit local GitHub mocks remain loopback-only. Their repository sync must
-  clear `repositoriesNeedSync` and return the seeded repository items without
-  requiring GitHub App API credentials. Local scan branch validation accepts
-  only the seeded/default branches and must not call GitHub.
-- The local plumbing smoke flow creates and cancels a scan. Do not report a
-  completed AI review unless the Worker has a reconciled managed Gateway
-  profile/catalog, a current Worker-specific Gateway grant, and the scan reaches
-  a terminal review result.
-- `--hold` opens Web and Admin through the existing loopback-only local GitHub
-  callback so the browser receives the fake session cookie before landing on
-  Dashboard/Workers. Keep raw service URLs unauthenticated in a fresh browser;
-  never add a Web/Admin production-code login bypass. `--no-open-browser`
-  disables only automatic tab opening, and `entryUrls` remain in the report.
-- Before port validation, replace only a prior run whose report binds the same
-  Server/Web/Admin URLs. A live `local_debug_loop.py` supervisor may be
-  terminated as one tree; orphan children may be terminated only when their
-  parent PID and Server/Vite/Watcher/Service command shapes match that report.
-  Never terminate an unknown process merely because it owns a requested port.
 
 # Pullwise Server Agent Notes
 
@@ -1473,10 +1539,6 @@ new read and write paths aligned with the normalized SQLite tables.
 - Terminal worker-result reconciliation may replay stored findings during `/scans` reads. Preserve the database-backed user issue status (`open`, `fixed`, or `snoozed`) and its update timestamp when replacing those findings, and rebuild the optional `ISSUES` mirror from the records actually stored; raw worker findings must not reopen user-triaged issues.
 - Public scan-system status must stay redacted, but fleet alert synchronization must receive an internal quota-bearing worker projection so complete-snapshot refreshes preserve quota incident grouping.
 - Parse trusted `X-Forwarded-For` chains from the right and use the first address outside `PULLWISE_TRUSTED_PROXY_CIDRS` as the client identity. Never use the client-controlled leftmost entry or a trusted proxy hop for rate-limit subjects.
-## Worker Upload Load Testing
-
-Use `python ops/worker_upload_load.py --workers <n> --uploads <m> --concurrency <c> --operation heartbeat|event|artifact|mixed|lease --artifact-kib <k> --event-kib <k>` from `pullwise-server` to measure v1 worker control-plane and artifact upload throughput against a real local `ThreadingHTTPServer` and temporary SQLite DB. This is a server control-plane load probe, not a worker execution benchmark: simulated workers do not run Codex, clone repositories, analyze files, or perform real review work, and production workers are expected to be distributed across many machines. Interpret slow local probe results as pressure on server HTTP handling, auth, worker routes, and database writes unless evidence proves a client-side harness bottleneck. New v1 artifact uploads store content bytes outside SQLite under `PULLWISE_REVIEW_ARTIFACT_STORAGE_DIR` or next to `PULLWISE_DB_PATH`; `review_artifacts.payload_json` must not contain `content_base64`, and `content_path` is server-internal. Review-run artifact uploads should reuse the job resolved from the run id instead of fetching it again, and unique non-replaceable artifact rows should insert before duplicate/conflict probing so the common path avoids an extra `review_artifacts` read. Progress event ingestion should use `db.store_review_run_event_and_progress(...)` with `scan_job_progress` so the durable event insert, `review_runs` progress upsert, and scan-job progress update share one SQLite transaction before any scan mirror update. Active heartbeat persistence should use `db.record_active_worker_heartbeat(...)` with heartbeat progress arguments when progress must be persisted, so job update classification, worker heartbeat upsert, missing-job recovery, lease renewal, `review_runs` progress, and scan-job progress share one SQLite transaction; heartbeat progress may update the in-memory scan mirror, but should not do a separate inline `db.upsert_scan(scan)` on the hot path. Heartbeat alert sync should pass known running-job/latest-command values instead of hydrating admin-only worker payload DB fields. The July 2026 300-worker local probes now meet the short-term SQLite/ThreadingHTTPServer target of stable 300/300 under the default request timeout with p95 below 60s: heartbeat p50/p95 roughly 9s/18s, event roughly 20s/20s, artifact 32 KiB roughly 9s/19s, mixed 16 KiB roughly 19s/19s, and lease roughly 29s/29s. The largest common late bottleneck was `read_json()`/body-size limit selection calling `worker_token_record(...)` with token last-used writes before worker routing; body-limit/auth-size checks for worker requests should use `update_last_used=False` and leave token usage writes off hot-path request parsing. Temporary short-circuit probes should be used before further hot-path changes: bypassing the lease claim transaction or removing the claim Python `_LOCK` produced the large lease improvement; removing the Python `_LOCK` around active heartbeat, event, and artifact write transactions also produced large improvements; pre-body heartbeat no-op p95 was about 0.18s and pure no-op `ThreadingHTTPServer` with heartbeat-sized gzip bodies was about 0.12s, proving earlier 40s floors came from Pullwise handler work rather than Windows/urllib. Short-circuiting heartbeat token read locking, scan-job read locking, post-DB alert/log-session response work, active-heartbeat command polling, active-heartbeat missing-job recovery scanning, gzip, implicit SQLite `IMMEDIATE` transactions, lease payload construction, scan mirror dirty marking, and scan mirror object updates did not produce useful gains. Lease requests should skip presence rewrites for already claim-ready workers, refresh only the requesting worker when it would otherwise be offline, create `review_runs` inside the claim transaction, never run full recovery sweeps inline on the claim hot path, and let SQLite transaction semantics rather than the process-wide DB lock serialize concurrent claims. Treat this probe as the regression/operational check before increasing worker fleet size, artifact size, heartbeat frequency, progress-event frequency, or lease claim rate.
-
 ## Debug Bundle Contract
 
 A debug bundle is not the audit bundle and must never silently fall back to the audit bundle.
@@ -2008,3 +2070,54 @@ A debug bundle is not the audit bundle and must never silently fall back to the 
 - Fixed SDK 0.7.0 passed imports on local Python Workers; its CPython loopback
   100ms inactivity timeout did not stop a continuous slow body within 2s.
   Preserve the separate target-runtime hard-exit gate and keep Jev disabled.
+- `ProductJobExecutor.prepare_claimed_analysis` reads the claimed source version,
+  context authority and saved Updates interests through one SQLite snapshot.
+  Question preparation is text-only and deterministic; omitted material and
+  incomplete CI logs remain partial coverage. Do not build model input from
+  browser parameters or an unfenced source read.
+- `publish_claimed_release_response` accepts strict raw response bytes only
+  after the matching claimed provider attempt was admitted. It republishes
+  source-only Updates with the prepared evidence and coverage in the existing
+  fenced transaction. This is an offline integration path, not an enabled Jev
+  execution loop or a model-quality validation.
+- The same claimed-input snapshot now includes the current CI Item and verified
+  inline PR reply parent when present. Publish CI symptoms only from complete
+  validated question groups with at least 0.8 confidence; retain the rule
+  Item's source and authority dependencies. Inline PR replies require a saved,
+  accessible parent in the same verified thread and pull; bind that parent as
+  an assessment dependency and publication fence.
+- The old Worker upload load script and tests for retired scan/Worker/Reviewer
+  routes were removed. Keep account, API-key, GitHub token encryption and
+  billing tests when removing mixed legacy test files.
+- When the local fact runtime has analysis admission disabled, eligible new
+  model sources use `provider_unavailable` so Web can distinguish collected
+  facts from a queued assessment. Preserve `assessed` on an unchanged saved
+  result and `needs_manual` when the source material is insufficient.
+- Claimed Updates publication projects saved v3 answer groups into a Release
+  Item in the same fenced transaction as Source assessment and usage. Relevant
+  units with explicit migration/deprecation/breaking/security signals create
+  `review_update` work; complete irrelevant Releases have no new Item, and an
+  existing Item becomes superseded while its handling history remains. Partial
+  or unclear results require confirmation and must not close prior work. Use
+  the stable source ID as the `update_release` unit key per watch context.
+- Treat `source_contexts.context_stale=1` as a hard analysis fence even if
+  context/configuration revision numbers have not changed: claim cancels and
+  releases the reservation, and publication rejects before charging. An
+  authorization proof expires at its `valid_until` second.
+- Claimed `pr_comment` publication uses the same v3 question groups and
+  evidence rules as inline PR thread analysis, then projects one Item per
+  stable comment source ID. Create an action only from confirmed request,
+  question, optional-suggestion or rereview signals. If coverage or answers
+  are uncertain, retain previous action labels with `needs_confirmation`;
+  only complete negative evidence may supersede the Item. Keep handling
+  history across Item versions and preserve neutral completion claims as
+  model classifications, not verified GitHub facts.
+- Claimed `pr_review_body` assessment may enrich the current formal-review
+  rule Item only when saved GitHub facts say effective CHANGES_REQUESTED.
+  Preserve the rule's `change_requested` action, current Item source/context
+  dependencies and revision fence; semantic labels from the body can add
+  reply/review/optional actions but cannot erase the formal GitHub action.
+- The former four-process local debug loop (Server/Web/Admin/Worker), its
+  process/browser helpers and tests, and the Model Gateway profile design note
+  were removed with the retired product. Do not reintroduce that scan/create/
+  cancel smoke path as validation for PR/CI/Updates.

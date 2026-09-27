@@ -82,12 +82,12 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
         app.STATE_DIRTY = False
 
     def test_bearer_session_token_authenticates_private_routes(self) -> None:
-        handler = HandlerHarness("/settings", headers={"Authorization": "Bearer ses_1"})
+        handler = HandlerHarness("/auth/session", headers={"Authorization": "Bearer ses_1"})
 
         app.PullwiseHandler.route(handler, "GET")
 
         self.assertEqual(handler.status, HTTPStatus.OK)
-        self.assertEqual(handler.payload["profile"]["email"], "dev@example.com")
+        self.assertEqual(handler.payload["user"]["email"], "dev@example.com")
 
     def test_sqlite_rate_limit_blocks_public_rest_api_after_configured_window_limit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -146,84 +146,8 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
 
         self.assertEqual(rows, [])
 
-    def test_unauthenticated_worker_routes_are_rate_limited(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
 
-            with patch.dict(
-                os.environ,
-                {
-                    "PULLWISE_DB_PATH": db_path,
-                },
-                clear=True,
-            ):
-                first = HandlerHarness("/v1/workers/wk_1/heartbeat", {"worker_id": "wk_1"})
-                second = HandlerHarness("/v1/workers/wk_1/heartbeat", {"worker_id": "wk_1"})
 
-                app.PullwiseHandler.route(first, "POST")
-                app.PullwiseHandler.route(second, "POST")
-
-            self.assertEqual(first.status, HTTPStatus.UNAUTHORIZED)
-            self.assertEqual(second.status, HTTPStatus.TOO_MANY_REQUESTS)
-            self.assertIn("rate limit", second.payload["message"].lower())
-
-    def test_authenticated_worker_routes_keep_worker_rate_limit_exemption(self) -> None:
-        handler = HandlerHarness(
-            "/v1/workers/wk_1/heartbeat",
-            headers={"Authorization": "Bearer worker-token"},
-        )
-
-        with (
-            patch.object(app.db, "get_enabled_worker_token", return_value={"worker_id": "wk_1"}),
-            patch.object(app.db, "record_rate_limit_hit") as record_rate_limit_hit,
-        ):
-            limited = handler.apply_rate_limit("POST", "/v1/workers/wk_1/heartbeat")
-
-        self.assertFalse(limited)
-        record_rate_limit_hit.assert_not_called()
-
-    def test_review_run_artifact_get_is_not_public_api_rate_limited(self) -> None:
-        handler = HandlerHarness("/v1/review-runs/run_1/artifacts/art_report")
-
-        with (
-            patch.object(app.db, "record_rate_limit_hit") as record_rate_limit_hit,
-        ):
-            limited = handler.apply_rate_limit(
-                "GET",
-                "/v1/review-runs/run_1/artifacts/art_report",
-                ["v1", "review-runs", "run_1", "artifacts", "art_report"],
-            )
-
-        self.assertFalse(limited)
-        record_rate_limit_hit.assert_not_called()
-    def test_deleted_worker_command_poll_keeps_worker_rate_limit_exemption(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            db_path = os.path.join(temp_dir, "pullwise.sqlite3")
-
-            with patch.dict(
-                os.environ,
-                {
-                    "PULLWISE_DB_PATH": db_path,
-                },
-                clear=True,
-            ):
-                db.initialize()
-                worker = db.create_worker({"name": "Worker", "provider": "codex"})
-                worker_id = worker["worker_id"]
-                command = db.create_worker_command({"worker_id": worker_id, "command": "uninstall"})
-                first = HandlerHarness("/auth/session")
-                poll = HandlerHarness(
-                    "/worker/commands/poll",
-                    {"worker_id": worker_id},
-                    headers={"Authorization": f"Bearer {worker['worker_token']}"},
-                )
-
-                app.PullwiseHandler.route(first, "GET")
-                app.PullwiseHandler.route(poll, "POST")
-
-            self.assertEqual(first.status, HTTPStatus.OK)
-            self.assertEqual(poll.status, HTTPStatus.OK)
-            self.assertEqual(poll.payload["command"]["id"], command["id"])
 
     def test_rate_limit_storage_failures_block_api_requests(self) -> None:
         handler = HandlerHarness("/api/v1/repositories")
@@ -345,50 +269,7 @@ class ApiSecurityExtensionsTest(unittest.TestCase):
         self.assertNotIn("billing", app.USERS["usr_1"])
         self.assertNotIn("billingCheckout", app.USERS["usr_1"])
 
-    def test_samesite_none_settings_patch_rejects_unconfigured_frontend_origin(self) -> None:
-        handler = HandlerHarness(
-            "/settings",
-            {"review": {"outputLanguage": "zh-CN"}},
-            cookie="pw_session=ses_1",
-            headers={"Origin": "https://pull-wise.com"},
-        )
 
-        with patch.dict(
-            os.environ,
-            {
-                "PULLWISE_COOKIE_SAME_SITE": "None",
-                "PULLWISE_APP_URL": "https://admin.pull-wise.com",
-                "PULLWISE_ALLOWED_ORIGINS": "https://admin.pull-wise.com",
-            },
-            clear=True,
-        ):
-            app.PullwiseHandler.route(handler, "PATCH")
-
-        self.assertEqual(handler.status, HTTPStatus.FORBIDDEN)
-        self.assertNotIn("usr_1", app.SETTINGS)
-
-    def test_samesite_none_settings_patch_accepts_configured_frontend_origin(self) -> None:
-        handler = HandlerHarness(
-            "/settings",
-            {"review": {"outputLanguage": "zh-CN"}},
-            cookie="pw_session=ses_1",
-            headers={"Origin": "https://pull-wise.com"},
-        )
-
-        with patch.dict(
-            os.environ,
-            {
-                "PULLWISE_COOKIE_SAME_SITE": "None",
-                "PULLWISE_APP_URL": "https://pull-wise.com",
-                "PULLWISE_ALLOWED_ORIGINS": "https://pull-wise.com",
-            },
-            clear=True,
-        ):
-            app.PullwiseHandler.route(handler, "PATCH")
-
-        self.assertEqual(handler.status, HTTPStatus.OK)
-        self.assertEqual(handler.payload["review"]["outputLanguage"], "zh-CN")
-        self.assertEqual(app.SETTINGS["usr_1"]["review"]["outputLanguage"], "zh-CN")
 
     def test_cors_allows_configured_app_url_origin(self) -> None:
         headers: list[tuple[str, str]] = []

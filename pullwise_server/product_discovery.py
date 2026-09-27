@@ -199,7 +199,8 @@ class ProductFactSync(GitHubWebhookReceiver):
     def __init__(self, store: ProductStore, *, read_page: Callable, processing_budget: Callable,
                  app_id: str, webhook_secret: str, global_active_limit: int = 1000,
                  owner_active_limit: int = 100, refresh_authorization: Callable | None = None,
-                 read_scheduled_page: Callable | None = None):
+                 read_scheduled_page: Callable | None = None,
+                 analysis_admission_enabled: bool = True, seed_targets: Callable | None = None):
         super().__init__(store, app_id=app_id, webhook_secret=webhook_secret)
         self.read_page = read_page
         self.read_scheduled_page = read_scheduled_page or read_page
@@ -207,10 +208,20 @@ class ProductFactSync(GitHubWebhookReceiver):
         self.global_active_limit = global_active_limit
         self.owner_active_limit = owner_active_limit
         self.refresh_authorization = refresh_authorization
+        self.analysis_admission_enabled = analysis_admission_enabled
+        self.seed_targets = seed_targets
 
     def run_forever(self, stop_event) -> None:
         """One server-owned fact worker; never run on an HTTP request thread."""
+        last_seed = 0
         while not stop_event.is_set():
+            current = product_store._now()
+            if self.seed_targets is not None and current - last_seed >= 60:
+                last_seed = current
+                try:
+                    self.seed_targets(now=current)
+                except Exception as error:
+                    logging.getLogger(__name__).warning("Fact target seed failed (%s)", type(error).__name__)
             for tick in (self.run_authorization_due, self.run_events, self.run_due):
                 if stop_event.is_set():
                     break
@@ -321,8 +332,10 @@ class ProductFactSync(GitHubWebhookReceiver):
     def run_due(self, *, now: int, limit: int = 100) -> list[dict]:
         """Normal server clock entrypoint, independent of GET and manual sync."""
         with self.store._read() as connection:
-            keys = connection.execute("SELECT control_key FROM discovery_targets WHERE next_scheduled_at<=? ORDER BY next_scheduled_at, control_key LIMIT ?",
-                                      (now, min(max(limit, 1), 100))).fetchall()
+            keys = connection.execute("""SELECT control_key FROM discovery_targets
+                WHERE accessible=1 AND valid_until>? AND next_scheduled_at<=?
+                ORDER BY next_scheduled_at, control_key LIMIT ?""",
+                (now, now, min(max(limit, 1), 100))).fetchall()
         results = []
         for row in keys:
             try:
@@ -418,6 +431,8 @@ class ProductFactSync(GitHubWebhookReceiver):
                     status = "rules_only"
                 elif not _material_ready(source, target):
                     status = "needs_manual"
+                elif not self.analysis_admission_enabled and status != "assessed":
+                    status = "provider_unavailable"
                 store.set_source_context(source_id=record["id"], context_id=target["context_id"],
                     context_version=target["context_version"], configuration_revision=target["configuration_revision"],
                     authorization_revision=target["authorization_revision"], authorization_valid_until=target["valid_until"],
@@ -439,7 +454,8 @@ class ProductFactSync(GitHubWebhookReceiver):
         # Facts are committed before eligibility, quotas, checkpoints or job admission.
         if trigger is None:
             return {"status": "completed", "sources": len(persisted)}
-        period, processing_limit = self.processing_budget(target["billing_owner_id"], now)
+        if self.analysis_admission_enabled:
+            period, processing_limit = self.processing_budget(target["billing_owner_id"], now)
         now = max(now, product_store._now())
         with self.store.atomic() as store, store._immediate() as connection:
             current = store.discovery_target(control_key)
@@ -456,7 +472,7 @@ class ProductFactSync(GitHubWebhookReceiver):
                     if str(error) != "DISCOVERY_CHECKPOINT_MISMATCH":
                         raise
                     return {"status": "checkpoint_conflict"}
-            if not target["analysis_enabled"]:
+            if not target["analysis_enabled"] or not self.analysis_admission_enabled:
                 return {"status": "completed", "sources": len(persisted)}
             store.establish_processing_eligibility(control_key, eligible_since=target["analysis_authorized_at"] if target["analysis_authorized_at"] is not None else now)
             if trigger == TrustedTrigger.SCHEDULED_DISCOVERY:

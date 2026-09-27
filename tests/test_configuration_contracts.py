@@ -157,7 +157,6 @@ class ConfigurationContractsTest(unittest.TestCase):
                     patch.object(app, "load_env_file"),
                     patch.object(app.logging_config, "configure_logging"),
                     patch.object(app, "ensure_state_loaded"),
-                    patch.object(app, "recover_interrupted_scans", return_value=0),
                     patch.object(app, "PullwiseThreadingHTTPServer", side_effect=server_factory),
                 ):
                     app.main()
