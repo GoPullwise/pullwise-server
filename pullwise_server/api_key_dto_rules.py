@@ -20,11 +20,6 @@ def _text(value: object) -> str:
     return value.strip()
 
 
-def _access_text(value: object) -> str:
-    if isinstance(value, int) and not isinstance(value, bool):
-        return str(value)
-    return _text(value)
-
 
 def _timestamp(value: object) -> int | None:
     if isinstance(value, bool):

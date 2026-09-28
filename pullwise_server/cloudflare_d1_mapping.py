@@ -5,22 +5,6 @@ Each returned list executes as one D1 batch.
 import json
 
 
-def schema():
-    return [
-        ("CREATE TABLE IF NOT EXISTS d1_command_guard(ok INTEGER NOT NULL CHECK(ok=1))", ()),
-        ("""CREATE TABLE IF NOT EXISTS account_entitlement_authority(
-            owner_id TEXT PRIMARY KEY, revision INTEGER NOT NULL CHECK(revision>=1),
-            plan TEXT NOT NULL, period TEXT NOT NULL,
-            period_start INTEGER NOT NULL CHECK(period_start>=0),
-            valid_until INTEGER NOT NULL, dirty INTEGER NOT NULL CHECK(dirty IN (0,1))
-        )""", ()),
-        ("""CREATE TABLE IF NOT EXISTS billing_webhook_receipts(
-            event_id TEXT PRIMARY KEY, raw_sha256 TEXT NOT NULL,
-            update_json TEXT NOT NULL, received_at INTEGER NOT NULL,
-            state TEXT NOT NULL CHECK(state IN ('pending','applied'))
-        )""", ()),
-    ]
-
 
 def _check(predicate, params=()):
     return ("INSERT INTO d1_command_guard VALUES(CASE WHEN " + predicate + " THEN 1 ELSE 0 END)", tuple(params))

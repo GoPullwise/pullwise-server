@@ -42,6 +42,26 @@ CI 收集全部存续 Server 测试，安装部署检查额外依赖，并在检
 当前状态：[Server 验收](../validation/local-acceptance.md)、
 [Web 验收](../../../pullwise-web/docs/validation/local-acceptance.md)。
 
+## 全面复核与 CodeGraph 排除
+
+2026-09-28 后续复核清除了四个源码和测试均无引用的 Server 函数、Web
+已退役的 setIssue 参数和历史处理用量翻译，以及本地 .codex 旧交接、
+预览图片和四工程自动提交脚本。旧 Reviewer 专用本地技能也已移除；
+当前 pullwise-dev 技能、配置、依赖和数据库备份保留。
+移除了 Web 未使用且 Server 已不存在的 /settings API 客户端，并清除了
+目标目录已不存在的 Web 原始视觉基线 worktree 注册；实际存续 worktree 保留。
+
+已确认安装的 CodeGraph 0.9.4 使用 .gitignore / Git 可见文件，不支持
+独立的 .codegraphignore。工作区根目录及两端仓库的 .gitignore 已补齐
+依赖、生成镜像、工具目录、缓存、构建和备份的排除规则。源码、现行测试、
+契约和 migrations 保留可见。扫描器实测选中工作区 150 个文件，
+Server 63 个、Web 87 个，没有任何被排除目录中的源文件。
+
+Server 的现有索引已强制刷新：63 个文件，0 个待同步变化；实际 map
+也检查了没有依赖、镜像或旧 probe 路径。Web 未隐式创建独立索引。
+根目录 .gitignore / 工具清理属于非 Git 工作区本地设置；两端仓库规则
+随代码提交。更改规则后应刷新已有索引，避免旧节点残留。
+
 ## 删除的受版本控制文件
 
 ### pullwise-server（28 个）

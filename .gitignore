@@ -41,5 +41,18 @@ Thumbs.db
 
 # Local verification artifacts
 .playwright-cli/
-.pytest_cache/
 output/
+
+# CodeGraph follows Git visibility: exclude non-product/generated code.
+.agents/
+.codex/
+.kimi-code/
+.cleanup-backups/
+.test-tmp/
+node_modules/
+vendor/
+python_modules/
+cloudflare/server/src/pullwise_server/
+.cache/
+.vite/
+*.tsbuildinfo

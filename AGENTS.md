@@ -71,3 +71,13 @@ screenshots or generated caches in version control. Runtime/build dependencies
 and CodeGraph indexes are local tooling, not product source. Preserve user
 changes and data; retire local databases outside the product tree before any
 approved cleanup. Record current acceptance in one document per project.
+
+## CodeGraph indexing
+
+The installed CodeGraph scanner uses Git visibility and .gitignore rules.
+Keep current source, tests and schema/contracts available; exclude dependency
+folders, generated mirrors, build/cache output, local tools and data backups.
+The workspace .gitignore protects whole-workspace scans; each repository
+keeps its own rules because Git boundaries do not inherit workspace rules.
+After changing exclusions, force-reindex an already initialized project to
+remove previously indexed paths; do not initialize another project implicitly.

@@ -95,9 +95,6 @@ def creem_product_configured_for_plan(product: dict | None, plan: str, configure
     return bool(product_id and product_id in configured_ids_by_plan.get(plan, ()))
 
 
-def creem_product_configured_for_pro(product: dict | None, configured_ids_by_plan: dict) -> bool:
-    return creem_product_configured_for_plan(product, "pro", configured_ids_by_plan)
-
 
 def creem_plan_from_product(product: dict | None, configured_ids_by_plan: dict) -> str | None:
     product_id = object_id(product)

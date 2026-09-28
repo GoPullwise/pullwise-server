@@ -90,16 +90,6 @@ def cycle_period(start: int) -> str:
     return f"cycle:{start}"
 
 
-def non_negative_int(value: object) -> int:
-    if isinstance(value, bool):
-        return 0
-    if isinstance(value, float) and not math.isfinite(value):
-        return 0
-    try:
-        return max(0, int(value or 0))
-    except (OverflowError, TypeError, ValueError):
-        return 0
-
 
 def normalize_plan(plan: object, default: str = "free") -> str:
     normalized_default = default if default in PLAN_IDS else "free"
