@@ -101,7 +101,7 @@ def validate_contract() -> None:
         for path in sorted(migrations):
             database.executescript(path.read_text(encoding="utf-8"))
         required = {"ledger_projects", "expenses", "expense_events", "app_state",
-                    "api_keys", "billing_webhook_receipts", "billing_public_catalog"}
+                    "api_keys", "billing_webhook_receipts", "billing_public_catalog", "ledger_plan_usage"}
         actual = {row[0] for row in database.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if not required <= actual:
             raise ValueError("ledger runtime migration tables are missing")

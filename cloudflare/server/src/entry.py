@@ -21,6 +21,8 @@ from pullwise_server.cloudflare_ledger_profile import read_ledger_me
 from pullwise_server.cloudflare_ledger_api import handle_ledger_request
 from pullwise_server.cloudflare_jev_gateway import WorkerJevGateway
 from pullwise_server.cloudflare_ledger_reports import CsvExport
+from pullwise_server.cloudflare_plan_limits import PlanLimitedD1, PlanLimitError
+from pullwise_server.ledger_plan_policy import parse_policy
 
 
 def _csv_stream(export):
@@ -45,7 +47,11 @@ def _csv_stream(export):
 
 class _Application:
     def __init__(self, env, binding):
-        self.env, self.binding = env, binding
+        self.env = env
+        self.binding = PlanLimitedD1(binding,
+            policy=parse_policy(getattr(env, "PULLWISE_PLAN_LIMITS_JSON", None)), now=int(time.time()))
+        self.jev_gateway = WorkerJevGateway(env)
+        self.binding.jev_available = self.jev_gateway.enabled
 
     async def fetch(self, request):
         if str(getattr(self.env, "PULLWISE_D1_ACCESS_ENABLED", "0")) != "1":
@@ -75,6 +81,7 @@ class _Application:
         }
         path = urlsplit(request.url).path
         now = int(time.time())
+        self.binding.now = now
         trusted_origins = {value.strip() for value in (
             getattr(self.env, "PULLWISE_ALLOWED_ORIGINS", "") + "," +
             getattr(self.env, "PULLWISE_APP_URL", "")).split(",")
@@ -128,8 +135,10 @@ class _Application:
                     binding=self.binding, gateway=WorkerGitHubGateway(self.env),
                     method=request.method, path=path,
                     headers=headers, params=parse_qs(urlsplit(request.url).query),
-                    body=body, now=now, suggestion_gateway=WorkerJevGateway(self.env))
+                    body=body, now=now, suggestion_gateway=self.jev_gateway)
                 status, payload = result if result is not None else (404, {"error": {"code": "NOT_FOUND"}})
+            except PlanLimitError as error:
+                status, payload = error.response()
             except (ValueError, UnicodeError):
                 status, payload = 422, {"error": {"code": "INVALID_INPUT"}}
             except Exception:
@@ -210,7 +219,10 @@ class Default(WorkerEntrypoint):
         if mode == "local":
             # Only the explicitly local-only config has this mode. Offline
             # config checks reject it in every remote deployment config.
-            return await _Application(self.env, self.env.DB).fetch(request)
+            try:
+                return await _Application(self.env, self.env.DB).fetch(request)
+            except ValueError:
+                return _unavailable("PLAN_POLICY_INVALID")
         if mode != "preview" or getattr(self.env, "VALIDATION_BUDGET", None) is None:
             return _unavailable("VALIDATION_CONTROL_REQUIRED")
         try:

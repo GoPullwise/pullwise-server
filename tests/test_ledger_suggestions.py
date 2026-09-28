@@ -34,6 +34,11 @@ class LedgerSuggestionTests(unittest.TestCase):
         _, _, headers = login(self.binding, GitHubStub(), self.now)
         self.headers = {"Cookie": headers["Set-Cookie"].split(";", 1)[0],
                         "Origin": "https://app.example.test"}
+        with self.store.connect() as db:
+            users = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])
+            for user in users.values():
+                user["billing"] = {"plan": "max", "status": "active", "currentPeriodEnd": self.now + 86400}
+            db.execute("UPDATE app_state SET payload=? WHERE name='users'", (json.dumps(users),))
 
     def tearDown(self):
         self.directory.cleanup()

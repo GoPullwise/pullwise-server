@@ -1,0 +1,5 @@
+{
+  "free": {"projects": 3, "records": 500, "writesPerMinute": 10, "writesPerMonth": 1000, "jevMonthlyBudgetUsd": "0.00"},
+  "pro": {"projects": 100, "records": 20000, "writesPerMinute": 60, "writesPerMonth": 10000, "jevMonthlyBudgetUsd": "0.00"},
+  "max": {"projects": 100, "records": 20000, "writesPerMinute": 60, "writesPerMonth": 10000, "jevMonthlyBudgetUsd": "5.00"}
+}

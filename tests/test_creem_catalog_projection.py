@@ -22,6 +22,13 @@ def test_verified_catalog_binds_configured_ids_intervals_and_product_capacity():
     assert result["plans"][2]["prices"]["month"]["configured"] is False
     assert result["plans"][1]["entitlements"] is None
     assert all(plan["entitlements"] is None for plan in result["plans"])
+    from pullwise_server.billing_catalog_rules import catalog_payload
+    import json
+    projected = catalog_payload([{"payload_json": json.dumps(result), "expires_at": 100, "source_revision": 1}], 10)
+    assert [plan["entitlements"]["limits"]["projects"] for plan in projected["plans"]] == [3, 100, 100]
+    assert projected["plans"][2]["entitlements"]["jev"] == {
+        "eligible": True, "available": False, "monthlyBudgetUsd": "5.00",
+        "period": "utc-calendar-month", "rollover": False}
     assert all("expense" in plan["description"] for plan in result["plans"])
 
 

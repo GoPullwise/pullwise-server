@@ -6,11 +6,17 @@
 
 `sync_server_modules.py` copies only Worker-reachable `pullwise_server` modules into `src/pullwise_server`; run it after changing Server source and run `--check` in CI. Do not edit the mirrored files directly.
 
-Migrations apply in order: `0001_ledger.sql`, `0002_identity_billing_keys.sql`, then `0003_ledger_suggestions.sql`. Preview and production use different D1 databases. The health check requires the ledger, identity, key, billing and suggestion tables.
+Migrations apply in order: `0001_ledger.sql`, `0002_identity_billing_keys.sql`,
+`0003_ledger_suggestions.sql`, `0004_ledger_plan_usage.sql`. They remain
+unexecuted remotely. Preview and production use different D1 databases. Health
+requires all 14 tables. The deploy script never applies remote migrations.
 
 ## Configuration
 
-`wrangler.preview.jsonc` still contains placeholder values. Production uses
+Preview now targets `preview-api.pull-wise.com` and a separate empty database,
+with the user's test Creem product IDs and test Secret bindings. Its GitHub
+provider fields remain unconfigured because the user waived real GitHub tests.
+Production uses
 the approved `api.pull-wise.com` domain and its distinct, initially empty D1
 database. Its GitHub App slug, required Secret names and product bindings have
 been checked; provider validity and real flows remain unverified.

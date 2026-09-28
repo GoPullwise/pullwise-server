@@ -41,8 +41,29 @@ historical product plans to gate work.
 - The fresh, unexecuted migrations contain current identity, payment, key
   and ledger tables. Account authority tracks billing revisions and cycles,
   not old processing quotas. Billing DTOs expose subscriptions and events,
-  not historical model-processing usage. Operational plan limits remain
-  unconfigured; do not invent prices or ledger allowances.
+  not historical model-processing usage. Plan defaults are Free 3 projects/500
+  stored expenses, Pro/Max 100/20,000; override with PULLWISE_PLAN_LIMITS_JSON.
+  Only Max has a $5 monthly UTC Jev reservation, with no rollover (annual too).
+  Do not invent Creem prices; provider activation remains separately gated.
+- `PlanLimitedD1` inserts one usage UPSERT inside the original credential,
+  mutation, idempotency and audit batch. GETs do not initialize usage; capacity
+  includes archived projects/soft-deleted expenses. Quota changes do not reset
+  totals. Late requests cannot roll UTC minute/month counters backwards.
+  Key revocation is exempt from commercial quotas so a compromised key can
+  always be revoked; the normal credential fence and global validation cap stay.
+- Migration 0004 and quota initialization/index effects need new S18 bounds.
+  Jev reserves a conservative whole-context cost before calling; it is not an
+  actual-invoice meter. Keep quality/enable flags off. Free/Pro are ineligible.
+- The user waived real GitHub login/repository authorization acceptance on
+  2026-09-28. Preserve security regressions; report waived, not provider-passed.
+- Preview uses preview-api.pull-wise.com and a separate empty database, with
+  test Creem IDs/Secrets only. Production keeps its original providers/DNS.
+  Both access switches stay 0. Never send a test webhook to production.
+- `deploy-cloudflare.sh` uploads only a paused Worker and never migrates D1.
+  `build-trigger-plan.json` records the approved main-branch GitHub Builds setup.
+  User explicitly approved it after automatic review initially rejected it.
+  Keep its static pause check, pinned tools/lock, no-migration command and main
+  branch restriction; this approval does not authorize activating D1.
 - Jev suggestions are optional and never save expenses. Keep enable/evaluated
   flags off until real anonymized en/zh quality and runtime gates pass.
   `typesafe_client.py` is the shared bounded input/response validator;

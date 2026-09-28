@@ -35,12 +35,10 @@ config="cloudflare/server/wrangler.${environment}.jsonc"
 wrangler="cloudflare/server/node_modules/wrangler/wrangler-dist/cli.js"
 if ((execute)); then
   [[ -f "$wrangler" ]] || { echo "Pinned local Wrangler installation is missing." >&2; exit 2; }
-  echo "Applying remote D1 migrations for $environment"
-  node "$wrangler" d1 migrations apply DB --remote --config "$config"
+  echo "Deploying paused Server only. D1 migrations remain outside this command."
   echo "Deploying Server Worker for $environment"
   node "$wrangler" deploy --config "$config"
 else
   echo "Dry run only. After local verification, --execute --local-checks-passed would run:"
-  echo "node $wrangler d1 migrations apply DB --remote --config $config"
   echo "node $wrangler deploy --config $config"
 fi

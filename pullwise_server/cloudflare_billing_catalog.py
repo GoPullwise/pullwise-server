@@ -29,14 +29,16 @@ async def read_public_plan(*, binding: Any, headers: Mapping[str, object],
             user = None
     if user is None:
         result = await binding.batch([binding.prepare(_CATALOG_SQL)])
-        catalog = _catalog_payload(result[0].results, now)
+        catalog = _catalog_payload(result[0].results, now, policy=getattr(binding, "plan_policy", None),
+                                   jev_available=getattr(binding, "jev_available", False))
         return ((200, catalog) if catalog else
                 (503, {"error": {"code": "BILLING_CATALOG_UNAVAILABLE"}}))
     auth, validate = _resource_auth_snapshot(binding, headers, user, {}, now,
         "profile:read")
     result = await binding.batch([*auth,
         binding.prepare(_CATALOG_SQL)])
-    catalog = _catalog_payload(result[-1].results, now)
+    catalog = _catalog_payload(result[-1].results, now, policy=getattr(binding, "plan_policy", None),
+                               jev_available=getattr(binding, "jev_available", False))
     if catalog is None:
         return 503, {"error": {"code": "BILLING_CATALOG_UNAVAILABLE"}}
     try:

@@ -59,7 +59,7 @@ class LedgerDeployContractTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     checker.validate_config("production", allow_placeholders=True)
 
-    def test_default_dry_run_rejects_placeholder_configuration(self):
+    def test_default_dry_run_does_not_run_or_propose_remote_migrations(self):
         result = subprocess.run(
             [BASH, SCRIPT.relative_to(ROOT).as_posix(), "--environment", "preview"],
             cwd=ROOT,
@@ -68,9 +68,10 @@ class LedgerDeployContractTests(unittest.TestCase):
             env={**os.environ, "PULLWISE_PYTHON": Path(sys.executable).as_posix()},
             check=False,
         )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("placeholder", result.stderr.lower())
-        self.assertNotIn("migrations apply", result.stdout)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Dry run", result.stdout)
+        self.assertNotIn("d1 migrations apply", result.stdout)
+        self.assertNotIn("d1 migrations apply", SCRIPT.read_text())
 
     def test_execute_requires_explicit_local_verification(self):
         result = subprocess.run(

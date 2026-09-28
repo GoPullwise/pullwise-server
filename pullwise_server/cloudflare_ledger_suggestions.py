@@ -11,6 +11,8 @@ from .cloudflare_ledger_auth import ledger_principal
 from .cloudflare_principal import PrincipalAuthError
 from .cloudflare_ledger_expenses import _amount
 from .typesafe_client import DEFAULT_JEV_MODEL, build_request, validate_response
+from .account_cycle_rules import effective_user_plan
+from .cloudflare_plan_limits import PlanLimitError
 
 
 QUESTION_VERSION = "ledger-suggest-v1"
@@ -77,6 +79,8 @@ async def handle_suggestion_request(*, binding, method, headers, body, now, gate
         user, _, auth, validate = await ledger_principal(binding=binding, headers=headers,
             scope="suggestions:use", now=now, target_kind=target_kind, project_id=project_id,
             proof=proof)
+        if gateway is not None and gateway.enabled and effective_user_plan(user, timestamp=now) != "max":
+            return _error(403, "MAX_REQUIRED")
         commands = [binding.prepare("""SELECT id,name FROM expense_categories
             WHERE owner_id=? AND archived_at IS NULL ORDER BY name,id LIMIT 30""").bind(user["id"]),
             binding.prepare("""SELECT id,purpose FROM expenses WHERE owner_id=? AND deleted_at IS NULL
@@ -106,6 +110,8 @@ async def handle_suggestion_request(*, binding, method, headers, body, now, gate
                 VALUES(?,?,1) ON CONFLICT(owner_id,day) DO UPDATE SET attempts=attempts+1
                 WHERE attempts<? RETURNING attempts""").bind(user["id"], day, limit),
             binding.prepare("DELETE FROM d1_command_guard")])
+    except PlanLimitError as error:
+        return error.response()
     except Exception:
         return _error(409, "AUTHORIZATION_CHANGED")
     if not attempt[-2].results:
@@ -133,6 +139,8 @@ async def handle_suggestion_request(*, binding, method, headers, body, now, gate
         if duplicate:
             suggestions["duplicateExpenseId"] = duplicate["id"]
         outcome = "available" if suggestions else "uncertain"
+    except PlanLimitError as error:
+        return error.response()
     except Exception:
         # Provider transport, timeout, malformed output and FFI errors all leave
         # the manual draft usable. No provider exception is returned to clients.
@@ -150,6 +158,8 @@ async def handle_suggestion_request(*, binding, method, headers, body, now, gate
             json.dumps(category_probs) if category_probs else None,
             json.dumps(target_probs) if target_probs else None),
             binding.prepare("DELETE FROM d1_command_guard")])
+    except PlanLimitError as error:
+        return error.response()
     except Exception:
         return _error(409, "AUTHORIZATION_CHANGED")
     return 200, {"status": outcome, "suggestionId": event_id,

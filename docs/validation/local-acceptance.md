@@ -2,6 +2,70 @@
 
 Updated 2026-09-28. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
 
+## Configurable plans and paused preview (2026-09-28)
+
+- Implemented Free 3 projects / 500 stored expenses and Pro/Max 100 / 20,000.
+  `PULLWISE_PLAN_LIMITS_JSON` exposes operator overrides. Added account-wide
+  atomic minute/month write protection; metadata reads never initialize usage.
+  Archived/soft-deleted rows count, replay does not spend again, downgrade
+  preserves history, and API-key revocation remains available after quota use.
+- Max alone has a $5 provider-cost reservation per UTC calendar month, including
+  annual subscriptions, without rollover. Reservations use pinned Jev 1.13
+  pricing and a conservative complete-context bound; successful small requests
+  are not yet settled to actual invoiced tokens. Jev stays disabled.
+- Full Python/SQLite run: **145 tests / 22 subtests passed**, 244.58 seconds.
+  After reviewed preview configuration and removal of migrations from the deploy
+  script, all **6 deployment contract tests** passed. A subsequent test-first
+  policy check prevents Pro/Max record overrides from diverging and passed.
+  Web companion: **257 tests**,
+  lint/build and offline production/preview config checks passed.
+- Native local quota run used three explicit requests. Schema/fixture setup
+  measured **29 reads / 61 writes**; successful guarded creation **1 read / 9
+  writes**. The over-cap batch returned PROJECT_LIMIT but supplied no complete
+  native meta. Its actual billed row counts are **unknown**, not zero; the run
+  stopped without retry. This is local-only evidence, not a proven remote bound.
+  Evidence: workspace `.test-tmp/plan-quota-native-evidence-c102.json`.
+- The user supplied four **test** Creem product IDs, a test API Key and test
+  Webhook Secret. Only the two Secret names/types were verified after a bulk
+  Secret write to `pullwise-server-preview`; values were not read back/logged
+  or stored in source. Production provider bindings were not changed.
+- `pullwise-ledger-preview` was created via metadata only, ID
+  `e9dc3b89-f81f-4fce-87ef-d8797d879fb4`. No remote schema, SQL query, seed or
+  cleanup was run. It is distinct from production. Replication is disabled.
+- Full Server source was uploaded to `pullwise-server-preview`, with the single
+  SQLite-backed validation coordinator namespace and access **0**. Initial
+  upload version: `d8c0ff19-b747-4dbc-b538-364128498812`; Secret updates subsequently
+  produced a settings version. Domain: `preview-api.pull-wise.com`.
+- `pullwise-web-preview` was separately uploaded, version
+  `3a12463b-32e1-4782-85e9-f5345eef3791`, at `preview.pull-wise.com`, proxying only
+  the preview API. Production Web/DNS/backend bindings remain unchanged.
+- A finite HTTP shell/pause check stopped at its first unexpected preview shell
+  response. No polling/retry or SQL followed. Domain/deployment metadata and
+  local noindex/proxy tests are evidence; browser/payment runtime is still pending.
+- User waived real GitHub login/repository authorization testing. Preserve
+  synthetic security regressions and report this gate **waived**, not passed.
+- Server GitHub repository connection was created for GoPullwise/pullwise-server
+  (repo ID 1231824559, connection 8cb85eea-4b6f-4f52-8176-4fd55ed596ff).
+  Automatic approval review initially rejected the persistent auto-deploy
+  trigger, because association alone did not authorize future main deployments.
+  The user then explicitly approved the exact reviewed main-branch commands,
+  keeping D1 at 0 and no migration/cron. Trigger
+  `38570661-f72d-4ee1-a97c-83db00a3003b` was created successfully for the existing
+  production Worker. `cloudflare/server/build-trigger-plan.json` records it.
+  Worker dependency resolution is now pinned by its checked-in uv.lock; offline
+  lock verification passed. The first build of these local changes is pending
+  their publication; Git association is not a claim that a build succeeded.
+- Production settings read-back still showed access **0** and its original DB.
+  **Cumulative remote D1 usage remains 0 read / 0 written.** Deployment/config
+  metadata, empty DB creation and Secret storage are not S18 runtime acceptance.
+
+Remaining: publish/review the first approved GitHub build; complete finite S18 SQL bounds
+including migration 0004 and quota initialization/index effects; establish all
+accounting/control cases; verify test product prices/credentials and test payment
+flows only after those gates. Neither paused Worker may be enabled just because
+configuration is present. See [plan configuration](../design/github-project-ledger/plans-and-configuration.md)
+and [language evaluation](../design/github-project-ledger/server-language-evaluation.md).
+
 ## Cost-control continuation (2026-09-28)
 
 - Test-first persistent admission and metered D1 adapter implemented. Shared

@@ -46,6 +46,7 @@ paths:
       x-pullwise-scope: projects:write
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectInput'}}}}
       responses:
+        '429': {$ref: '#/components/responses/RateLimited'}
         '201': {description: Created project, content: {application/json: {schema: {$ref: '#/components/schemas/Project'}}}}
         '403': {$ref: '#/components/responses/Forbidden'}
         '422': {$ref: '#/components/responses/InvalidInput'}
@@ -63,6 +64,7 @@ paths:
       parameters: [{$ref: '#/components/parameters/IfMatch'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectPatch'}}}}
       responses:
+        '429': {$ref: '#/components/responses/RateLimited'}
         '200': {description: Updated project, content: {application/json: {schema: {$ref: '#/components/schemas/Project'}}}}
         '404': {$ref: '#/components/responses/NotFound'}
         '412': {$ref: '#/components/responses/PreconditionFailed'}
@@ -77,6 +79,7 @@ paths:
       x-pullwise-scope: categories:write
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CategoryInput'}}}}
       responses:
+        '429': {$ref: '#/components/responses/RateLimited'}
         '201': {description: Created category, content: {application/json: {schema: {$ref: '#/components/schemas/Category'}}}}
         '422': {$ref: '#/components/responses/InvalidInput'}
   /api/v1/categories/{id}:
@@ -87,6 +90,7 @@ paths:
       parameters: [{$ref: '#/components/parameters/IfMatch'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CategoryInput'}}}}
       responses:
+        '429': {$ref: '#/components/responses/RateLimited'}
         '200': {description: Updated category, content: {application/json: {schema: {$ref: '#/components/schemas/Category'}}}}
         '404': {$ref: '#/components/responses/NotFound'}
         '412': {$ref: '#/components/responses/PreconditionFailed'}
@@ -96,6 +100,7 @@ paths:
       description: Archive only; existing expenses retain their category reference.
       parameters: [{$ref: '#/components/parameters/IfMatch'}]
       responses:
+        '429': {$ref: '#/components/responses/RateLimited'}
         '204': {description: Archived}
         '404': {$ref: '#/components/responses/NotFound'}
         '412': {$ref: '#/components/responses/PreconditionFailed'}
@@ -113,6 +118,7 @@ paths:
       parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ExpenseInput'}}}}
       responses:
+        '429': {$ref: '#/components/responses/RateLimited'}
         '201': {description: Created expense or exact idempotent replay, content: {application/json: {schema: {$ref: '#/components/schemas/Expense'}}}}
         '403': {$ref: '#/components/responses/Forbidden'}
         '409': {$ref: '#/components/responses/Conflict'}
@@ -140,6 +146,7 @@ paths:
       parameters: [{$ref: '#/components/parameters/IfMatch'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ExpenseInput'}}}}
       responses:
+        '429': {$ref: '#/components/responses/RateLimited'}
         '200': {description: Updated expense, content: {application/json: {schema: {$ref: '#/components/schemas/Expense'}}}}
         '404': {$ref: '#/components/responses/NotFound'}
         '412': {$ref: '#/components/responses/PreconditionFailed'}
@@ -150,6 +157,7 @@ paths:
       description: Soft delete and audit event; immediately excluded from list, export and reports.
       parameters: [{$ref: '#/components/parameters/IfMatch'}]
       responses:
+        '429': {$ref: '#/components/responses/RateLimited'}
         '204': {description: Removed or already removed by the same owner}
         '404': {$ref: '#/components/responses/NotFound'}
         '412': {$ref: '#/components/responses/PreconditionFailed'}
@@ -183,7 +191,7 @@ paths:
       responses:
         '200': {description: Status, optional suggestionId, candidates and probabilities; never an expense write, content: {application/json: {schema: {type: object, properties: {status: {type: string, enum: [available, uncertain, unavailable]}, suggestionId: {type: string}, questionVersion: {type: string}, modelVersion: {type: [string, 'null']}, suggestions: {type: object, properties: {categoryId: {type: string}, targetKind: {type: string}, duplicateExpenseId: {type: string}}}, probabilities: {type: object}}}}}}
         '403': {$ref: '#/components/responses/Forbidden'}
-        '429': {description: Per-account daily suggestion budget exhausted}
+        '429': {description: Account rate or daily/monthly suggestion budget exhausted}
   /api/v1/expense-suggestions/{id}/decision:
     post:
       operationId: recordExpenseSuggestionDecision
@@ -192,6 +200,7 @@ paths:
       parameters: [{$ref: '#/components/parameters/Id'}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, required: [categoryId, target], properties: {categoryId: {type: string}, target: {$ref: '#/components/schemas/Target'}}}}}}
       responses:
+        '429': {$ref: '#/components/responses/RateLimited'}
         '204': {description: Decision recorded}
         '403': {$ref: '#/components/responses/Forbidden'}
 components:
@@ -212,11 +221,12 @@ components:
     Limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
   responses:
     Unauthorized: {description: Authentication required}
-    Forbidden: {description: Scope, target or GitHub authorization insufficient}
+    Forbidden: {description: Scope, target, GitHub authorization or plan capacity insufficient}
     NotFound: {description: Resource absent or belongs to another account}
-    Conflict: {description: Idempotency key reused for different input}
+    Conflict: {description: Idempotency conflict or a quota window changed; reload before retrying}
     PreconditionFailed: {description: Revision does not match If-Match}
     InvalidInput: {description: Invalid or missing field}
+    RateLimited: {description: Account write rate, monthly write allowance or Jev budget exhausted}
   schemas:
     Me:
       type: object
@@ -224,7 +234,29 @@ components:
       properties:
         id: {type: string}
         scopes: {type: array, items: {type: string}}
-        entitlements: {type: object, additionalProperties: true}
+        entitlements: {$ref: '#/components/schemas/Entitlements'}
+    Entitlements:
+      type: object
+      required: [plan, limits, jev]
+      properties:
+        plan: {type: string, enum: [free, pro, max]}
+        limits:
+          type: object
+          required: [projects, expenseRecords, writesPerMinute, writesPerMonth]
+          properties:
+            projects: {type: integer, minimum: 1}
+            expenseRecords: {type: integer, minimum: 1, description: Stored records including soft deletion}
+            writesPerMinute: {type: integer, minimum: 1, description: Fixed UTC minute bucket per account}
+            writesPerMonth: {type: integer, minimum: 1, description: UTC calendar month per account}
+        jev:
+          type: object
+          required: [eligible, available, monthlyBudgetUsd, period, rollover]
+          properties:
+            eligible: {type: boolean, description: Max-only entitlement}
+            available: {type: boolean, description: Eligibility and current activation gates both passed}
+            monthlyBudgetUsd: {type: string, pattern: '^[0-9]+(\.[0-9]{1,6})?$'}
+            period: {type: string, enum: [utc-calendar-month]}
+            rollover: {type: boolean, const: false}
     Repository:
       type: object
       required: [githubRepoId, fullName]

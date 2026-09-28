@@ -35,7 +35,7 @@ def _seed_health_read_tables(db):
                   "expense_create_idempotency", "expense_suggestion_budget",
                   "expense_suggestion_events", "api_keys", "billing_public_catalog",
                   "d1_command_guard", "account_entitlement_authority",
-                  "billing_webhook_receipts"):
+                  "billing_webhook_receipts", "ledger_plan_usage"):
         db.execute(f'CREATE TABLE IF NOT EXISTS "{table}" (id TEXT PRIMARY KEY)')
 
 

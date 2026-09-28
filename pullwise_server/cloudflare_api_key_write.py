@@ -1,6 +1,8 @@
 """Guard session-only API-key revocation in a single D1 write batch."""
 from __future__ import annotations
 
+from .cloudflare_plan_limits import PlanLimitError
+
 import hashlib
 import base64
 import json
@@ -65,6 +67,8 @@ async def revoke_api_key(*, binding: Any, key_id: str,
     ]
     try:
         await binding.batch(statements)
+    except PlanLimitError as error:
+        return error.response()
     except Exception:
         return 409, {"error": {"code": "AUTHORIZATION_CHANGED"}}
     return 200, {"ok": True, "id": key_id, "revoked": True}
@@ -132,6 +136,8 @@ async def create_api_key(*, binding: Any, headers: Mapping[str, object],
     ]
     try:
         await binding.batch(statements)
+    except PlanLimitError as error:
+        return error.response()
     except Exception:
         return 503, {"error": {"code": "SERVER_UNAVAILABLE"}}
     return 201, api_key_public_payload(record, token=token)

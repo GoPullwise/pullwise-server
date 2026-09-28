@@ -1,6 +1,8 @@
 """Exact-money ledger expense operations with guarded D1 writes and audit events."""
 from __future__ import annotations
 
+from .cloudflare_plan_limits import PlanLimitError
+
 import hashlib
 import json
 import re
@@ -258,6 +260,8 @@ async def _write(binding, gateway, method, item_id, headers, data, now):
             binding.prepare("DELETE FROM d1_command_guard")]
         try:
             await binding.batch(commands)
+        except PlanLimitError as error:
+            return error.response()
         except Exception:
             try:
                 _, _, _, replay_rows = await _snapshot(binding, headers, now, "expenses:write",
@@ -304,6 +308,8 @@ async def _write(binding, gateway, method, item_id, headers, data, now):
         binding.prepare("DELETE FROM d1_command_guard")]
     try:
         await binding.batch(commands)
+    except PlanLimitError as error:
+        return error.response()
     except Exception:
         return _error(412, "PRECONDITION_FAILED")
     return (200, after) if method == "PATCH" else (204, None)

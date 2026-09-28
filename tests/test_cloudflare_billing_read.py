@@ -87,7 +87,7 @@ def test_public_plan_uses_fresh_saved_catalog_and_cookie_account_snapshot(tmp_pa
     assert "account" not in public
     status, personal = asyncio.run(read({"Cookie": "pw_session=session-local"}))
     assert status == 200 and personal["account"]["plan"] == "pro"
-    assert all(plan["entitlements"] is None for plan in personal["plans"])
+    assert [plan["entitlements"]["limits"]["projects"] for plan in personal["plans"]] == [3, 100, 100]
     assert binding.batch_count == 2
 
 
@@ -125,5 +125,5 @@ def test_public_plan_drops_account_if_cookie_revoked_before_combined_batch(tmp_p
         read_body=no_body, binding=binding, creem_secret="",
         configured_products={}, now=fixture.now))
     assert status == 200 and "account" not in payload
-    assert payload["plans"][1]["entitlements"] is None
+    assert payload["plans"][1]["entitlements"]["jev"]["eligible"] is False
     assert binding.batch_count == 1

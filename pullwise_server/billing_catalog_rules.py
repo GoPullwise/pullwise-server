@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import json
+from .ledger_plan_policy import plan_entitlements
 
 PLANS = frozenset({"free", "pro", "max"})
 
 
-def catalog_payload(rows: list[dict], now: int) -> dict | None:
+def catalog_payload(rows: list[dict], now: int, *, policy=None, jev_available=False) -> dict | None:
     if len(rows) != 1 or int(rows[0]["expires_at"]) <= now:
         return None
     try:
@@ -21,7 +22,7 @@ def catalog_payload(rows: list[dict], now: int) -> dict | None:
             return None
         plan = {key: value for key, value in record.items()
                 if key not in {"reviewLimit", "repositoryLimits", "agentConfig"}}
-        plan["entitlements"] = None
+        plan["entitlements"] = plan_entitlements(record["id"], policy=policy, jev_available=jev_available)
         plan["description"] = "Pullwise project expense ledger subscription."
         plans.append(plan)
     if {plan["id"] for plan in plans} != PLANS or len(plans) != 3:

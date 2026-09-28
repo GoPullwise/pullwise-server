@@ -1,6 +1,8 @@
 """Owner-scoped project and category REST operations for the ledger Worker."""
 from __future__ import annotations
 
+from .cloudflare_plan_limits import PlanLimitError
+
 import hashlib
 import re
 import uuid
@@ -243,6 +245,8 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
             binding.prepare("DELETE FROM d1_command_guard")]
         try:
             await binding.batch(commands)
+        except PlanLimitError as error:
+            return error.response()
         except Exception:
             return _error(409, "PROJECT_CONFLICT")
         return 201, _project({"id": project_id, "github_repo_id": repo_id,
@@ -268,6 +272,8 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
         binding.prepare("DELETE FROM d1_command_guard")]
     try:
         await binding.batch(commands)
+    except PlanLimitError as error:
+        return error.response()
     except Exception:
         return _error(412, "PRECONDITION_FAILED")
     updated = {**existing, "description": body.get("description", existing["description"]),
@@ -307,6 +313,8 @@ async def _categories(binding, method, item_id, headers, body, now, scope):
             binding.prepare("DELETE FROM d1_command_guard")]
         try:
             await binding.batch(commands)
+        except PlanLimitError as error:
+            return error.response()
         except Exception:
             return _error(409, "CATEGORY_CONFLICT")
         return 201, {"id": category_id, "name": name, "color": body.get("color"),
@@ -331,6 +339,8 @@ async def _categories(binding, method, item_id, headers, body, now, scope):
         binding.prepare("DELETE FROM d1_command_guard")]
     try:
         await binding.batch(commands)
+    except PlanLimitError as error:
+        return error.response()
     except Exception:
         return _error(409 if method == "PATCH" else 412,
                       "CATEGORY_CONFLICT" if method == "PATCH" else "PRECONDITION_FAILED")

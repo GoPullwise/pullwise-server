@@ -6,6 +6,26 @@ record of completed runtime acceptance or authorization to release production.
 
 ## Budget and execution status
 
+2026-09-28 continuation: the user waived real GitHub login/repository authorization
+testing. Test Creem IDs and test Secrets are configured in a separately deployed
+**paused** preview Server; preview Web proxies only that Server. Empty preview
+DB creation, namespace/deployment and Secret configuration used metadata APIs,
+not D1 SQL. Both switches remain 0 and the remote case allowlist is empty.
+Cumulative remote D1 rows are still **0 read / 0 written**.
+
+Migration 0004 adds `ledger_plan_usage` and an implicit primary-key index, making
+the current target 14 tables / 24 SQLite indexes. Every protected resource write
+now includes a usage UPSERT; initialization counts existing owner rows once.
+API-key revocation is exempt from this commercial quota for security, but remains
+inside global validation admission/accounting. Earlier base mutation counts
+omit these new effects and must not be used as current remote upper bounds.
+The deploy script no longer runs or proposes direct remote D1 migration commands.
+
+New native local steps: schema/fixture setup measured 29 reads / 61 writes;
+guarded creation measured 1 / 9. Expected over-cap failure provided no complete
+meta; the run stopped with unknown actual counts for that batch. No retry or
+remote probe was used. This shows why error-path reservations remain mandatory.
+
 - Approved cumulative S18 ceiling: 1,000 Rows Written and 10,000 Rows Read.
   The user also authorized restoring pinned development dependencies and
   deploying Server separately at `https://api.pull-wise.com`.
