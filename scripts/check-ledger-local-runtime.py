@@ -13,12 +13,17 @@ import tempfile
 import time
 from pathlib import Path
 from urllib.error import HTTPError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKER = ROOT / "cloudflare/server"
 TOKEN = "pwk_loopback_runtime_fixture"
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, message, headers, new_url):
+        return None
 
 
 def literal(value):
@@ -68,6 +73,7 @@ def main():
             cwd=WORKER, check=True, capture_output=True)
 
     count = 0
+    opener = build_opener(ProxyHandler({}), NoRedirect())
 
     def call(method, path, body=None, headers=None, expected=200, cookie=False):
         nonlocal count
@@ -79,7 +85,7 @@ def main():
             headers={**auth, "Content-Type": "application/json", **(headers or {})},
             data=json.dumps(body).encode() if body is not None else None)
         try:
-            response = urlopen(request, timeout=45)
+            response = opener.open(request, timeout=45)
         except HTTPError as error:
             response = error
         with response:

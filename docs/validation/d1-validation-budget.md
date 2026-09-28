@@ -23,6 +23,126 @@ record of completed runtime acceptance or authorization to release production.
 
 ## Accounting
 
+### Implemented local admission boundary (2026-09-28)
+
+`ValidationBudget` in `cloudflare/server/src/entry.py` now executes preview
+HTTP handlers behind a single Durable Object. `cloudflare_validation_budget.py`
+uses its synchronous SQLite storage to persist a full worst-case reservation
+before any application/provider call. It does not spend D1 rows on budgeting.
+The fixed scope is `pullwise-s17-s18-2026-09-28`: any future preview binding
+must share ONE authoritative namespace across stages/databases, not provision
+one per environment. No coordinator binding or migration was deployed remotely.
+
+- Hard ceilings: 1,000 written / 10,000 read rows, 40 admitted requests, finite
+  per-case requests and at most 64 D1 batch operations per request.
+- No refund on success, denial, failure or timeout. Observed actual metadata is
+  tracked separately; incomplete metadata is explicitly marked incomplete.
+- One durable active ticket excludes interleaving HTTP handlers across awaits.
+  A restarted object with a pending ticket permanently stops. SQL operation
+  slots are consumed before await, so overlapping calls cannot reuse a slot.
+- The metered binding matches exact trusted SQL batch groups before dispatch,
+  preserves domain transactions, and captures every result's native meta.
+  `first()` uses the full batch result so it does not discard accounting.
+- Missing/invalid metadata, unexpected response, SQL/case/request/row limit,
+  ambiguous result or timeout stops persistently. In-flight returned metadata
+  is retained even after manual stop. Internal stop/evidence RPCs use DO
+  storage only; no public HTTP control or reset endpoint exists.
+- Production cannot enter preview validation even if its access switch is
+  mistakenly set to 1. Preview without the coordinator fails closed before
+  reading DB/provider configuration. All OAuth, Session, API-key, webhook and
+  unknown HTTP paths take this same ingress boundary.
+- `REVIEWED_REMOTE_PLANS` is **empty**. No runtime path is remotely admitted.
+  CSV's lazy D1 pulls are explicitly blocked until its entire stream lifetime
+  is bounded. Migration DDL, fixtures and cleanup have no approved plan and
+  must not be executed through Wrangler/REST outside this boundary.
+
+These controls are implementation/local evidence, **not** proof of the numeric
+SQL bounds needed to enable a case. An incorrect bound cannot be undone by
+checking meta afterwards. Remote configs and deployment checks keep access at 0
+and forbid cron. Provider presence does not relax these gates.
+
+### Complete cost-path inventory
+
+The packaged import closure and entry were inspected locally after CodeGraph's
+bounded query did not return. Static SQL/I/O inventory was retained under the
+ignored workspace runtime directory; generated mirrors are not authority.
+
+| Path / modules | Possible side effects and bound prerequisite |
+| --- | --- |
+| Health; `cloudflare_http_contract` | sqlite_master/schema reads; returned COUNT is not billed Rows Read |
+| Principal/profile; `cloudflare_principal`, `cloudflare_ledger_auth`, `cloudflare_ledger_profile` | Session/user JSON virtual-table and key reads; resource snapshot SELECTs are repeated in the authorization batch |
+| OAuth/App; `cloudflare_github_identity_http`, `cloudflare_oauth_state_adapter`, `cloudflare_session_adapter` | GET authorize issues state; callback consumes state, writes user, may initializes authority, then creates session; installation callback consumes state and writes repository access; logout revokes session |
+| Key management; `cloudflare_api_key_read`, `cloudflare_api_key_write` | Create/revoke writes key and guard rows; authentication alone does not update last_used_at in current source; include key's PK, unique hash and user/revocation indexes |
+| Ledger; `cloudflare_ledger_api`, `cloudflare_ledger_expenses`, `cloudflare_ledger_reports` | Resource, guard, audit and idempotency writes; aggregate scans are not bounded by result count; CSV continues in 250-row pages after HTTP response |
+| Billing reads/catalog; `cloudflare_billing_read`, `cloudflare_billing_catalog`, `cloudflare_billing_catalog_refresh`, `cloudflare_billing_catalog_write` | GET /billing/plan can refresh stale catalog: provider requests plus catalog/guard writes; paid/free plan projection is not a resource-quota definition |
+| Billing mutations/account; `cloudflare_billing_mutations`, `cloudflare_account_adapter`, `cloudflare_d1_mapping` | Account CAS, pending updates/events and authority revisions; pending reconciliation can settle up to 16 receipts per call, each with its own writes |
+| Creem ingress/replay; `cloudflare_creem_handler`, `cloudflare_webhook_receipts` | Receipt/guard writes occur even for a duplicate; an applied receipt can still refresh dirty authority; unknown owner may park a pending event; settlement writes account/events/pending/receipt/authority and guards |
+| Jev; `cloudflare_ledger_suggestions` | Suggestion budget/event/guard writes are separate from expense writes; disabled and unadmitted |
+| SQL helper; `cloudflare_d1_batch` | Trusted finite command lists preserve one transaction; statement count is not a row bound |
+| Migration/seed/cleanup | Three migrations create 13 tables and 23 SQLite indexes (7 explicit, 16 implicit), plus four app_state seed rows; include DDL and migration-bookkeeping rows, and teardown/index effects; remote bounds unknown |
+
+Logical success-path table writes below assume serial execution and an empty
+guard table. They omit billed index/internal rows and failure paths and are
+**not remote upper bounds**:
+
+| Additional step | Logical base-table rows written |
+| --- | ---: |
+| OAuth state issue / consume; Session issue / revoke | 3 each |
+| New-user OAuth callback | 12 (state consumption, user write, authority initialization, session issue) |
+| Existing-user OAuth callback | 9, excluding any initialization/failure branch |
+| App install authorize / successful callback | 3 / 6 |
+| API-key create / revoke | 3 each |
+| Catalog publication / refresh write | 3 |
+| Webhook receipt insert / duplicate receipt check | 3 / 2 |
+| Park unmatched receipt | 7 |
+| Settle receipt | 19 |
+| Refresh dirty authority | 5 |
+
+The current `app_state` maps/arrays and `json_each` scans need explicit finite
+cardinality/input constraints; a few physical JSON rows do not establish a
+read bound. `DELETE FROM d1_command_guard` has no predicate. Any existing guard
+rows or another database writer invalidate the serial base counts. Local
+SQLite index inspection is structural evidence, not D1 billing calibration.
+
+No remote step currently has a proven bound: migration, identity, key/payment
+cases, fixtures and cleanup remain **not admissible**. Their current executable
+remote request allowance is zero. The earlier 20-request ledger candidate and
+32/500 reservations remain proposals only; do not use them as approved limits.
+
+### Actual finite local cost-control evidence
+
+An ignored, generated loopback-only fixture exercised the production coordinator
+and adapter on real local Python Worker, SQLite-backed DO and D1 bindings. It
+used no provider or remote binding and did not seed CSV fixtures remotely.
+
+| Local step | D1 Rows Read | D1 Rows Written |
+| --- | ---: | ---: |
+| Request 1: CREATE table, INSERT, SELECT, metered first(COUNT) | 3 | 3 |
+| Request 2: same finite case | 4 | 1 |
+| Request 3: rejected with CASE_LIMIT before D1 | 0 | 0 |
+| Total observed local D1 meta | **7** | **4** |
+
+The persisted DO journal retained **220 reads / 40 writes reserved**, two
+admitted requests, all four operation metadata totals and sticky CASE_LIMIT
+after the process was stopped. No reservation was refunded. DO storage usage
+is separate from these D1 totals and has its own billing if deployed remotely.
+The local fixture bounds are test-only and do not admit remote DDL or data.
+
+The first intended loopback client attempt used the machine's default proxy
+and timed out; it was stopped without an automatic retry. The cause was
+confirmed with proxy_bypass('127.0.0.1') == False. After the transport was
+corrected, the explicit three-request finite run above passed. Both local
+validation scripts now disable proxies/redirects; a regression test reproduces
+the proxy failure first and passes with the fix.
+
+Evidence files, outside version control:
+`F:/Pullwise/.agents/runtime/budget-local-evidence-c102.json` (stopped attempt),
+`budget-local-evidence-c102-proxy-fixed.json` and `budget-local-journal-c102.json`.
+No extra remote D1 request was used for evidence/monitoring.
+**Cumulative remote usage remains 0 Rows Read / 0 Rows Written**; the unused
+approved ceiling remains 10,000 / 1,000. No remote migration or production
+activation occurred.
+
 [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/) defines
 Rows Written to include INSERT/UPDATE/DELETE and additional index writes;
 DDL may also contribute reads and writes. Under the documented paid rate,

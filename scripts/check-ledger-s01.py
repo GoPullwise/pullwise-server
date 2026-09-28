@@ -36,6 +36,10 @@ def validate_config(environment: str, allow_placeholders: bool) -> None:
         if not pattern.endswith("/*") or not zone or not (host == zone or host.endswith("." + zone)):
             raise ValueError("reviewed zone route is required")
     vars_ = config.get("vars", {})
+    if vars_.get("PULLWISE_D1_ACCESS_ENABLED") != "0":
+        raise ValueError("remote D1 access must remain paused")
+    if config.get("triggers", {}).get("crons"):
+        raise ValueError("cron is forbidden during bounded validation")
     app_url = vars_.get("PULLWISE_APP_URL", "")
     allowed = vars_.get("PULLWISE_ALLOWED_ORIGINS", "")
     parsed_app = urlparse(app_url)

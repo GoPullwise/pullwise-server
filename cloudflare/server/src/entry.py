@@ -1,9 +1,15 @@
 """Candidate Server Worker entry; no probe endpoints or scheduled trigger."""
+import asyncio
 import json
 import time
 from urllib.parse import urlsplit, parse_qs
 
-from workers import Response, WorkerEntrypoint
+from workers import DurableObject, Response, WorkerEntrypoint
+
+from pullwise_server.cloudflare_validation_budget import (
+    BUDGET_SCOPE, REQUEST_SECONDS, BudgetError, BudgetJournal, MeteredD1,
+    REVIEWED_REMOTE_PLANS,
+)
 
 from pullwise_server.cloudflare_http_contract import handle_http_request
 from pullwise_server.cloudflare_github_identity_http import handle_identity_request
@@ -37,7 +43,10 @@ def _csv_stream(export):
         dict_converter=Object.fromEntries))
 
 
-class Default(WorkerEntrypoint):
+class _Application:
+    def __init__(self, env, binding):
+        self.env, self.binding = env, binding
+
     async def fetch(self, request):
         if str(getattr(self.env, "PULLWISE_D1_ACCESS_ENABLED", "0")) != "1":
             return Response.json({"error": {"code": "D1_ACCESS_PAUSED"}}, status=503,
@@ -73,7 +82,7 @@ class Default(WorkerEntrypoint):
         try:
             identity = await handle_identity_request(
                 method=request.method, path=path, params=parse_qs(urlsplit(request.url).query),
-                headers=headers, binding=getattr(self.env, "DB", None),
+                headers=headers, binding=self.binding,
                 gateway=WorkerGitHubGateway(self.env), now=now,
                 app_url=getattr(self.env, "PULLWISE_APP_URL", ""),
                 callback_url=getattr(self.env, "PULLWISE_GITHUB_CALLBACK_URL", ""),
@@ -91,7 +100,7 @@ class Default(WorkerEntrypoint):
         if path == "/api/v1/me" and request.method == "GET":
             try:
                 status, payload = await read_ledger_me(
-                    binding=getattr(self.env, "DB", None), headers=headers, now=now)
+                    binding=self.binding, headers=headers, now=now)
             except Exception:
                 status, payload = 503, {"error": {"code": "SERVER_UNAVAILABLE"}}
             return Response.json(payload, status=status, headers={"Cache-Control": "no-store"})
@@ -116,7 +125,7 @@ class Default(WorkerEntrypoint):
                             status=413, headers={"Cache-Control": "no-store"})
                     body = json.loads(raw)
                 result = await handle_ledger_request(
-                    binding=getattr(self.env, "DB", None), gateway=WorkerGitHubGateway(self.env),
+                    binding=self.binding, gateway=WorkerGitHubGateway(self.env),
                     method=request.method, path=path,
                     headers=headers, params=parse_qs(urlsplit(request.url).query),
                     body=body, now=now, suggestion_gateway=WorkerJevGateway(self.env))
@@ -143,7 +152,7 @@ class Default(WorkerEntrypoint):
         if path == "/billing/plan" and request.method == "GET":
             try:
                 status, payload = await read_or_refresh_catalog(
-                    binding=getattr(self.env, "DB", None), gateway=WorkerCreemGateway(self.env),
+                    binding=self.binding, gateway=WorkerCreemGateway(self.env),
                     headers=headers, products=products, now=now)
             except Exception:
                 status, payload = 503, {"error": {"code": "BILLING_CATALOG_UNAVAILABLE"}}
@@ -156,7 +165,7 @@ class Default(WorkerEntrypoint):
                     return Response.json({"error": {"code": "REQUEST_TOO_LARGE"}}, status=413)
                 body = json.loads(raw)
                 status, payload = await handle_billing_mutation(
-                    binding=getattr(self.env, "DB", None), gateway=WorkerCreemGateway(self.env),
+                    binding=self.binding, gateway=WorkerCreemGateway(self.env),
                     now=now, method=request.method, path=path, headers=headers, body=body,
                     app_url=getattr(self.env, "PULLWISE_APP_URL", ""),
                     trusted_origins=trusted_origins, products=products)
@@ -171,7 +180,7 @@ class Default(WorkerEntrypoint):
             params=parse_qs(urlsplit(request.url).query),
             headers=headers,
             read_body=read_body,
-            binding=getattr(self.env, "DB", None),
+            binding=self.binding,
             creem_secret=getattr(self.env, "PULLWISE_CREEM_WEBHOOK_SECRET", ""),
             configured_products=webhook_product_ids(products),
             now=now,
@@ -186,3 +195,85 @@ class Default(WorkerEntrypoint):
                or path.startswith("/api-keys/")
                or path.startswith("/api/v1/") else None)
         return Response.json(payload, status=status, headers=response_headers)
+
+
+def _unavailable(code):
+    return Response.json({"error": {"code": code}}, status=503,
+                         headers={"Cache-Control": "no-store"})
+
+
+class Default(WorkerEntrypoint):
+    async def fetch(self, request):
+        if str(getattr(self.env, "PULLWISE_D1_ACCESS_ENABLED", "0")) != "1":
+            return _unavailable("D1_ACCESS_PAUSED")
+        mode = getattr(self.env, "PULLWISE_MODE", "")
+        if mode == "local":
+            # Only the explicitly local-only config has this mode. Offline
+            # config checks reject it in every remote deployment config.
+            return await _Application(self.env, self.env.DB).fetch(request)
+        if mode != "preview" or getattr(self.env, "VALIDATION_BUDGET", None) is None:
+            return _unavailable("VALIDATION_CONTROL_REQUIRED")
+        try:
+            namespace = self.env.VALIDATION_BUDGET
+            # Fixed across callers, phases and databases. Never use a request,
+            # account, env run ID or DB ID to create another budget instance.
+            stub = namespace.get(namespace.idFromName(BUDGET_SCOPE))
+            return await stub.fetch(request)
+        except Exception:
+            # No fallback to DB and no automatic RPC retry.
+            return _unavailable("VALIDATION_UNAVAILABLE")
+
+
+class ValidationBudget(DurableObject):
+    def __init__(self, ctx, env):
+        self.ctx, self.env = ctx, env
+        self.journal = None
+
+    def _journal(self):
+        if self.journal is None:
+            self.journal = BudgetJournal(self.ctx.storage.sql)
+        return self.journal
+
+    async def stop(self):
+        journal = self._journal()
+        journal.stop("MANUAL_STOP")
+        return journal.snapshot()
+
+    async def evidence(self):
+        return self._journal().snapshot()
+
+    async def fetch(self, request):
+        if str(getattr(self.env, "PULLWISE_D1_ACCESS_ENABLED", "0")) != "1":
+            return _unavailable("D1_ACCESS_PAUSED")
+        if getattr(self.env, "PULLWISE_MODE", "") != "preview":
+            return _unavailable("VALIDATION_CONTROL_REQUIRED")
+        path = urlsplit(request.url).path
+        # Lazy CSV pulls outlive a Response. Keep this path closed until a
+        # finite preview stream lifetime/cardinality plan is implemented.
+        if path == "/api/v1/expenses/export":
+            return _unavailable("STREAMING_CASE_UNBOUNDED")
+        plan = next((item for item in REVIEWED_REMOTE_PLANS
+                     if item.method == request.method and item.path == path), None)
+        if plan is None:
+            return _unavailable("UNREVIEWED_CASE")
+        journal = self._journal()
+        try:
+            ticket = journal.begin(plan, now=time.time())
+        except BudgetError as error:
+            return _unavailable(str(error))
+        try:
+            binding = MeteredD1(self.env.DB, journal, ticket, plan)
+            response = await asyncio.wait_for(
+                _Application(self.env, binding).fetch(request), timeout=REQUEST_SECONDS)
+            if response.status not in plan.expected_statuses:
+                journal.stop("UNEXPECTED_RESPONSE")
+            else:
+                journal.finish(ticket, now=time.time())
+            print(json.dumps({"validation_budget": journal.snapshot()}))
+            return response
+        except BaseException as error:
+            journal.stop("TIMEOUT" if isinstance(error, asyncio.TimeoutError) else "REQUEST_OUTCOME_UNKNOWN")
+            print(json.dumps({"validation_budget": journal.snapshot()}))
+            if isinstance(error, asyncio.CancelledError):
+                raise
+            return _unavailable(journal.snapshot()["stopped"])

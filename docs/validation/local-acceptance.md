@@ -2,6 +2,41 @@
 
 Updated 2026-09-28. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
 
+## Cost-control continuation (2026-09-28)
+
+- Test-first persistent admission and metered D1 adapter implemented. Shared
+  DO scope, cumulative no-refund reservations, request/case/SQL operation caps,
+  concurrency exclusion, stop/restart semantics and missing/partial metadata
+  are covered. Remote SQL/case plans remain empty and all such cases fail closed.
+- Full Python/SQLite suite passed: **131 tests / 22 subtests**, 189.32 seconds.
+  Subsequently added proxy/unknown-path and in-flight/partial-meta regressions
+  passed in the focused **32-test** cost/pause/transport/deployment run. This is
+  targeted verification after the full run, not a claim of another full suite.
+- Real local Worker/D1/DO control fixture: three finite HTTP requests; two
+  admitted, third rejected by CASE_LIMIT. Native D1 totals: **7 reads / 4 writes**
+  including DDL. Persistent reservations: **220 reads / 40 writes**, no refunds.
+  The fixture process was stopped; no background validation remains running.
+- An earlier loopback client timed out because system proxies did not bypass
+  127.0.0.1. That attempt stopped. Explicit no-proxy/no-redirect transport then
+  passed the finite local run; both local check scripts now prevent this leak.
+- Static contract/config and module checks and Git Bash syntax passed. Remote
+  config check now rejects enabled D1 and cron; production/preview remain at 0.
+- Latest existing Server CI [36392938720](https://github.com/GoPullwise/pullwise-server/actions/runs/36392938720)
+  succeeded at `d11d1bf3b1ebaf46d6476fa88a1451f36b8f708b`. New local changes
+  have no corresponding CI run yet.
+- The browser connector's bounded getState attempt timed out (25.6 seconds);
+  no browser page was navigated. S17 browser integration remains pending.
+- **S18 remains blocked** by unproven per-step migration/index/identity/payment
+  and cleanup bounds, missing reviewed shared preview coordinator binding and
+  incomplete browser/provider acceptance. Provider price/environment/validity
+  is still unverified. No remote DB/provider execution was attempted; **remote
+  totals remain 0 read / 0 written**, against cumulative 10,000 / 1,000 ceilings.
+  Budget implementation/local success does not authorize production activation.
+
+See [cost-path inventory and accounting](d1-validation-budget.md) for the full
+path audit, finite local steps, actual evidence locations and exact remaining
+gates. Preserve the empty remote allowlist until each bound is established.
+
 ## Conditional S17/S18 continuation (2026-09-28)
 
 The user approved pinned dependency restoration, a cumulative remote ceiling

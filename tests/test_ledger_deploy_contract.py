@@ -24,6 +24,23 @@ BASH = shutil.which("bash") or "bash"
 
 
 class LedgerDeployContractTests(unittest.TestCase):
+    def test_remote_config_rejects_enabled_d1_and_cron(self):
+        spec = importlib.util.spec_from_file_location("ledger_config_checker", ROOT / "scripts/check-ledger-s01.py")
+        checker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checker)
+        original = json.loads((ROOT / "cloudflare/server/wrangler.production.jsonc").read_text())
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            (folder / "src").mkdir()
+            (folder / "src/entry.py").touch()
+            for enabled, crons in [("1", []), (None, []), ("0", ["* * * * *"])]:
+                config = json.loads(json.dumps(original))
+                config["vars"]["PULLWISE_D1_ACCESS_ENABLED"] = enabled
+                config["triggers"] = {"crons": crons}
+                (folder / "wrangler.production.jsonc").write_text(json.dumps(config))
+                with patch.object(checker, "SERVER", folder), self.assertRaises(ValueError):
+                    checker.validate_config("production", allow_placeholders=True)
+
     def test_reviewed_zone_route_preserves_existing_dns(self):
         spec = importlib.util.spec_from_file_location("ledger_config_checker", ROOT / "scripts/check-ledger-s01.py")
         checker = importlib.util.module_from_spec(spec)

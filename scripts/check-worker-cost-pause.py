@@ -3,7 +3,7 @@ import argparse
 import json
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -24,7 +24,8 @@ def main():
             raise SystemExit("Remote checks are restricted to the approved Server origin")
     elif origin.scheme != "http" or origin.hostname not in {"127.0.0.1", "localhost"}:
         raise SystemExit("Local checks require loopback HTTP")
-    opener = build_opener(NoRedirect())
+    opener = (build_opener(NoRedirect()) if args.remote
+              else build_opener(ProxyHandler({}), NoRedirect()))
     for path in ("/health", "/api/v1/me", "/api/v1/expenses", "/auth/github/authorize"):
         request = Request(args.origin + path, headers={"Accept": "application/json"})
         try:

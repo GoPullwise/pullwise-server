@@ -74,6 +74,22 @@ historical product plans to gate work.
   `PULLWISE_D1_ACCESS_ENABLED=0` until active-service admission and accounting
   controls pass; it blocks all routes before any DB/provider access and fails
   closed when absent. It is a pause switch, not a metered quota.
+- Preview ingress must use the one fixed `ValidationBudget` Durable Object
+  name `pullwise-s17-s18-2026-09-28`, sharing the same namespace across phases
+  and databases. Never derive a budget ID from a run/user/DB or create another
+  namespace to regain quota. Production remains blocked. Only the explicitly
+  local config uses `PULLWISE_MODE=local` for direct local D1 access.
+- `cloudflare_validation_budget.py` reserves worst-case totals before side
+  effects and never refunds them. Its DO SQLite journal is not D1. The hard
+  ceilings are 1,000 written / 10,000 read rows and 40 requests; exact SQL batch
+  groups and operation counts require reviewed bounds. The remote plan list
+  is deliberately empty until schema/index/input/cardinality bounds are proven.
+  Stop is persistent, without a reset/resume API; interrupted requests retain
+  their reservations. Capture native meta through the metered batch adapter,
+  including for `first()`. CSV streaming, migrations and cleanup are unadmitted.
+- Loopback validation clients must disable system proxies and redirects.
+  This machine's proxy does not bypass 127.0.0.1; a default urllib opener can
+  forward an intended local check outside loopback and time out.
 - Run Windows shell tests through a PATH-resolved Git Bash and use forward
   slash relative script paths. `PULLWISE_PYTHON` selects the deployment-check
   interpreter. SQLite test contexts must commit/rollback AND close connections.

@@ -38,6 +38,7 @@ MODULES = (
     "cloudflare_principal",
     "cloudflare_session_adapter",
     "cloudflare_webhook_receipts",
+    "cloudflare_validation_budget",
     "creem_event_rules",
     "creem_public_catalog_rules",
     "creem_signature",
