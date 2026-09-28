@@ -5,7 +5,7 @@ from typing import Any, Mapping
 
 from .api_key_dto_rules import parse_api_key_restrictions
 from .cloudflare_principal import (
-    ProductReadAuthError, _bearer, _header, _principal, _resource_auth_snapshot,
+    PrincipalAuthError, _bearer, _header, _principal, _resource_auth_snapshot,
 )
 
 
@@ -34,11 +34,11 @@ async def ledger_principal(*, binding: Any, headers: Mapping[str, object],
         try:
             restrictions = parse_api_key_restrictions(raw_restrictions)
         except ValueError:
-            raise ProductReadAuthError(403, "INSUFFICIENT_SCOPE", "Invalid key restriction") from None
+            raise PrincipalAuthError(403, "INSUFFICIENT_SCOPE", "Invalid key restriction") from None
         if restrictions != raw_restrictions:
-            raise ProductReadAuthError(403, "INSUFFICIENT_SCOPE", "Invalid key restriction")
+            raise PrincipalAuthError(403, "INSUFFICIENT_SCOPE", "Invalid key restriction")
         if target_kind is not None and not target_allowed(restrictions, target_kind, project_id):
-            raise ProductReadAuthError(403, "TARGET_FORBIDDEN", "Target is outside API key restriction")
+            raise PrincipalAuthError(403, "TARGET_FORBIDDEN", "Target is outside API key restriction")
     else:
         restrictions = {}
     statements, validate = _resource_auth_snapshot(

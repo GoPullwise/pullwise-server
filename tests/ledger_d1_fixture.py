@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
-TOKEN = "pwk_synthetic_profile_and_usage"
+TOKEN = "pwk_synthetic_ledger_profile"
 
 
 class Store:
@@ -89,14 +89,12 @@ def seed(path, *, now=1_800_000_000):
                    (json.dumps({"owner": account}, separators=(",", ":")), now))
         db.execute("UPDATE app_state SET payload=?,updated_at=? WHERE name='billingEvents'",
                    ('{"event_fixture":{"status":"processed"}}', now))
-        db.execute("INSERT INTO account_entitlement_authority VALUES(?,?,?,?,?,?,?,?)",
-                   ("owner", 1, "pro", "2026-09", now - 864000, 5000, now + 864000, 0))
-        db.execute("INSERT INTO processing_usage_buckets VALUES(?,?,?,?,?,?,?)",
-                   ("owner", "2026-09", "intelligent_processing", 0, 1, 5000, now))
+        db.execute("INSERT INTO account_entitlement_authority VALUES(?,?,?,?,?,?,?)",
+                   ("owner", 1, "pro", "2026-09", now - 864000, now + 864000, 0))
     return SimpleNamespace(store=store, now=now), None, frozen
 
 
-def seed_auth(fixture, *, scopes=("profile:read", "usage:read"),
+def seed_auth(fixture, *, scopes=("profile:read",),
               session_expires=None, key_expires=None, restrictions="{}"):
     with fixture.store._immediate() as db:
         db.execute("UPDATE app_state SET payload=?,updated_at=? WHERE name='sessions'",

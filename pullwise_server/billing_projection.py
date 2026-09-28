@@ -1,4 +1,4 @@
-"""Pure Billing account DTO over persisted payment facts and product usage."""
+"""Pure Billing account DTO over persisted payment facts."""
 from __future__ import annotations
 
 from .api_key_dto_rules import _timestamp
@@ -57,10 +57,8 @@ def subscription_events_dto(user: dict) -> list[dict]:
     return result[:50]
 
 
-def billing_account_dto(user: dict, product_usage: dict,
-                        processing_activity: list[dict]) -> dict:
+def billing_account_dto(user: dict, plan: str) -> dict:
     current = user.get("billing") if isinstance(user.get("billing"), dict) else {}
-    plan = product_usage["plan"]
     return {"provider": _text(current.get("provider")),
         "status": _status(current.get("status")),
         "plan": plan,
@@ -77,8 +75,5 @@ def billing_account_dto(user: dict, product_usage: dict,
         "lastEventType": _text(current.get("lastEventType")),
         "lastEventCreated": _timestamp(current.get("lastEventCreated")),
         "updatedAt": _timestamp(current.get("updatedAt")),
-        "entitlements": product_usage["entitlements"],
-        "usage": product_usage["usage"],
-        "runtimeUsage": product_usage["runtimeUsage"],
-        "processingActivity": list(processing_activity),
+        "entitlements": None,
         "subscriptionEvents": subscription_events_dto(user)}

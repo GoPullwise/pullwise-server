@@ -8,7 +8,7 @@ from datetime import date, datetime, timezone
 from typing import Any, Mapping
 
 from .cloudflare_ledger_auth import ledger_principal, target_allowed
-from .cloudflare_principal import ProductReadAuthError, _header
+from .cloudflare_principal import PrincipalAuthError, _header
 
 
 def _error(status: int, code: str):
@@ -151,7 +151,7 @@ async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path
         if kind == "projects":
             return await _projects(binding, gateway, method, item_id, headers, params, body, now, scope)
         return await _categories(binding, method, item_id, headers, body, now, scope)
-    except ProductReadAuthError as exc:
+    except PrincipalAuthError as exc:
         return _error(exc.status, exc.code)
 
 

@@ -40,7 +40,7 @@ class CsvExport:
 
 from .cloudflare_ledger_api import _error, _param
 from .cloudflare_ledger_auth import ledger_principal, target_allowed
-from .cloudflare_principal import ProductReadAuthError
+from .cloudflare_principal import PrincipalAuthError
 
 
 def expense_filter(params: Mapping[str, object], *, paged: bool = False):
@@ -149,7 +149,7 @@ async def handle_report_request(*, binding, method, path, headers, params, now):
         parts = await binding.batch([*auth, binding.prepare(sql).bind(user["id"], *values, *restricted_values)])
         validate([part.results for part in parts[:len(auth)]])
         rows = parts[-1].results
-    except ProductReadAuthError as exc:
+    except PrincipalAuthError as exc:
         return _error(exc.status, exc.code)
     if is_export:
         async def next_page(after_date, after_id):

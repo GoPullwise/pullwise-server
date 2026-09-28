@@ -3,13 +3,7 @@ name = "pullwise-server"
 version = "0.1.0"
 description = "Cloudflare Worker modules for the Pullwise expense ledger"
 requires-python = ">=3.10.12,<3.11"
-dependencies = [
-  "Authlib>=1.6,<2",
-  "cryptography>=50.0.0,<51",
-  "PyGithub>=2.9,<3",
-  "requests>=2.33,<3",
-  "urllib3>=2.7,<3",
-]
+dependencies = []
 
 [project.optional-dependencies]
 deployment = ["PyYAML>=6.0.3,<7"]

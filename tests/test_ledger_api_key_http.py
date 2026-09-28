@@ -8,7 +8,7 @@ from pathlib import Path
 from pullwise_server.cloudflare_api_key_write import create_api_key, revoke_api_key
 from pullwise_server.cloudflare_ledger_auth import ledger_principal
 from pullwise_server.cloudflare_ledger_profile import read_ledger_me
-from pullwise_server.cloudflare_principal import ProductReadAuthError
+from pullwise_server.cloudflare_principal import PrincipalAuthError
 from test_cloudflare_github_identity_http import D1ShapedSQLite, GitHubStub, call, login, seed
 
 
@@ -51,17 +51,17 @@ class LedgerApiKeyHttpTests(unittest.TestCase):
         self.assertEqual(key["restrictions"], {"projectIds": ["prj_a"], "shared": False})
         token = {"Authorization": "Bearer " + key["key"]}
         self.assertEqual(self.authorize(token, "expenses:read", "project", "prj_a")[0]["id"], "usr_github_77")
-        with self.assertRaises(ProductReadAuthError) as denied:
+        with self.assertRaises(PrincipalAuthError) as denied:
             self.authorize(token, "expenses:read", "project", "prj_b")
         self.assertEqual(denied.exception.status, 403)
-        with self.assertRaises(ProductReadAuthError):
+        with self.assertRaises(PrincipalAuthError):
             self.authorize(token, "expenses:read", "shared")
-        with self.assertRaises(ProductReadAuthError):
+        with self.assertRaises(PrincipalAuthError):
             self.authorize(token, "projects:read", "project", "prj_a")
         status, _ = self.run_async(revoke_api_key(binding=self.binding, key_id=key["id"],
             headers=cookie, now=self.now + 4))
         self.assertEqual(status, 200)
-        with self.assertRaises(ProductReadAuthError) as revoked:
+        with self.assertRaises(PrincipalAuthError) as revoked:
             self.authorize(token, "expenses:read", "project", "prj_a")
         self.assertEqual(revoked.exception.status, 401)
 
@@ -80,7 +80,7 @@ class LedgerApiKeyHttpTests(unittest.TestCase):
                 db.execute("UPDATE api_keys SET restrictions=? WHERE id=?",
                            (json.dumps({"shared": False}), key["id"]))
             parts = await self.binding.batch(commands)
-            with self.assertRaises(ProductReadAuthError):
+            with self.assertRaises(PrincipalAuthError):
                 validate([part.results for part in parts])
         self.run_async(check())
 

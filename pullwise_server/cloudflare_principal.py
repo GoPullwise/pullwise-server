@@ -9,7 +9,7 @@ SESSION_COOKIE = "pw_session"
 API_KEY_PREFIX = "pwk_"
 
 
-class ProductReadAuthError(Exception):
+class PrincipalAuthError(Exception):
     def __init__(self, status: int, code: str, message: str) -> None:
         self.status, self.code, self.message = status, code, message
 
@@ -69,16 +69,16 @@ async def _principal(binding: Any, headers: Mapping[str, object],
     api_token = bearer if bearer.startswith(API_KEY_PREFIX) else ""
     if header_key and not header_key.startswith(API_KEY_PREFIX):
         if cookie_sessions or bearer:
-            raise ProductReadAuthError(400, "AMBIGUOUS_AUTH",
+            raise PrincipalAuthError(400, "AMBIGUOUS_AUTH",
                 "Use either a session or an API key, not both.")
-        raise ProductReadAuthError(401, "UNAUTHENTICATED",
+        raise PrincipalAuthError(401, "UNAUTHENTICATED",
             "A session or API key is required.")
     if header_key.startswith(API_KEY_PREFIX):
         if api_token and header_key != api_token:
-            raise ProductReadAuthError(400, "AMBIGUOUS_AUTH", "Use one API key.")
+            raise PrincipalAuthError(400, "AMBIGUOUS_AUTH", "Use one API key.")
         api_token = header_key
     if api_token and (cookie_sessions or (bearer and not bearer.startswith(API_KEY_PREFIX))):
-        raise ProductReadAuthError(400, "AMBIGUOUS_AUTH",
+        raise PrincipalAuthError(400, "AMBIGUOUS_AUTH",
             "Use either a session or an API key, not both.")
     if api_token:
         key_hash = hashlib.sha256(api_token.encode("utf-8")).hexdigest()
@@ -87,19 +87,19 @@ async def _principal(binding: Any, headers: Mapping[str, object],
         expires_at = _timestamp(record["expires_at"]) if record else None
         if (not record or (record["expires_at"] is not None
                            and (expires_at is None or expires_at < now))):
-            raise ProductReadAuthError(401, "UNAUTHENTICATED", "A session or API key is required.")
+            raise PrincipalAuthError(401, "UNAUTHENTICATED", "A session or API key is required.")
         try:
             scopes = json.loads(record["scopes"])
             restrictions = json.loads(record["restrictions"])
         except (TypeError, ValueError):
-            raise ProductReadAuthError(403, "INSUFFICIENT_SCOPE", "API key scope is invalid.") from None
+            raise PrincipalAuthError(403, "INSUFFICIENT_SCOPE", "API key scope is invalid.") from None
         if not isinstance(scopes, list) or scope not in scopes:
-            raise ProductReadAuthError(403, "INSUFFICIENT_SCOPE", f"API key scope {scope} is required.")
+            raise PrincipalAuthError(403, "INSUFFICIENT_SCOPE", f"API key scope {scope} is required.")
         if not isinstance(restrictions, dict) or restrictions.get("kind") == "audit_bundle":
-            raise ProductReadAuthError(403, "INSUFFICIENT_SCOPE", "API key restriction forbids this read.")
+            raise PrincipalAuthError(403, "INSUFFICIENT_SCOPE", "API key restriction forbids this read.")
         user = await _user(binding, str(record["user_id"]))
         if user is None:
-            raise ProductReadAuthError(401, "UNAUTHENTICATED", "A session or API key is required.")
+            raise PrincipalAuthError(401, "UNAUTHENTICATED", "A session or API key is required.")
         return user, restrictions
     if session_ids:
         row = await binding.prepare("SELECT payload FROM app_state WHERE name='sessions'").first()
@@ -118,7 +118,7 @@ async def _principal(binding: Any, headers: Mapping[str, object],
                         "github" in (user.get("providers") or [])
                         and not user.get("githubAccessToken"))):
                     return user, {}
-    raise ProductReadAuthError(401, "UNAUTHENTICATED", "A session or API key is required.")
+    raise PrincipalAuthError(401, "UNAUTHENTICATED", "A session or API key is required.")
 
 
 def _resource_auth_snapshot(binding: Any, headers: Mapping[str, object],
@@ -143,14 +143,14 @@ def _resource_auth_snapshot(binding: Any, headers: Mapping[str, object],
         key_rows, session_rows, user_rows = rows
         saved_user = json.loads(user_rows[0]["snapshot"]) if len(user_rows) == 1 else None
         if saved_user != user:
-            raise ProductReadAuthError(401, "UNAUTHENTICATED", "A session or API key is required.")
+            raise PrincipalAuthError(401, "UNAUTHENTICATED", "A session or API key is required.")
         if token:
             record = key_rows[0] if len(key_rows) == 1 else None
             expiry = _timestamp(record["expires_at"]) if record else None
             if (not record or record["revoked_at"] is not None
                     or record["user_id"] != owner_id
                     or (record["expires_at"] is not None and (expiry is None or expiry < now))):
-                raise ProductReadAuthError(401, "UNAUTHENTICATED", "A session or API key is required.")
+                raise PrincipalAuthError(401, "UNAUTHENTICATED", "A session or API key is required.")
             try:
                 scopes = json.loads(record["scopes"])
                 current_restrictions = json.loads(record["restrictions"])
@@ -161,7 +161,7 @@ def _resource_auth_snapshot(binding: Any, headers: Mapping[str, object],
                     or current_restrictions != restrictions
                     or not isinstance(current_restrictions, dict)
                     or current_restrictions.get("kind") == "audit_bundle"):
-                raise ProductReadAuthError(403, "INSUFFICIENT_SCOPE", "API key scope is invalid.")
+                raise PrincipalAuthError(403, "INSUFFICIENT_SCOPE", "API key scope is invalid.")
             if proof is not None:
                 proof.update(key=record, sessions=None, user=user_rows[0]["snapshot"], token=token)
             return
@@ -177,6 +177,6 @@ def _resource_auth_snapshot(binding: Any, headers: Mapping[str, object],
                                      user=user_rows[0]["snapshot"], token=None,
                                      session_id=session_id)
                     return
-        raise ProductReadAuthError(401, "UNAUTHENTICATED", "A session or API key is required.")
+        raise PrincipalAuthError(401, "UNAUTHENTICATED", "A session or API key is required.")
 
     return statements, validate

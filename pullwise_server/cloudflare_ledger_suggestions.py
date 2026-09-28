@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from .cloudflare_ledger_api import _error, _write_guard
 from .cloudflare_ledger_auth import ledger_principal
-from .cloudflare_principal import ProductReadAuthError
+from .cloudflare_principal import PrincipalAuthError
 from .cloudflare_ledger_expenses import _amount
 from .typesafe_client import DEFAULT_JEV_MODEL, build_request, validate_response
 
@@ -92,7 +92,7 @@ async def handle_suggestion_request(*, binding, method, headers, body, now, gate
         categories, recent = rows[len(auth)].results, rows[len(auth) + 1].results
         if project_id and not rows[-1].results:
             return _error(404, "NOT_FOUND")
-    except ProductReadAuthError as exc:
+    except PrincipalAuthError as exc:
         return _error(exc.status, exc.code)
     if gateway is None or not gateway.enabled:
         return 200, {"status": "unavailable", "reason": "disabled", "suggestions": {}}
@@ -189,7 +189,7 @@ async def handle_suggestion_decision(*, binding, method, path, headers, body, no
         parts = await binding.batch([*auth, *checks])
         validate([part.results for part in parts[:len(auth)]])
         event, category = parts[len(auth)].results, parts[len(auth) + 1].results
-    except ProductReadAuthError as exc:
+    except PrincipalAuthError as exc:
         return _error(exc.status, exc.code)
     if not event:
         return _error(404, "NOT_FOUND")

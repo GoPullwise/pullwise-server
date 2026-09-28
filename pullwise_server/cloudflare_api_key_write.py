@@ -14,7 +14,7 @@ from .api_key_dto_rules import (
 )
 
 from .cloudflare_principal import (
-    ProductReadAuthError, _bearer, _cookie_sessions, _header,
+    PrincipalAuthError, _bearer, _cookie_sessions, _header,
     _principal, _resource_auth_snapshot,
 )
 
@@ -39,7 +39,7 @@ async def revoke_api_key(*, binding: Any, key_id: str,
         return 401, {"error": {"code": "UNAUTHENTICATED"}}
     try:
         user, _ = await _principal(binding, headers, scope="profile:read", now=now)
-    except ProductReadAuthError as failure:
+    except PrincipalAuthError as failure:
         return failure.status, {"error": {"code": failure.code}}
     proof: dict = {}
     auth, validate = _resource_auth_snapshot(binding, headers, user, {}, now,
@@ -48,7 +48,7 @@ async def revoke_api_key(*, binding: Any, key_id: str,
         WHERE id=? AND user_id=? AND revoked_at IS NULL""").bind(key_id, user["id"])])
     try:
         validate([part.results for part in result[:len(auth)]])
-    except ProductReadAuthError as failure:
+    except PrincipalAuthError as failure:
         return failure.status, {"error": {"code": failure.code}}
     if not result[-1].results:
         return 404, {"error": {"code": "NOT_FOUND"}}
@@ -97,7 +97,7 @@ async def create_api_key(*, binding: Any, headers: Mapping[str, object],
         return 400, {"error": {"code": "INVALID_REQUEST"}}
     try:
         user, _ = await _principal(binding, headers, scope="profile:read", now=now)
-    except ProductReadAuthError as failure:
+    except PrincipalAuthError as failure:
         return failure.status, {"error": {"code": failure.code}}
     proof: dict = {}
     auth, validate = _resource_auth_snapshot(binding, headers, user, {}, now,
@@ -105,7 +105,7 @@ async def create_api_key(*, binding: Any, headers: Mapping[str, object],
     snapshot = await binding.batch(auth)
     try:
         validate([part.results for part in snapshot])
-    except ProductReadAuthError as failure:
+    except PrincipalAuthError as failure:
         return failure.status, {"error": {"code": failure.code}}
     token = _new_api_token()
     key_id = f"ak_{uuid.uuid4().hex}"

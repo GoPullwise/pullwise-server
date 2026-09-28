@@ -12,19 +12,12 @@ def schema():
             owner_id TEXT PRIMARY KEY, revision INTEGER NOT NULL CHECK(revision>=1),
             plan TEXT NOT NULL, period TEXT NOT NULL,
             period_start INTEGER NOT NULL CHECK(period_start>=0),
-            monthly_processing_limit INTEGER NOT NULL CHECK(monthly_processing_limit>=0),
             valid_until INTEGER NOT NULL, dirty INTEGER NOT NULL CHECK(dirty IN (0,1))
-        )""", ()),
-        ("""CREATE TABLE IF NOT EXISTS d1_claim_authority(
-            job_id TEXT PRIMARY KEY, account_revision INTEGER NOT NULL CHECK(account_revision>=1)
         )""", ()),
         ("""CREATE TABLE IF NOT EXISTS billing_webhook_receipts(
             event_id TEXT PRIMARY KEY, raw_sha256 TEXT NOT NULL,
             update_json TEXT NOT NULL, received_at INTEGER NOT NULL,
             state TEXT NOT NULL CHECK(state IN ('pending','applied'))
-        )""", ()),
-        ("""CREATE TABLE IF NOT EXISTS d1_enqueue_decision(
-            job_id TEXT PRIMARY KEY, admit INTEGER NOT NULL CHECK(admit IN (0,1))
         )""", ()),
     ]
 
@@ -48,18 +41,18 @@ def _projection(owner_id, account_snapshot, now):
     period, valid_until = quota_cycle_for_user(user, plan, timestamp=now)
     if valid_until <= now:
         raise ValueError("expired account cycle")
-    return plan, period, period_start_for_key(period, valid_until), 0, valid_until
+    return plan, period, period_start_for_key(period, valid_until), valid_until
 
 
 def initialize_account(*, owner_id, account_snapshot, now):
     """Local synthetic seed after the account has been persisted; no API entrypoint."""
-    plan, period, period_start, monthly_processing_limit, valid_until = _projection(owner_id, account_snapshot, now)
+    plan, period, period_start, valid_until = _projection(owner_id, account_snapshot, now)
     return [_check("""EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u
         WHERE a.name='users' AND u.key=? AND u.value=?)""", (owner_id, account_snapshot)),
         ("""INSERT INTO account_entitlement_authority
-        (owner_id,revision,plan,period,period_start,monthly_processing_limit,valid_until,dirty)
-        VALUES (?,1,?,?,?,?,?,0)""",
-        (owner_id, plan, period, period_start, monthly_processing_limit, valid_until)),
+        (owner_id,revision,plan,period,period_start,valid_until,dirty)
+        VALUES (?,1,?,?,?,?,0)""",
+        (owner_id, plan, period, period_start, valid_until)),
         ("DELETE FROM d1_command_guard", ())]
 
 
@@ -253,19 +246,15 @@ def stage_account_event(*, owner_id, expected_revision, account_snapshot,
 
 def refresh_account_entitlement(*, owner_id, expected_revision, account_snapshot, now):
     """Commit a trusted entitlement calculation over the persisted account."""
-    plan, period, period_start, monthly_processing_limit, valid_until = _projection(owner_id, account_snapshot, now)
+    plan, period, period_start, valid_until = _projection(owner_id, account_snapshot, now)
     return [
         _check("""EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u,
             account_entitlement_authority authority WHERE a.name='users' AND u.key=?
             AND u.value=? AND authority.owner_id=? AND authority.revision=?)""",
             (owner_id, account_snapshot, owner_id, expected_revision)),
         ("""UPDATE account_entitlement_authority SET revision=revision+1,plan=?,period=?,
-            period_start=?,monthly_processing_limit=?,valid_until=?,dirty=0
+            period_start=?,valid_until=?,dirty=0
             WHERE owner_id=? AND revision=?""",
-            (plan, period, period_start, monthly_processing_limit, valid_until, owner_id, expected_revision)), _changed(),
-        ("""UPDATE processing_usage_buckets SET limit_value=?,updated_at=?
-            WHERE billing_owner_id=? AND period=? AND metric='intelligent_processing'
-            AND limit_value<>?""",
-            (monthly_processing_limit, now, owner_id, period, monthly_processing_limit)),
+            (plan, period, period_start, valid_until, owner_id, expected_revision)), _changed(),
         ("DELETE FROM d1_command_guard", ()),
     ]

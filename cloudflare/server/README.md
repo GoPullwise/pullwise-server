@@ -1,6 +1,6 @@
 # Pullwise Server Worker
 
-`src/entry.py` is the Cloudflare Python Worker for the project expense ledger. It routes GitHub sign-in and App authorization, account API keys, Creem subscription and webhook requests, `/api/v1` ledger resources, per-currency reports, paginated CSV export, and optional Jev suggestions. PR/CI/Updates collection and analysis routes are not mounted.
+`src/entry.py` is the Cloudflare Python Worker for the project expense ledger. It routes GitHub sign-in and App authorization, account API keys, Creem subscription and webhook requests, `/api/v1` ledger resources, per-currency reports, paginated CSV export, and optional Jev suggestions.
 
 ## Source and database
 
@@ -24,4 +24,4 @@ python3 cloudflare/server/sync_server_modules.py --check
 bash -n scripts/deploy-cloudflare.sh
 ```
 
-The stage handoffs record the focused pytest suite and outstanding remote checks. `scripts/deploy-cloudflare.sh` prints intended steps by default and requires explicit execution for remote D1 migration and Worker deployment. Production needs separate review of migration, config and rollback.
+The [local acceptance record](../../docs/validation/local-acceptance.md) records all current tests and outstanding runtime checks. All Wrangler/workerd and D1 commands, including local probes, are paused until explicit user authorization. Do not add cron triggers. `scripts/deploy-cloudflare.sh` prints intended steps by default and requires explicit execution for remote D1 migration and Worker deployment. Production needs separate review of migration, config and rollback.

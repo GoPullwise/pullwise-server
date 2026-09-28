@@ -58,6 +58,10 @@ class LedgerDeployContractTests(unittest.TestCase):
             with sqlite3.connect(path) as database:
                 for migration in sorted((ROOT / "cloudflare/server/migrations").glob("*.sql")):
                     database.executescript(migration.read_text())
+                tables = {row[0] for row in database.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'")}
+                self.assertFalse(tables.intersection({"processing_usage_buckets",
+                    "processing_usage_ledger", "provider_attempts"}))
             store = Store.__new__(Store)
             store.path = path
             async def read_body():

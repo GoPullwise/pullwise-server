@@ -5,3 +5,8 @@ python_modules/
 src/pullwise_server/
 __pycache__/
 *.pyc
+
+# Local Worker credentials
+.dev.vars
+.dev.vars.*
+!.dev.vars.example

@@ -6,7 +6,7 @@ from typing import Any, Mapping
 
 from .api_key_dto_rules import ALLOWED_SCOPES
 from .cloudflare_ledger_auth import ledger_principal
-from .cloudflare_principal import ProductReadAuthError, _bearer, _header
+from .cloudflare_principal import PrincipalAuthError, _bearer, _header
 
 
 async def read_ledger_me(*, binding: Any, headers: Mapping[str, object], now: int) -> tuple[int, dict]:
@@ -15,7 +15,7 @@ async def read_ledger_me(*, binding: Any, headers: Mapping[str, object], now: in
             binding=binding, headers=headers, scope="profile:read", now=now)
         parts = await binding.batch(commands)
         validate([part.results for part in parts])
-    except ProductReadAuthError as failure:
+    except PrincipalAuthError as failure:
         return failure.status, {"error": {"code": failure.code}}
     key = _bearer(headers).startswith("pwk_") or bool(_header(headers, "X-Pullwise-Api-Key"))
     scopes = json.loads(parts[0].results[0]["scopes"]) if key else sorted(ALLOWED_SCOPES)

@@ -35,8 +35,7 @@ def _seed_health_read_tables(db):
                   "expense_create_idempotency", "expense_suggestion_budget",
                   "expense_suggestion_events", "api_keys", "billing_public_catalog",
                   "d1_command_guard", "account_entitlement_authority",
-                  "billing_webhook_receipts", "processing_usage_buckets",
-                  "processing_usage_ledger", "provider_attempts"):
+                  "billing_webhook_receipts"):
         db.execute(f'CREATE TABLE IF NOT EXISTS "{table}" (id TEXT PRIMARY KEY)')
 
 
@@ -87,14 +86,6 @@ def test_health_rejects_incomplete_d1_auth_schema(tmp_path):
     assert status == 503 and payload["ok"] is False
 
 
-@pytest.mark.parametrize("table", ["processing_usage_buckets", "processing_usage_ledger", "provider_attempts"])
-def test_health_does_not_depend_on_retired_processing_tables(tmp_path, table):
-    fixture, _, _ = seed(tmp_path / "domain.db")
-    with fixture.store._immediate() as db:
-        _seed_health_read_tables(db)
-        db.execute(f'DROP TABLE "{table}"')
-    status, payload = _get_health(D1ShapedSQLite(fixture.store))
-    assert status == 200 and payload["ok"] is True
 
 
 @pytest.mark.parametrize("table", ["ledger_projects", "expenses", "expense_events",

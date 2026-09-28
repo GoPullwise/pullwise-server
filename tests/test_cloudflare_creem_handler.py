@@ -39,7 +39,6 @@ def test_signed_paid_upgrade_settles_and_refreshes_existing_bucket(tmp_path):
         assert user["billing"]["plan"] == "max"
         assert user["githubAccessToken"] == json.loads(frozen)["githubAccessToken"]
         assert tuple(db.execute("SELECT revision,dirty,plan FROM account_entitlement_authority").fetchone()) == (3, 0, "max")
-        assert tuple(db.execute("SELECT used,reserved,limit_value FROM processing_usage_buckets").fetchone()) == (0, 1, 5000)
         assert db.execute("SELECT state FROM billing_webhook_receipts WHERE event_id='evt-upgrade'").fetchone()[0] == "applied"
     assert asyncio.run(accept_signed_creem_webhook(**args)) == {
         "received": True, "state": "duplicate", "eventId": "evt-upgrade"}
@@ -100,11 +99,9 @@ def test_duplicate_delivery_repairs_dirty_projection_after_refresh_failure(tmp_p
         assert db.execute("SELECT state FROM billing_webhook_receipts "
             "WHERE event_id='evt-refresh-retry'").fetchone()[0] == "applied"
         assert tuple(db.execute("SELECT revision,dirty FROM account_entitlement_authority").fetchone()) == (2, 1)
-        assert db.execute("SELECT limit_value FROM processing_usage_buckets").fetchone()[0] == 5000
     assert asyncio.run(accept_signed_creem_webhook(**args))["state"] == "duplicate"
     with closing(fixture.store.connect()) as db:
         assert tuple(db.execute("SELECT revision,dirty FROM account_entitlement_authority").fetchone()) == (3, 0)
-        assert db.execute("SELECT limit_value FROM processing_usage_buckets").fetchone()[0] == 5000
 
 
 def test_oversized_body_never_reaches_d1(tmp_path):

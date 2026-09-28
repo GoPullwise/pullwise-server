@@ -10,7 +10,7 @@ from typing import Any, Mapping
 
 from .cloudflare_ledger_api import _error, _live_repos, _param, _revision, _timestamp, _write_guard
 from .cloudflare_ledger_auth import ledger_principal, target_allowed
-from .cloudflare_principal import ProductReadAuthError, _header
+from .cloudflare_principal import PrincipalAuthError, _header
 
 # ISO 4217 active alphabetic units; exponents are fixed here so Worker runtime
 # does not depend on the host locale or a floating point conversion library.
@@ -152,7 +152,7 @@ async def handle_expense_request(*, binding: Any, gateway: Any, method: str, pat
         else:
             data = None
         return await _write(binding, gateway, method, item_id, headers, data, now)
-    except ProductReadAuthError as exc:
+    except PrincipalAuthError as exc:
         return _error(exc.status, exc.code)
 
 
@@ -265,7 +265,7 @@ async def _write(binding, gateway, method, item_id, headers, data, now):
                         FROM expense_create_idempotency WHERE owner_id=? AND idempotency_key=?""").bind(owner, key)])
                 if replay_rows[0] and replay_rows[0][0]["request_sha256"] == digest:
                     return 201, json.loads(replay_rows[0][0]["response_json"])
-            except ProductReadAuthError as exc:
+            except PrincipalAuthError as exc:
                 return _error(exc.status, exc.code)
             return _error(409, "EXPENSE_CONFLICT")
         return 201, payload

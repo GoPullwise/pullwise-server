@@ -133,7 +133,6 @@ def test_session_delete_revokes_api_key_without_usage_or_model_write(tmp_path):
     assert get(binding, {"Cookie": "pw_session=session-local"}, fixture.now)[1]["items"] == []
     with fixture.store._immediate() as db:
         assert db.execute("SELECT revoked_at FROM api_keys WHERE id='key-local'").fetchone()[0] == fixture.now
-        assert db.execute("SELECT COUNT(*) FROM provider_attempts").fetchone()[0] == 0
 
 
 def test_api_key_delete_rolls_back_if_session_changes_before_write(tmp_path):

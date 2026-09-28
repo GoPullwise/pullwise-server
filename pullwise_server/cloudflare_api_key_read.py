@@ -5,7 +5,7 @@ from typing import Any, Mapping
 
 from .api_key_dto_rules import api_key_public_payload
 from .cloudflare_principal import (
-    ProductReadAuthError, _bearer, _cookie_sessions, _header,
+    PrincipalAuthError, _bearer, _cookie_sessions, _header,
     _principal, _resource_auth_snapshot,
 )
 
@@ -18,7 +18,7 @@ async def list_api_keys(*, binding: Any, headers: Mapping[str, object],
         return 401, {"error": {"code": "UNAUTHENTICATED"}}
     try:
         user, _ = await _principal(binding, headers, scope="profile:read", now=now)
-    except ProductReadAuthError as failure:
+    except PrincipalAuthError as failure:
         return failure.status, {"error": {"code": failure.code}}
     auth, validate = _resource_auth_snapshot(binding, headers, user, {}, now,
         "profile:read")
@@ -28,7 +28,7 @@ async def list_api_keys(*, binding: Any, headers: Mapping[str, object],
         ORDER BY created_at DESC,id DESC""").bind(user["id"])])
     try:
         validate([part.results for part in result[:len(auth)]])
-    except ProductReadAuthError as failure:
+    except PrincipalAuthError as failure:
         return failure.status, {"error": {"code": failure.code}}
     items = [api_key_public_payload(row) for row in result[-1].results]
     return 200, {"items": items, "apiKeys": items}

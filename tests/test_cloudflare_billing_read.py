@@ -30,16 +30,14 @@ def get(binding, headers, now):
         creem_secret="", configured_products={}, now=now))
 
 
-def test_billing_cookie_read_matches_product_and_payment_projection(tmp_path):
+def test_billing_cookie_read_matches_payment_projection(tmp_path):
     fixture, _, frozen = seed(tmp_path / "domain.db")
     _seed_auth(fixture)
     binding = D1ShapedSQLite(fixture.store)
     status, payload = get(binding, {"Cookie": "pw_session=session-local"}, fixture.now)
     assert status == 200 and payload["page"]["id"] == "billing"
     user = json.loads(frozen)
-    expected = billing_account_dto(user,
-        {"plan": effective_user_plan(user, timestamp=fixture.now),
-         "entitlements": None, "usage": None, "runtimeUsage": None}, [])
+    expected = billing_account_dto(user, effective_user_plan(user, timestamp=fixture.now))
     assert payload["account"] == expected
     assert binding.batch_count == 1
     assert get(binding, {"Authorization": f"Bearer {TOKEN}"}, fixture.now)[0] == 401
@@ -58,6 +56,16 @@ def test_billing_cookie_revocation_before_read_batch_hides_account(tmp_path):
     status, payload = get(binding, {"Cookie": "pw_session=session-local"}, fixture.now)
     assert status == 401 and payload["error"]["code"] == "UNAUTHENTICATED"
     assert binding.batch_count == 1
+
+
+def test_billing_exposes_payment_facts_without_retired_processing_fields(tmp_path):
+    fixture, _, _ = seed(tmp_path / "ledger.db")
+    _seed_auth(fixture)
+    status, payload = get(D1ShapedSQLite(fixture.store),
+        {"Cookie": "pw_session=session-local"}, fixture.now)
+    assert status == 200
+    assert payload["account"]["subscriptionId"] == "sub_fixture"
+    assert not {"usage", "runtimeUsage", "processingActivity"}.intersection(payload["account"])
 
 
 def test_public_plan_uses_fresh_saved_catalog_and_cookie_account_snapshot(tmp_path):

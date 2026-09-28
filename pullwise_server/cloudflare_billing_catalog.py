@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from .cloudflare_billing_read import billing_account_from_parts, billing_statements
+from .billing_projection import billing_account_dto
+from .account_cycle_rules import effective_user_plan
 from .cloudflare_principal import (
-    ProductReadAuthError, _cookie_sessions, _header, _principal,
+    PrincipalAuthError, _cookie_sessions, _header, _principal,
     _resource_auth_snapshot,
 )
 from .billing_catalog_rules import catalog_payload as _catalog_payload
@@ -24,7 +25,7 @@ async def read_public_plan(*, binding: Any, headers: Mapping[str, object],
     if not public_only:
         try:
             user, _ = await _principal(binding, headers, scope="profile:read", now=now)
-        except ProductReadAuthError:
+        except PrincipalAuthError:
             user = None
     if user is None:
         result = await binding.batch([binding.prepare(_CATALOG_SQL)])
@@ -33,16 +34,14 @@ async def read_public_plan(*, binding: Any, headers: Mapping[str, object],
                 (503, {"error": {"code": "BILLING_CATALOG_UNAVAILABLE"}}))
     auth, validate = _resource_auth_snapshot(binding, headers, user, {}, now,
         "profile:read")
-    period, statements = billing_statements(binding, user, now)
-    result = await binding.batch([*auth, *statements,
+    result = await binding.batch([*auth,
         binding.prepare(_CATALOG_SQL)])
     catalog = _catalog_payload(result[-1].results, now)
     if catalog is None:
         return 503, {"error": {"code": "BILLING_CATALOG_UNAVAILABLE"}}
     try:
         validate([part.results for part in result[:len(auth)]])
-    except ProductReadAuthError:
+    except PrincipalAuthError:
         return 200, catalog
-    catalog["account"] = billing_account_from_parts(user, period,
-        result[len(auth):-1], now)
+    catalog["account"] = billing_account_dto(user, effective_user_plan(user, timestamp=now))
     return 200, catalog

@@ -17,7 +17,7 @@ from .cloudflare_session_adapter import D1SessionTransactions
 from .cloudflare_account_adapter import D1AccountTransactions
 from .cloudflare_principal import _cookie_sessions, _header
 from .cloudflare_ledger_auth import ledger_principal
-from .cloudflare_principal import ProductReadAuthError
+from .cloudflare_principal import PrincipalAuthError
 
 SESSION_AGE = 7 * 86400
 
@@ -270,7 +270,7 @@ async def handle_identity_request(*, binding: Any, gateway: Any, now: int,
                     binding=binding, headers=headers, scope="projects:read", now=now)
                 snapshot = await binding.batch(auth)
                 validate([part.results for part in snapshot])
-            except ProductReadAuthError as failure:
+            except PrincipalAuthError as failure:
                 return failure.status, {"error": {"code": failure.code}}, no_store
         else:
             _, user = await _session_user(binding, headers, now)

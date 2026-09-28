@@ -1,8 +1,8 @@
 # Pullwise 转型设计：GitHub 项目支出记账
 
-状态：设计稿，2026-09-27。本文描述目标产品和实施边界，不表示现有代码已经实现。本文中的“项目”指一个 GitHub repository，而非 GitHub Projects 看板。前端 `pullwise-web` 与后端 `pullwise-server` 仍为独立部署单元。
+状态：当前产品设计，2026-09-28。本文描述产品契约和实施边界，运行验收状态见两端验证记录。本文中的“项目”指一个 GitHub repository，而非 GitHub Projects 看板。前端 `pullwise-web` 与后端 `pullwise-server` 仍为独立部署单元。
 
-实施状态（2026-09-28）：S01–S16 的目标代码已在两端完成本地实现，S15 的旧 Server 运行时已删除；S12 长篇多语言文案已补齐。S17 的本地静态、合成数据库与 Web 测试持续记录在两端 `docs/handoffs/S17-*.md`；Python CSV 到 `ReadableStream` 的真实 workerd 验证仍未进行，因此不得将 S17 记为全部验收通过。S18 Cloudflare 预览、远程 D1 迁移及真实 GitHub/Creem/Jev 验收未执行，缺预览域名、D1 ID 与 Wrangler 凭证。下文“当前仓库事实与差距”保留设计时的 2026-09-27 基线，不代表今天的代码状态。
+实施状态（2026-09-28）：原 S01–S16 的目标代码已完成本地实现。当前测试及剩余事项集中在两端 `docs/validation/local-acceptance.md`。S17 真实 workerd CSV 桥接及 Worker 联调未完成；S18 预览、远程迁移和真实提供商验收未执行，不能宣称全部验收通过。
 
 ## 1. 产品目标与边界
 
@@ -12,17 +12,17 @@
 
 现有 Creem 支付是用户购买 Pullwise 服务的**平台账单**，用户填写的项目支出是**业务记账数据**。两者必须使用不同表、API、导航和文案；平台支付不会自动成为项目支出。保留既有支付交易事实、订阅历史、Webhook 验签及幂等处理，产品套餐权益改为适合记账服务的项目数、记录数或 Jev 辅助次数，具体价格和限额须在实施前与运营配置对齐。核心手工记账和报表不依赖 Jev。
 
-## 2. 当前仓库事实与差距
+## 2. 当前实现入口
 
-| 领域 | 当前证据 | 迁移判断 |
-| --- | --- | --- |
-| GitHub 身份和仓库授权 | Server `pullwise_server/_app_part_10_handler_main.py` 有 `/auth/github/*`、`/integrations/github/*`、`/repositories`；`github_auth.py` 和 `github_authorization.py` 承担 OAuth/App 逻辑 | 保留授权方式和安全约束；将必要处理移植到 Cloudflare Server Worker，而非重新设计登录 |
-| Token | `db.py` 和 `cloudflare_api_key_*` 保存哈希化 API Key；当前作用域仍是 PR/CI/Updates 相关范围 | 复用一次展示、哈希存储、撤销与认证机制；替换为记账作用域并更新前后端与文档 |
-| 支付 | 本地 Server 有 `/billing/*`、`/webhooks/creem`；Cloudflare 候选入口只有部分账单读取及 Creem Webhook | 保留支付事实与流程，并补齐 Cloudflare 上的购买、套餐变更、取消/恢复和可信目录刷新；不能把候选入口当成已可上线 |
-| 旧核心 | `product_*`、部分 `github_*`、`cloudflare_*` 和 Web `dashboard.jsx`、`product-management.jsx`、`product.js` 面向 PR/CI/Updates | 用记账模型、API 和页面替换；按依赖核对后删除旧采集、分析、Job 与页面代码 |
-| 部署 | Web 的 `wrangler.jsonc` + `worker.js` 已配置静态资源和 `/api/*` 代理，`package.json` 有 `deploy:workers`；Server `cloudflare/server/wrangler.jsonc` 是 `workers_dev:false`、无 routes、`remote:false` 的本地候选 | Web 保留同源代理；Server 增加可部署配置、D1 migrations、部署脚本及完整 HTTP 入口，当前配置不能直接当生产配置 |
-
-`pullwise-web/README.md` 仍把 Server 描述为 VM/容器服务，而现目标要求两端都部署到 Cloudflare；实施时同步改 README、运行手册和 CI。旧 PR/CI/Updates 设计与状态文档已移除；`openapi/product-v1.yaml` 暂留作当前运行代码的契约，实施时替换，不继续作为新服务的产品定义。仓库目前有大量未提交改动，代码删除清单必须在实施时以当时工作树和引用关系复核，不允许按文件名前缀批量删除。
+| 领域 | 当前入口 |
+| --- | --- |
+| Worker HTTP | `cloudflare/server/src/entry.py`；依赖源位于 `pullwise_server/` |
+| 身份与权限 | `cloudflare_github_identity_http.py`、`cloudflare_principal.py`、`cloudflare_ledger_auth.py`、`cloudflare_api_key_*` |
+| 项目、类别、支出 | `cloudflare_ledger_api.py`、`cloudflare_ledger_expenses.py` |
+| 报表与导出 | `cloudflare_ledger_reports.py`；CSV 每页 250 条，Python 到 JavaScript 流的运行时验收待完成 |
+| 平台支付 | `cloudflare_billing_*`、`cloudflare_creem_*`、`cloudflare_account_adapter.py`；支付事实与支出分离 |
+| 可选建议 | `cloudflare_ledger_suggestions.py`、`cloudflare_jev_gateway.py`、`typesafe_client.py`；默认关闭 |
+| Web | `src/api/ledger.js`、`src/screens/ledger.jsx`、账户/支付页面及 `worker.js` 同源代理 |
 
 ## 3. 目标架构
 
@@ -62,7 +62,7 @@ flowchart LR
 
 ## 5. REST API 契约草案
 
-所有业务路径以 `/api/v1` 开头；Web 使用 `/api/api/v1/...` 的同源代理路径时应由现有请求 helper 统一组装，避免手写双前缀。实现时以一份新的 OpenAPI 文件为准并生成/校验前端 client。以下路径为目标契约，不能把当前 `product-v1.yaml` 直接视为已覆盖。
+所有业务路径以 `/api/v1` 开头；Web 使用 `/api/api/v1/...` 的同源代理路径时应由现有请求 helper 统一组装，避免手写双前缀。实现时以一份新的 OpenAPI 文件为准并生成/校验前端 client。实际契约以 `openapi/ledger-v1.yaml` 为准。
 
 | 方法与路径 | 作用 | 建议的 Key scope |
 | --- | --- | --- |
@@ -100,50 +100,17 @@ Session Cookie 和 Bearer Key 共用业务授权与 DTO；登录/支付/API Key 
 | 公共池提示 | 用途描述和用户已选择的目标；Noul 问“这笔费用是否明显跨多个项目？” | 仅提示用户核对归属，不自动改为公共池或分摊 |
 | 疑似重复 | 当前草稿与同账户、相近日期金额的有限候选记录；Choice/Score 判断相似度 | 提示可能重复的记录链接；精确去重仍靠 Idempotency-Key 和用户确认 |
 
-类别 ID 必须由后端验证为该账户当前允许的类别；即使 Jev 高置信度也不能创建类别、入账、改金额、推断汇率或决定 GitHub/支付权限。服务端设请求大小、超时、费用/调用次数上限和故障降级；保存问题版本、模型版本、候选、概率与用户接受/改选结果，便于评估。先用中英文真实匿名样本标注准确率、误提示率和“不确定”覆盖率，再决定阈值；未通过评估时保持功能关闭。现有 `typesafe_client.py`、`product_analysis_*` 的 Jev 链路为旧 PR/CI/Updates 产品服务，不能直接当成记账接入；可复用其安全传输与 SDK 经验，但需隔离新的问题定义和调用预算。Cloudflare Python Worker 对目标 SDK/网络调用的生产适配需在完成实现后验证，必要时使用 Server Worker 内受控 HTTP 调用。服务端密钥使用 Cloudflare Secret。
+类别 ID 必须由后端验证为该账户当前允许的类别；即使 Jev 高置信度也不能创建类别、入账、改金额、推断汇率或决定 GitHub/支付权限。服务端设请求大小、超时、费用/调用次数上限和故障降级；保存问题版本、模型版本、候选、概率与用户接受/改选结果，便于评估。先用中英文真实匿名样本标注准确率、误提示率和“不确定”覆盖率，再决定阈值；未通过评估时保持功能关闭。建议问题和调用预算由 `cloudflare_ledger_suggestions.py` 定义；`typesafe_client.py` 验证固定模型、输入与响应，`cloudflare_jev_gateway.py` 提供 Worker 传输。Cloudflare Python Worker 对目标 SDK/网络调用的生产适配需在完成实现后验证，必要时使用 Server Worker 内受控 HTTP 调用。服务端密钥使用 Cloudflare Secret。
 
-## 8. 清理清单与实施顺序
+## 8. 验证与发布门槛
 
-先以新契约替换引用，再删除旧核心；每个路径都应在最终工作树中查引用、测试和构建结果。下列为基于当前文件的**候选**，不是现在执行的删除命令。
+本地实现（原 S01–S16）已经完成。S17 包含两端全部测试、共享 REST 契约、权限、账目、支付、构建和部署脚本静态检查，以及真实 Server Worker 的本地运行时联调。当前静态/合成测试证据不证明 Python CSV 到 `ReadableStream`、D1 batch/事务、Cookie 或提供商的真实运行行为，因此 S17 运行时验收仍开放。
 
-| 动作 | 文件/目录 | 注意点 |
-| --- | --- | --- |
-| 保留并改造 | Server `github_auth.py`、`github_authorization.py`、`github_credentials.py`、OAuth/安装回调、`api_key_dto_rules.py`、`cloudflare_api_key_*`、`billing.py`、`cloudflare_creem_handler.py`、账户/Session 相关模块 | 保持 GitHub 授权和支付事实；移除旧权益字段时保护付款历史与身份 |
-| 新增 | Server `ledger_domain.py`、`ledger_store.py`/D1 adapter、`ledger_api.py`、新 OpenAPI、D1 migration、报表查询、可选 Jev suggestion adapter；Web `src/api/ledger.js`、项目/公共池/类别/报表页面 | 命名为建议，实施时按现有包结构拆分；REST 契约先行 |
-| 替换后移除 | Server `product_domain.py`、`product_store.py`、`product_api.py`、`product_jobs.py`、`product_discovery.py`、`product_analysis_input.py`、`product_analysis_runner.py`、`product_projection.py`、`product_visualizations.py`、`product_source_events.py`、`product_item_filters.py`、`product_update_items.py`、`product_pr_comment_items.py` 等旧域代码；`cloudflare_source_read.py`、`cloudflare_item_read.py`、`cloudflare_item_handling.py`、`cloudflare_watch_adapter.py` 等旧 D1 映射 | 先核查 `product_*` 中是否承载账户/支付/仓库权限的可复用部分，再拆分；保留通用 GitHub 授权、目录和 HTTP 传输 |
-| 替换后移除 | Server `github_pr_reader.py`、`github_pr_threads.py`、`github_pr_reviews.py`、`github_ci_reader.py`、`github_ci_logs.py`、`github_ci_transport.py`、`github_release_reader.py`、`github_ingestion.py` 等 PR/CI/Release 事实采集链路 | `github_auth.py`、`github_authorization.py`、`github_credentials.py`、必要的 App Webhook 和仓库目录能力不得随之删除 |
-| 替换后移除 | Web `src/screens/dashboard.jsx`、`product-management.jsx` 中的旧 PR/CI/Updates 视图，`src/api/product.js`、旧产品组件/样式/测试、`src/screens/product-api-scopes.js` 的旧 scope | 可复用壳层、图表样式和通用 HTTP helper；测试改为记账契约 |
-| 后续删除或替换 | `openapi/product-v1.yaml` 旧版本、`cloudflare/probe/` 中只服务旧分析的 probe、`launcher.sh`、`git-watch.sh`、旧 Worker/Agent/扫描脚本及 CI lane | 逐项核对后处理；保留用于新 Cloudflare 部署与安全回归的脚本/测试。旧 PR/CI/Updates、Worker 管理和 Cloudflare 事务设计文档已移除 |
-| 同步更新 | 两端 `README.md`、`AGENTS.md` 当前产品段落、`.github/workflows/ci.yml`、Web `index.html`/`src/lib/seo.js`/法律页/多语言/Docs/API Docs、Server 部署说明 | 不得继续宣称 PR/CI/Updates 是对外服务；法律页描述记账数据、建议数据与保留规则 |
+两端各维护一份 `docs/validation/local-acceptance.md` 并互相链接，记录当前检查和剩余门槛；已完成阶段的临时交接不作为现行规则保留。
 
-### 小阶段与交接规则
+S18 的 Cloudflare 预览、远程迁移和真实 GitHub/Creem/Jev 验收，仅在 S17 完成、环境配置审阅且开发者明确指示继续后执行。所有 Wrangler/workerd 与 D1 命令（含本地探针）当前暂停，不得添加 cron。远程验证前必须审阅每请求 D1 行/操作上限、请求频率、分页/缓存策略和费用保护，并取得明确授权。
 
-每次开发任务只完成下表**一个小阶段**。阶段边界以表中的可验收结果为准，不因代码已写一部分就宣称完成。完成本阶段的本地验证后，必须先在负责工程内写交接文档，再暂停本次开发任务；不得自动开始下一阶段。开发者阅读交接后，决定让同一 agent 继续，或把下一阶段交给其他 agent。若开发者明确指定不同顺序或合并阶段，以其最新指令为准，并在交接中记下变更。
-
-| 阶段 | 工程 | 本阶段完成的可验收结果 |
-| --- | --- | --- |
-| S01 | Server | 新记账 OpenAPI 草案、D1 migration 布局、Server 生产/预览配置和受保护的部署脚本；仅本地静态/语法检查，不接入真实 Cloudflare |
-| S02 | Web | 保留并核对静态资源 Worker 与 `/api/*` 代理，补齐新 API 路径和部署脚本/本地检查；本地构建通过，不执行 `deploy:workers` |
-| S03 | Server | 现有 GitHub OAuth、App 仓库授权与 Session 接入 Server Worker；合成回调、失权和 Cookie 测试通过 |
-| S04 | Server | 既有 Creem 购买/变更/取消/恢复及 Webhook 支付事实接入 Worker；本地重放和历史交易测试通过 |
-| S05 | Server | API Key 换为记账 scope、项目/公共池限制和撤销规则；Cookie/Token 权限契约测试通过 |
-| S06 | Server | 项目描述、GitHub 仓库绑定与类别 CRUD；D1 所有权/失权/并发测试通过 |
-| S07 | Server | 项目与公共池支出创建、查询、修改、移除；金额精度、归属迁移、幂等与审计测试通过 |
-| S08 | Server | 逐币日期/类别报表、分页与导出；Cookie/Token 共享 REST 契约及权限测试通过 |
-| S09 | Web | 项目选择、描述、类别管理与失权历史数据页面；前端本地交互测试通过 |
-| S10 | Web | 项目和公共池的新增、修改、移除支出流程；保存冲突、删除确认和错误/空态测试通过 |
-| S11 | Web | 日期/类别图表、逐币账户总览和明细筛选；报表与列表同过滤条件测试通过 |
-| S12 | Web | API Key 文档、平台账单区分及营销/法律/多语言文案；本地构建和页面测试通过 |
-| S13 | Server | 可选 Jev 建议入口、开关、限额、失败降级及离线样本评估；关闭 Jev 时核心记账完整可用 |
-| S14 | Web | Jev 类别/公共池/重复提示的确认界面；建议失败时手工表单仍可用 |
-| S15 | Server | 删除无引用的 PR/CI/Updates 采集/分析/旧 API/脚本与旧 OpenAPI，保留身份和支付；Server 本地回归通过 |
-| S16 | Web | 删除旧 PR/CI/Updates 页面、客户端、样式/测试和文案；Web 本地回归通过 |
-| S17 | Server + Web | 完整本地联调、契约/权限/账目/支付/部署脚本检查；两个工程各写一份相互链接的交接文档，列清未做的远程验收 |
-| S18 | Server + Web | **仅在 S17 证明全部目标功能已实现且开发者指示继续后**进行 Cloudflare 远程迁移、预览与验收；生产发布仍需审阅迁移、配置和回滚方案 |
-
-交接文档放在当前阶段负责工程的 `docs/handoffs/Sxx-<简短名称>.md`（例如 `pullwise-server/docs/handoffs/S07-expenses.md`）；Web 阶段放在 `pullwise-web/docs/handoffs/`。跨工程阶段在两个工程各写一份并互相链接。这些是阶段执行记录，不是另一套产品设计。每份交接至少写清：阶段编号与完成/未完成状态、改动文件和契约/数据决策、运行过的本地检查及结果、尚存风险或阻塞、Cloudflare 真实测试是否未运行、下一阶段的具体入口。保留可复用规则到对应 `AGENTS.md`；不要把凭证、Token 或真实用户账目写进交接。交接文件写完并核对路径后，向开发者报告完成情况并**停止当前开发任务**，等待“继续”或新的 agent 接手指令。
-
-部署脚本的接口在 S01/S02 就固定：Web 保留 `pullwise-web/package.json` 的 `build`、`deploy:workers` 与 `wrangler.jsonc`，增加本地配置检查；Server 新增 `cloudflare/server/wrangler.production.jsonc` 和 `scripts/deploy-cloudflare.sh`（实际名称可随仓库规范调整）。Server 脚本显式选择配置与 D1 绑定，先执行 `wrangler d1 migrations apply DB --remote --config ...`，再执行 `wrangler deploy --config ...`；默认只打印待执行步骤，必须传显式执行参数才会触发远程操作。脚本预检拒绝占位数据库 ID、缺失域名/环境名和未完成的本地检查；密钥只通过 Cloudflare Secret 配置，不写入 `wrangler.jsonc` 或命令日志。Web 的代理源 `PULLWISE_API_ORIGIN` 指向新 Server Worker 自定义域，GitHub OAuth 回调通过 Web `/api/auth/github/callback` 到 Server `/auth/github/callback`；实施时用本地测试确认可信重定向、`Set-Cookie` 域/SameSite 和代理的 `Authorization` 透传。现有 Web 部署命令本身会真正发布，因此在完成实现前只检查其配置和构建，**不运行**该命令。只有整个目标服务完成后，或用户主动要求时，才进行任何 Cloudflare 真实测试（包括远程 D1、远程 Wrangler、预览/生产 Worker、真实 GitHub/Creem/Jev 联调）。
+Server 预览/生产使用独立配置和数据库；`scripts/deploy-cloudflare.sh` 默认不执行远程操作并拒绝占位值。Web `wrangler.jsonc` 当前指向生产域名，预览配置必须单独审阅。还需核对 OAuth/App 回调、Cookie Domain/SameSite、Creem 测试产品/Secrets，以及迁移和回滚方案。任何本地测试通过都不是发布批准。
 
 ## 9. 验收证据
 

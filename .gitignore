@@ -1,4 +1,4 @@
-﻿__pycache__/
+__pycache__/
 *.py[cod]
 .env
 .env.*
@@ -16,10 +16,6 @@ dist/
 .pullwise/
 .omx/
 .worktrees/
-Python-3.10.12.tgz
-.tmp-copy.sqlite3
-.tmp-sqlite-test.db
-.tmp-state-read.sqlite3
 *.private-key.pem
 
 # IDE
@@ -42,3 +38,8 @@ Thumbs.db
 # SQLite (catch all tmp/test patterns)
 *.sqlite3
 *.db
+
+# Local verification artifacts
+.playwright-cli/
+.pytest_cache/
+output/

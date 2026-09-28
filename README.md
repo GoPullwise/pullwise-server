@@ -1,23 +1,40 @@
 # Pullwise Server
 
-The target Server is a Cloudflare Python Worker for the [GitHub project expense ledger](docs/design/github-project-ledger/README.md). It keeps GitHub identity and repository authorization, API keys, and Creem subscription facts. Ledger expenses, reports and CSV exports are account-owned and separate from platform billing.
+Cloudflare Python Worker modules for the [GitHub project expense ledger](docs/design/github-project-ledger/README.md).
+The Server owns GitHub identity/repository authorization, Cookie/API-key
+security, project/shared expenses, categories, exact money, reports, paginated
+CSV and optional suggestions. Creem subscriptions remain separate from expenses.
 
-The deployed entry is `cloudflare/server/src/entry.py`. Its dependency mirror is generated from `pullwise_server/` by `cloudflare/server/sync_server_modules.py`. The Worker exposes GitHub OAuth and App callbacks, billing and webhook routes, `/api-keys`, and `/api/v1` projects, categories, expenses, reports and optional suggestions. The old local VM runtime, PR/CI/Updates modules and their historical tests have been removed. Local verification uses the Worker entry and its synthetic D1 test fixture; Cloudflare runtime behavior still needs separate acceptance.
+`cloudflare/server/src/entry.py` is the Worker entry. `pullwise_server/` owns
+the implementation; `cloudflare/server/sync_server_modules.py` generates the
+ignored Worker mirror. The [ledger OpenAPI](openapi/ledger-v1.yaml) is the shared
+business contract.
 
-## Local checks
+## Offline verification
 
-Use Python 3.10.12 with the project installed in `.venv`. The focused Cloudflare ledger suite is configured in `.github/workflows/ci.yml`; run it locally with the same test list. Also run:
+Use Python 3.10.12 with the deployment/test tools available:
 
 ```bash
-python3 scripts/check-ledger-s01.py --allow-placeholders
-python3 cloudflare/server/sync_server_modules.py --check
+python -m pytest tests
+python scripts/check-ledger-s01.py --allow-placeholders
+python cloudflare/server/sync_server_modules.py --check
 bash -n scripts/deploy-cloudflare.sh
 ```
 
-The untracked local test `tests/test_jev_sdk_child_adapter.py`, if present, imports a module outside the target Worker and prevents an unrestricted `pytest` collection. The target CI suite names current ledger, identity, key and payment tests explicitly.
+Tests use synthetic SQLite D1 fixtures. Current results and unverified runtime
+behavior are in [local acceptance](docs/validation/local-acceptance.md).
 
-## Deployment
+## Configuration and deployment
 
-`cloudflare/server/migrations/0001_ledger.sql`, `0002_identity_billing_keys.sql`, and `0003_ledger_suggestions.sql` define the target D1 schema. Preview and production use separate `wrangler.<environment>.jsonc` files and D1 bindings. `scripts/deploy-cloudflare.sh` is dry-run by default and rejects placeholder IDs/domains before executing any remote migration or deployment. Configure credentials as Cloudflare Secrets, never in JSONC or logs. Jev suggestions remain off until the offline evaluation gate passes.
+Preview and production have separate `cloudflare/server/wrangler.<environment>.jsonc`
+configs and D1 databases. `cloudflare/server/.dev.vars.example` lists local
+Worker variable names; credentials belong in Secrets and must not be committed.
+`scripts/deploy-cloudflare.sh` defaults to dry-run and rejects placeholder
+domains/database IDs. Jev stays disabled until real quality/runtime gates pass.
 
-The [ledger OpenAPI](openapi/ledger-v1.yaml) is the current contract. See `docs/handoffs/` for local verification and remote acceptance status.
+All Wrangler/workerd and D1 commands, including local probes, remain paused
+until the user explicitly resumes them. Do not add cron triggers. Before any
+remote validation, review the request row/operation budget, request frequency,
+pagination/cache policy, cost guard, migration and rollback. S17 runtime
+verification and S18 remote acceptance remain open; this repository is not a
+claim that the Server has been deployed.

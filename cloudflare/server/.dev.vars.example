@@ -1,0 +1,10 @@
+# Local Worker example only; use reviewed environment configs and Cloudflare Secrets.
+# Wrangler/workerd and D1 commands remain paused until explicit authorization.
+PULLWISE_GITHUB_CLIENT_ID=replace-me
+PULLWISE_GITHUB_CLIENT_SECRET=replace-me
+PULLWISE_GITHUB_TOKEN_KEY=replace-with-reviewed-token-encryption-key
+PULLWISE_CREEM_API_KEY=replace-me
+PULLWISE_CREEM_WEBHOOK_SECRET=replace-me
+TYPESAFE_API_KEY=replace-me
+PULLWISE_JEV_SUGGESTIONS_ENABLED=0
+PULLWISE_JEV_SUGGESTIONS_EVALUATED=0

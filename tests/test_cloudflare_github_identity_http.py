@@ -19,7 +19,7 @@ class Store:
             db.execute("""CREATE TABLE account_entitlement_authority(
                 owner_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,plan TEXT NOT NULL,
                 period TEXT NOT NULL,period_start INTEGER NOT NULL,
-                monthly_processing_limit INTEGER NOT NULL,valid_until INTEGER NOT NULL,
+                valid_until INTEGER NOT NULL,
                 dirty INTEGER NOT NULL)""")
 
     def connect(self):
