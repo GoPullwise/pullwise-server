@@ -10,6 +10,14 @@ from types import SimpleNamespace
 from pullwise_server.cloudflare_github_identity_http import handle_identity_request
 
 
+class ClosingConnection(sqlite3.Connection):
+    def __exit__(self, *args):
+        try:
+            return super().__exit__(*args)
+        finally:
+            self.close()
+
+
 class Store:
     def __init__(self, path):
         self.path = path
@@ -23,7 +31,7 @@ class Store:
                 dirty INTEGER NOT NULL)""")
 
     def connect(self):
-        db = sqlite3.connect(self.path)
+        db = sqlite3.connect(self.path, factory=ClosingConnection)
         db.row_factory = sqlite3.Row
         return db
 

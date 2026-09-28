@@ -24,9 +24,17 @@ def validate_config(environment: str, allow_placeholders: bool) -> None:
     if config.get("workers_dev") is not False or config.get("preview_urls") is not False:
         raise ValueError("unreviewed public Worker URL")
     routes = config.get("routes", [])
-    if len(routes) != 1 or routes[0].get("custom_domain") is not True:
-        raise ValueError("one custom domain is required")
-    host = routes[0].get("pattern", "")
+    if len(routes) != 1:
+        raise ValueError("one reviewed hostname is required")
+    route = routes[0]
+    pattern = route.get("pattern", "")
+    host = pattern if route.get("custom_domain") is True else pattern.removesuffix("/*")
+    if not re.fullmatch(r"[A-Za-z0-9.-]+", host):
+        raise ValueError("route must target one exact hostname")
+    if route.get("custom_domain") is not True:
+        zone = route.get("zone_name", "")
+        if not pattern.endswith("/*") or not zone or not (host == zone or host.endswith("." + zone)):
+            raise ValueError("reviewed zone route is required")
     vars_ = config.get("vars", {})
     app_url = vars_.get("PULLWISE_APP_URL", "")
     allowed = vars_.get("PULLWISE_ALLOWED_ORIGINS", "")

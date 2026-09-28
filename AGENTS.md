@@ -32,6 +32,12 @@ historical product plans to gate work.
 - Creem checkout does not grant entitlement. Signed, idempotent webhooks
   own payment facts; keep account revision fences, pending updates and replay
   recovery atomic. Platform payments never create ledger expenses.
+- `PULLWISE_CREEM_PRODUCT_IDS_JSON` is a plain_text binding containing a JSON
+  string, because entry parses it with json.loads. Keep pro/max objects and
+  distinct product IDs, with month/year keys as available. Mirror public IDs
+  in the reviewed environment config. Settings-only binding updates must
+  inherit existing bindings and verify Secret names, DB ID and D1 pause on
+  read-back; never read or log Secret values.
 - The fresh, unexecuted migrations contain current identity, payment, key
   and ledger tables. Account authority tracks billing revisions and cycles,
   not old processing quotas. Billing DTOs expose subscriptions and events,
@@ -56,12 +62,37 @@ historical product plans to gate work.
   until explicit user authorization. Do not enable cron triggers or remote
   schedules. Before remote validation, document request row/operation bounds,
   frequency, pagination/cache policy and cost guard, then obtain approval.
+- Follow the workspace `D1 Rows Written budget guard`: S17/S18 need finite
+  cases, request/retry caps and conservative total read/write bounds under a
+  user-approved numeric ceiling. Count all guard, audit, idempotency, identity,
+  payment replay, migration/cleanup and index effects, not just expense rows.
+  Unknown bounds block remote work. No cron, recurring writes or D1 polling;
+  enforce caps before execution rather than relying on delayed billing alerts.
+- Current authorization allows pinned tool restoration, local S17 and an
+  independent Server deployment at api.pull-wise.com. Remote validation has
+  cumulative ceilings of 1,000 written / 10,000 read rows. Keep remote
+  `PULLWISE_D1_ACCESS_ENABLED=0` until active-service admission and accounting
+  controls pass; it blocks all routes before any DB/provider access and fails
+  closed when absent. It is a pause switch, not a metered quota.
+- Run Windows shell tests through a PATH-resolved Git Bash and use forward
+  slash relative script paths. `PULLWISE_PYTHON` selects the deployment-check
+  interpreter. SQLite test contexts must commit/rollback AND close connections.
+- `scripts/check-ledger-local-runtime.py` seeds an isolated local database and
+  checks a finite loopback-only HTTP journey; migrate first and use a fresh
+  persistence directory for each run. Never seed its fixture remotely.
+- Production uses `api.pull-wise.com/*` as an exact zone route over the
+  existing proxied DNS record. Keep DNS and Web intact. The newly bound remote
+  database is empty/unmigrated; paused deployment is not active-service acceptance.
+- GitHub Client ID/Secret must belong to the same GitHub App as its slug,
+  because repository access uses `/user/installations` App user tokens.
+  Distinguish the Client ID from the numeric App ID. Configure OAuth and
+  installation Setup callbacks separately through the Web API proxy.
 - Preview/production use separate configs and databases. Deploy guards must
   reject placeholders. Keep credentials in Cloudflare Secrets; never expose
   tokens, private keys or account snapshots in logs or documentation.
 - `docs/validation/local-acceptance.md` records current evidence and pending
-  S17/S18 gates. The Python CSV generator to `ReadableStream` bridge remains
-  unverified in workerd; local success is not deployment authorization.
+  S17/S18 gates. The Python CSV generator to `ReadableStream` bridge has local
+  workerd evidence; browser/provider and remote acceptance remain pending.
 
 ## Repository hygiene
 

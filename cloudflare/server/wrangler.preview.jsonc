@@ -8,6 +8,7 @@
   "preview_urls": false,
   "routes": [{"pattern": "preview-api.example.invalid", "custom_domain": true}],
   "vars": {
+    "PULLWISE_D1_ACCESS_ENABLED": "0",
     "PULLWISE_MODE": "preview",
     "PULLWISE_APP_URL": "https://preview.example.invalid",
     "PULLWISE_GITHUB_CALLBACK_URL": "https://preview.example.invalid/api/auth/github/callback",

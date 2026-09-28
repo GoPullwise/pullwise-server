@@ -39,6 +39,9 @@ def _csv_stream(export):
 
 class Default(WorkerEntrypoint):
     async def fetch(self, request):
+        if str(getattr(self.env, "PULLWISE_D1_ACCESS_ENABLED", "0")) != "1":
+            return Response.json({"error": {"code": "D1_ACCESS_PAUSED"}}, status=503,
+                                 headers={"Cache-Control": "no-store"})
         raw_products = getattr(self.env, "PULLWISE_CREEM_PRODUCT_IDS_JSON", "")
         try:
             products = product_bindings(json.loads(raw_products)) if raw_products else {}

@@ -7,6 +7,7 @@
   "workers_dev": false,
   "preview_urls": false,
   "routes": [],
+  "vars": {"PULLWISE_D1_ACCESS_ENABLED": "1"},
   "d1_databases": [
     {
       "binding": "DB",

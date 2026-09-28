@@ -6,14 +6,17 @@
   "compatibility_flags": ["python_workers"],
   "workers_dev": false,
   "preview_urls": false,
-  "routes": [{"pattern": "api.example.invalid", "custom_domain": true}],
+  "routes": [{"pattern": "api.pull-wise.com/*", "zone_name": "pull-wise.com"}],
   "vars": {
+    "PULLWISE_D1_ACCESS_ENABLED": "0",
     "PULLWISE_MODE": "production",
-    "PULLWISE_APP_URL": "https://app.example.invalid",
-    "PULLWISE_GITHUB_CALLBACK_URL": "https://app.example.invalid/api/auth/github/callback",
-    "PULLWISE_GITHUB_APP_SLUG": "pullwise-production-placeholder",
+    "PULLWISE_APP_URL": "https://pull-wise.com",
+    "PULLWISE_GITHUB_CALLBACK_URL": "https://pull-wise.com/api/auth/github/callback",
+    "PULLWISE_GITHUB_CLIENT_ID": "Iv23lipOl05N1ZULZmYW",
+    "PULLWISE_GITHUB_APP_SLUG": "gopullwise",
     "PULLWISE_CREEM_API_BASE_URL": "https://api.creem.io",
-    "PULLWISE_ALLOWED_ORIGINS": "https://app.example.invalid",
+    "PULLWISE_CREEM_PRODUCT_IDS_JSON": "{\"pro\":{\"month\":\"prod_1ZPmBQisU24W9nbchSbY4e\",\"year\":\"prod_6dKBnQA9RMlBbYvzOyXFUp\"},\"max\":{\"month\":\"prod_4r5baIPikLWUU5ACOWwr1m\",\"year\":\"prod_7AwPI8NNipx2UFEJqEOvkd\"}}",
+    "PULLWISE_ALLOWED_ORIGINS": "https://pull-wise.com",
     "PULLWISE_COOKIE_SAME_SITE": "None",
     "PULLWISE_JEV_SUGGESTIONS_ENABLED": "0",
     "PULLWISE_JEV_SUGGESTIONS_EVALUATED": "0"
@@ -21,7 +24,7 @@
   "d1_databases": [{
     "binding": "DB",
     "database_name": "pullwise-ledger-production",
-    "database_id": "00000000-0000-0000-0000-000000000000",
+    "database_id": "80a29a0d-5699-449f-9541-a01dc461ca9d",
     "migrations_dir": "migrations"
   }]
 }
