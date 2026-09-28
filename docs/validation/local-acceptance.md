@@ -2,6 +2,29 @@
 
 Updated 2026-09-28. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
 
+## Preview variables handoff checkpoint (2026-09-28)
+
+The user's latest instruction supersedes the earlier production-test request:
+**do not open production; configure preview only**. Both D1 switches stay 0.
+Preview settings-only multipart PATCH inherited DB, validation namespace,
+product JSON and all Secret bindings. Read-back confirmed GitHub public Client
+ID/slug/callback, App/origin/Cookie policy, test Creem API base and explicit
+PULLWISE_PLAN_LIMITS_JSON. No D1/provider request was performed.
+
+A fresh 32-byte preview PULLWISE_GITHUB_TOKEN_KEY was generated inside the
+connector and written directly as a Secret without displaying its value.
+The preview database remains empty/unmigrated. Its Secret inventory now contains
+the two Creem test Secrets and this encryption key. **PULLWISE_GITHUB_CLIENT_SECRET
+is still missing**; never read/copy the production value. Real preview login
+would also require provider callback configuration; earlier GitHub acceptance
+waiver is not evidence that preview login is ready. Jev remains disabled.
+
+Local preview config matches these changes. Static config/contract and parsed
+plan policy validation passed. Remote settings PATCH requires multipart/form-data
+with a JSON `settings` part; application/json was rejected without mutation.
+Handoff is requested by the user; resume with preview setup and finite cost
+proofs, not an access-switch change. Cumulative remote D1 usage remains zero.
+
 ## Web-to-Server transport correction (2026-09-28)
 
 Production Web's domain fetch to this zone-route Server returned 521 while
