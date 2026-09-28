@@ -2,6 +2,16 @@
 
 Updated 2026-09-28. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
 
+## Web-to-Server transport correction (2026-09-28)
+
+Production Web's domain fetch to this zone-route Server returned 521 while
+direct Server requests returned 503. Web now uses a matching HTTP service
+binding; production DNS and Server code/bindings were retained. A finite
+post-fix Web GitHub-authorize request returned **503 D1_ACCESS_PAUSED**, confirming
+the intended pause is reached through the proxy. The Server switch remains 0;
+no OAuth state, provider call or D1 SQL ran. Full details and Web regressions
+are in the companion. This is not real GitHub flow acceptance or activation.
+
 ## Configurable plans and paused preview (2026-09-28)
 
 - Implemented Free 3 projects / 500 stored expenses and Pro/Max 100 / 20,000.

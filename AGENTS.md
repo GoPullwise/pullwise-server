@@ -120,6 +120,9 @@ historical product plans to gate work.
 - Production uses `api.pull-wise.com/*` as an exact zone route over the
   existing proxied DNS record. Keep DNS and Web intact. The newly bound remote
   database is empty/unmigrated; paused deployment is not active-service acceptance.
+- Web must use its PULLWISE_SERVER HTTP service binding to this Worker.
+  Same-zone fetch cannot target a Route and may reach the retained DNS origin
+  instead (521); direct API checks alone do not validate Web-to-Server transport.
 - GitHub Client ID/Secret must belong to the same GitHub App as its slug,
   because repository access uses `/user/installations` App user tokens.
   Distinguish the Client ID from the numeric App ID. Configure OAuth and
