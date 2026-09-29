@@ -2,6 +2,53 @@
 
 Updated 2026-09-29. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
 
+## Product preview is active (2026-09-29)
+
+The user explicitly requested all preview product paths to be usable now,
+retaining the 1,000-written / 10,000-read cumulative cap. Product-wide mode
+replaces the empty HTTP case list with per-SQL durable reservations, unique-key
+write validation, index/guard bounds, cardinality checks and a serialized queue.
+It automatically initializes only the frozen empty preview schema inside the
+existing fixed budget journal. Production remains at access 0, verified through
+Worker settings; the original preview DB and namespace were preserved.
+
+Reference full suite passed **189 tests / 22 subtests**, 279.46 seconds. Later
+targeted deployment/budget/provider regressions passed **74 tests**. One Windows
+focused run chose WSL bash and failed to find python3; explicitly selecting Git
+Bash passed all eight deployment-contract checks. Native local Python Worker/
+D1/DO ran 15 product checks including login/install, profile, create/edit/delete,
+list/report and CSV, plus two simultaneous session reads. Before those reads:
+464 native reads / 131 writes, 7,847 / 232 reserved, no stop. CSV is eagerly
+consumed inside the preview ticket (1 MiB cap), preventing late unmetered pulls.
+
+Preview Web was deployed as 66ff72ed-cd94-4cf0-89f2-9c9af21d71cc. Preview Server
+current version is 9f2fef3b-e4e8-4577-b899-87271df4c67a. A finite Web auth/session
+check returned 200 authenticated=false; homepage returned 200 HTML and noindex;
+GitHub authorize returned 200 with github.com target (state/URL not logged).
+These checks do not claim a real browser/OAuth callback or completed payment.
+
+The real test catalog initially failed before making a provider request:
+Workers rejects fetch redirect='error'. GitHub and Creem gateways now use
+manual redirect and reject non-success responses without following redirects.
+The regression failed before repair and passed after. A metadata deployment
+failed due to connectivity; its bounded retry succeeded without data/budget
+reset. Creem test catalog then returned **200, provider=creem, enabled=true**.
+No checkout or actual payment was started by the agent.
+
+One final read-only /_preview/budget check reported **165 observed reads / 67
+written**, **3,554 reads / 135 writes reserved**, schemaReady=true, stopped=null.
+This status is read from DO storage, not an extra D1 monitoring query. It exposes
+only budget numbers/readiness/stop reason, no account/token/SQL parameter data.
+This is the recorded checkpoint, not a claim about future user/account traffic.
+The same hard cap applies to subsequent manual requests and provider callbacks.
+No cron, polling, application retries, reset or new namespace was added.
+
+Jev remains unavailable without its separate real key/quality gate. Real user
+GitHub callback/repository use, complete test payment/webhook and browser visual
+acceptance remain to be exercised. Provider/HTTP business errors do not close
+all product paths when native D1 accounting is complete; ambiguous D1 outcomes
+still stop persistently. Do not reset stopped/exhausted budgets to regain quota.
+
 ## Preview switch and zero-SQL ingress check (2026-09-29)
 
 Committed the earlier local initialization/build repair checkpoint as 0c2e2c6;

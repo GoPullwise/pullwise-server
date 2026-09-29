@@ -12,7 +12,7 @@ async def read_or_refresh_catalog(*, binding, gateway, headers, products: dict, 
         return await read_public_plan(binding=binding, headers=headers, now=now)
     ids = webhook_product_ids(products)
     if set(ids) != {"pro", "max"} or not any(ids.values()):
-        return 503, {"error": {"code": "BILLING_CATALOG_UNAVAILABLE"}}
+        return 503, {"error": {"code": "BILLING_CATALOG_UNAVAILABLE", "diagnostic": "PRODUCT_BINDINGS_INVALID"}}
     fetched = {}
     for product_id in {item for values in ids.values() for item in values}:
         fetched[product_id] = await gateway.product(product_id)

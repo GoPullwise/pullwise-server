@@ -45,7 +45,7 @@ class WorkerGitHubGateway:
             headers["Authorization"] = f"Bearer {token}"
         if body:
             headers["Content-Type"] = "application/x-www-form-urlencoded"
-        init = {"method": method, "headers": headers, "redirect": "error",
+        init = {"method": method, "headers": headers, "redirect": "manual",
                 "signal": AbortSignal.timeout(10000)}
         if body:
             init["body"] = body

@@ -4,6 +4,71 @@ Updated 2026-09-29. The user authorized S17/S18 conditional on controlling
 D1 usage, especially Rows Written. This is an execution candidate, not a
 record of completed runtime acceptance or authorization to release production.
 
+## Product-wide preview authorization (2026-09-29)
+
+The user subsequently explicitly requested all preview product functionality,
+including deployment/initialization needed to make it usable now. Production
+stays paused. The cumulative 1,000 written / 10,000 read limits remain active;
+this is not authorization to remove/reset the budget or use production data.
+
+Product preview uses the same fixed ValidationBudget namespace/name. It replaces
+HTTP case denial with serialized product requests and durable reservation before
+each SQL group. At most 200 admitted requests, 128 SQL groups per request and
+64 statements per group are permitted. No application retry, cron, polling,
+new namespace or reset endpoint is introduced. Missing/ambiguous native D1 meta
+stops persistently. Normal business/provider HTTP errors with complete D1 meta
+retain their reservations; a subsequent manual request is separately capped.
+
+### Executable row-bound rules
+
+- Initialization first reads sqlite_master with LIMIT 65, reserving 384 reads
+  including native read retries. Nonempty application schemas are rejected.
+  Only the frozen four migrations execute, as one atomic D1 batch: 14 tables,
+  24 indexes and four app_state seed rows, with no Wrangler migration table or
+  untracked bookkeeping. Bound: 2 x 14 table/root writes + 2 x 24 index/schema
+  writes + 4 x 2 seed/index writes = 84; reserve **128 written / 2,000 read**.
+  At most 64 initial/final schema objects and 22 finite DDL/seed statements fit
+  the reserved schema scan bound. D1 write queries are not automatically retried.
+- Runtime INSERT must be scalar VALUES or scalar SELECT without a top-level
+  FROM/compound SELECT. REPLACE and multi-row VALUES are rejected. UPDATE/DELETE
+  require a top-level conjunctive primary-key equality fence. Current index
+  counts are frozen with migration fingerprints. Scalar INSERT reserves one
+  base row plus all indexes; UPDATE/UPSERT reserves one plus twice all indexes;
+  scalar DELETE reserves one plus all indexes. Maximum is 9 for expense UPDATE.
+- Guard inserts are scalar; guard DELETE reserves every preceding insert in
+  the same atomic group. Every guard-bearing group must end with zero guards.
+  D1 batch rollback prevents failed transactions leaving extra guard rows.
+- Numeric cardinality snapshots contain no account/token data in the journal.
+  They start at the exact seed shape, refresh before requests and after writes,
+  and reserve COUNT/state reads using the previous counts plus scalar insert
+  upper bounds. Unknown/excessive cardinality or nonempty guards stops the run.
+  Runtime parameters are UTF-8/finite scalar bounded; state JSON is capped at
+  8,192 bytes. Read reservations cover table traversals, indexed probes and
+  JSON iteration using current cardinalities/parameter collection bounds.
+- D1 can retry read-only queries twice, so each read-only group's reservation
+  covers all three attempts. There is no application retry or refund. Details:
+  [automatic read retries](https://developers.cloudflare.com/d1/best-practices/retry-queries/).
+- CSV is materialized inside the active budget ticket, capped at 1 MiB. No lazy
+  D1 pull remains after releasing the response. Queue depth is capped at 16;
+  concurrent page reads serialize rather than consuming overlapping tickets.
+
+Native local Python Worker/D1/DO product run: 15 finite checks including login,
+installation, profile, category/expense creation, list/report/CSV and edit/delete
+passed; two concurrent session requests also returned 200. Before those two
+reads, observed usage was **464 read / 131 written**, reservations **7,847 /
+232** and no stop. A failed earlier lazy-CSV buffering attempt retained all
+reservations and stopped; its local state was preserved. The fixed fixture is
+separate local-only persistence, never a replacement remote namespace/budget.
+The subsequent SELECT traversal estimate removes an unnecessary fixed DML probe
+allowance; its bounds still include indexed/JSON traversal and native retries.
+
+Local artifacts: .agents/runtime/preview-product-local-20260929/ including
+http-evidence-csv-fixed.json, csv-fixed-journal.json and concurrency-evidence.json.
+GitHub in this run is synthetic. All prior source/secret/config readings and
+guard HTTP checks used zero remote D1. Remote initialization and bounded product
+smoke checks are pending publication of this reviewed product-preview mode.
+Jev remains disabled without its separate real credentials/quality gate.
+
 2026-09-29: MeteredD1 additionally checks per-statement parameter envelopes
 before dispatch (count, scalar type, safe integer range and UTF-8 byte bound).
 Missing envelopes allow no parameters. Violations stop without a D1 call;

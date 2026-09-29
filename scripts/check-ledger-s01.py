@@ -36,8 +36,18 @@ def validate_config(environment: str, allow_placeholders: bool) -> None:
         if not pattern.endswith("/*") or not zone or not (host == zone or host.endswith("." + zone)):
             raise ValueError("reviewed zone route is required")
     vars_ = config.get("vars", {})
-    if vars_.get("PULLWISE_D1_ACCESS_ENABLED") != "0":
+    product_preview = (environment == "preview" and
+                       vars_.get("PULLWISE_PREVIEW_PRODUCT_ENABLED") == "1")
+    if vars_.get("PULLWISE_D1_ACCESS_ENABLED") != "0" and not (
+            product_preview and vars_.get("PULLWISE_D1_ACCESS_ENABLED") == "1"):
         raise ValueError("remote D1 access must remain paused")
+    if product_preview:
+        bindings = config.get("durable_objects", {}).get("bindings", [])
+        if (config.get("name") != "pullwise-server-preview" or len(bindings) != 1
+                or bindings[0].get("name") != "VALIDATION_BUDGET"
+                or bindings[0].get("class_name") != "ValidationBudget"
+                or vars_.get("PULLWISE_CREEM_API_BASE_URL") != "https://test-api.creem.io"):
+            raise ValueError("product preview requires the existing budget coordinator and test provider")
     if config.get("triggers", {}).get("crons"):
         raise ValueError("cron is forbidden during bounded validation")
     app_url = vars_.get("PULLWISE_APP_URL", "")
@@ -54,6 +64,10 @@ def validate_config(environment: str, allow_placeholders: bool) -> None:
     if database.get("migrations_dir") != "migrations" or not database.get("database_name"):
         raise ValueError("D1 migration layout is missing")
     database_id = database.get("database_id", "")
+    if product_preview and (database_id != "e9dc3b89-f81f-4fce-87ef-d8797d879fb4"
+                            or host != "preview-api.pull-wise.com"
+                            or app_url != "https://preview.pull-wise.com"):
+        raise ValueError("active preview must retain its isolated database and hosts")
     if not re.fullmatch(r"[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", database_id):
         raise ValueError("D1 database ID must be a UUID")
     if not allow_placeholders and (

@@ -28,7 +28,7 @@ def webhook_product_ids(products: dict) -> dict:
 
 class WorkerCreemGateway:
     def __init__(self, env):
-        self.api_key = str(getattr(env, "PULLWISE_CREEM_API_KEY", ""))
+        self.api_key = str(getattr(env, "PULLWISE_CREEM_API_KEY", "")).strip()
         base = str(getattr(env, "PULLWISE_CREEM_API_BASE_URL", "https://api.creem.io")).rstrip("/")
         if base not in {"https://api.creem.io", "https://test-api.creem.io"}:
             raise ValueError("Creem API origin is not allowed")
@@ -40,7 +40,7 @@ class WorkerCreemGateway:
         if not self.api_key or not re.fullmatch(r"v1/(checkouts|products\?product_id=[A-Za-z0-9_-]{3,128}|subscriptions/[A-Za-z0-9_-]{3,128}/(upgrade|cancel|resume))", path):
             raise ValueError("Creem request is not configured or path is invalid")
         headers = {"x-api-key": self.api_key, "Accept": "application/json"}
-        init = {"method": method, "headers": headers, "redirect": "error",
+        init = {"method": method, "headers": headers, "redirect": "manual",
                 "signal": AbortSignal.timeout(10000)}
         if payload is not None:
             headers["Content-Type"] = "application/json"
@@ -50,7 +50,9 @@ class WorkerCreemGateway:
         if length and int(length) > 1024 * 1024:
             raise ValueError("Creem response too large")
         body = await response.text()
-        if not response.ok or len(body) > 1024 * 1024:
+        if not response.ok:
+            raise ValueError(f"Creem HTTP {int(response.status)}")
+        if len(body) > 1024 * 1024:
             raise ValueError("Creem request failed")
         parsed = json.loads(body)
         if not isinstance(parsed, dict):

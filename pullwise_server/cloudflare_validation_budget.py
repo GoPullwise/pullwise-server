@@ -221,6 +221,39 @@ class BudgetJournal:
             self._reject("TIMEOUT")
         return state
 
+    def begin_product(self, *, now):
+        state = self.snapshot()
+        if state["stopped"]:
+            raise BudgetError(state["stopped"])
+        if state["active"] is not None:
+            raise BudgetError("VALIDATION_BUSY")
+        if state["requests"] >= 200:
+            self._reject("REQUEST_LIMIT")
+        state["requests"] += 1
+        state["cases"]["product"] = state["cases"].get("product", 0) + 1
+        state["active"] = state["requests"]
+        state["deadline"] = now + REQUEST_SECONDS
+        self._save(state)
+        return state["active"]
+
+    def reserve_operation(self, ticket, *, reads, writes, now):
+        state = self.check(ticket, now=now)
+        if not _integer(reads) or not _integer(writes):
+            self._reject("UNREVIEWED_BOUND")
+        if (state["reserved_read"] + reads > READ_CEILING
+                or state["reserved_written"] + writes > WRITE_CEILING):
+            self._reject("BUDGET_EXHAUSTED")
+        state["reserved_read"] += reads
+        state["reserved_written"] += writes
+        self._save(state)
+
+    def save_product_state(self, ticket, data, *, now, initialized=False):
+        state = self.check(ticket, now=now)
+        state["product_data"] = data
+        if initialized:
+            state["schema_ready"] = True
+        self._save(state)
+
     def record(self, ticket, operation, reads, writes, *, complete=True):
         # An already dispatched operation can finish after stop/timeout. Keep
         # its observed meta without authorizing another operation or refund.
@@ -272,6 +305,9 @@ class MeteredD1:
         if self._calls[index] >= bound.max_calls:
             self.journal._reject("OPERATION_LIMIT")
         self._calls[index] += 1  # Consume before yielding; concurrent calls cannot reuse it.
+        return await self._dispatch(statements, index, bound)
+
+    async def _dispatch(self, statements, index, bound):
         try:
             raw = [self._binding.prepare(item.sql).bind(*item.params) for item in statements]
             results = list(await asyncio.wait_for(self._binding.batch(raw), timeout=10))

@@ -10,6 +10,31 @@ historical product plans to gate work.
 
 ## Runtime and ownership
 
+- The user's latest 2026-09-29 requirement is usable, product-wide preview.
+  PULLWISE_PREVIEW_PRODUCT_ENABLED=1 selects the product budget wrapper; it
+  admits product paths with per-SQL reservations instead of the empty case
+  list. Keep production access 0 and the same cumulative 1,000 write / 10,000
+  read ceilings, namespace/name and no-reset/no-retry/no-cron policy.
+- Product preview initializes the frozen canonical schema only on an empty
+  isolated DB, behind the same journal. cloudflare_preview_schema.py embeds
+  the four migrations; its fingerprint regression must match every canonical
+  migration. Recompile/review it when schema changes; never silently rerun
+  initialization against user data. Package both preview modules in the mirror.
+- ProductMeteredD1 validates scalar INSERT and unique-key UPDATE/DELETE,
+  includes all index effects and guard cleanup, reserves before dispatch and
+  validates native meta. Cardinality snapshots/journal evidence must never
+  contain raw users, tokens, SQL parameters or provider payloads. Complete
+  CSV pulls inside the active ticket; serialize concurrent product requests.
+- Active preview config is allowed only with its original DB/hosts, existing
+  ValidationBudget class and test Creem origin. This supersedes the old blanket
+  preview-pause notes below; it does not permit production activation or Jev.
+- Workers fetch supports follow/manual, not redirect='error'. GitHub/Creem
+  gateways use manual and reject unsuccessful/3xx responses without following
+  them. Preview diagnostics must redact all credentials and omit provider body.
+- /_preview/budget is a preview-only, read-only numeric status, served from DO
+  storage without D1. It is not a reset/stop/SQL endpoint and must never return
+  raw journal product state, accounts, tokens or parameter evidence.
+
 - `cloudflare/server/src/entry.py` is the Server Worker entry.
   `pullwise_server/` owns its modules; `sync_server_modules.py` generates the
   ignored Worker mirror. Never edit the mirror directly. Run the sync and

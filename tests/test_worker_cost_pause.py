@@ -53,6 +53,7 @@ def test_enabled_remote_worker_without_global_control_still_fails_closed():
     class Environment:
         PULLWISE_D1_ACCESS_ENABLED = "1"
         PULLWISE_MODE = "preview"
+        PULLWISE_PREVIEW_PRODUCT_ENABLED = "0"
 
         def __getattr__(self, name):
             if name == "VALIDATION_BUDGET":
@@ -113,6 +114,7 @@ def test_preview_coordinator_unknown_paths_do_not_touch_storage_d1_or_providers(
     class Environment:
         PULLWISE_D1_ACCESS_ENABLED = "1"
         PULLWISE_MODE = "preview"
+        PULLWISE_PREVIEW_PRODUCT_ENABLED = "0"
 
         def __getattr__(self, name):
             raise AssertionError(f"Unreviewed case accessed {name}")

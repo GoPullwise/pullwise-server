@@ -39,6 +39,8 @@ MODULES = (
     "cloudflare_session_adapter",
     "cloudflare_webhook_receipts",
     "cloudflare_validation_budget",
+    "cloudflare_preview_budget",
+    "cloudflare_preview_schema",
     "cloudflare_plan_limits",
     "ledger_plan_policy",
     "creem_event_rules",

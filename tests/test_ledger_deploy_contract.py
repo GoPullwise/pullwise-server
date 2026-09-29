@@ -25,6 +25,23 @@ BASH = shutil.which("bash") or "bash"
 
 
 class LedgerDeployContractTests(unittest.TestCase):
+    def test_active_preview_retains_budget_and_database_isolation(self):
+        spec = importlib.util.spec_from_file_location("preview_checker", ROOT / "scripts/check-ledger-s01.py")
+        checker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checker)
+        config = json.loads((ROOT / "cloudflare/server/wrangler.preview.jsonc").read_text())
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            (folder / "src").mkdir()
+            (folder / "src/entry.py").touch()
+            path = folder / "wrangler.preview.jsonc"
+            path.write_text(json.dumps(config))
+            with patch.object(checker, "SERVER", folder):
+                checker.validate_config("preview", allow_placeholders=False)
+                config["d1_databases"][0]["database_id"] = "80a29a0d-5699-449f-9541-a01dc461ca9d"
+                path.write_text(json.dumps(config))
+                with self.assertRaises(ValueError):
+                    checker.validate_config("preview", allow_placeholders=False)
     def test_cloudflare_build_static_checks_use_managed_python_with_sqlite(self):
         plan = json.loads((ROOT / "cloudflare/server/build-trigger-plan.json").read_text())
         command = next(command for command in plan["build_command"].split(" && ")

@@ -10,6 +10,7 @@ from pullwise_server.cloudflare_validation_budget import (
     BUDGET_SCOPE, REQUEST_SECONDS, BudgetError, BudgetJournal, MeteredD1,
     REVIEWED_REMOTE_PLANS,
     REVIEWED_INITIALIZATION_PLAN, run_initialization,
+    READ_CEILING, WRITE_CEILING,
 )
 
 from pullwise_server.cloudflare_http_contract import handle_http_request
@@ -24,6 +25,7 @@ from pullwise_server.cloudflare_jev_gateway import WorkerJevGateway
 from pullwise_server.cloudflare_ledger_reports import CsvExport
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1, PlanLimitError
 from pullwise_server.ledger_plan_policy import parse_policy
+from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initialize_product
 
 
 def _csv_stream(export):
@@ -49,6 +51,7 @@ def _csv_stream(export):
 class _Application:
     def __init__(self, env, binding):
         self.env = env
+        self.bounded_exports = isinstance(binding, ProductMeteredD1)
         self.binding = PlanLimitedD1(binding,
             policy=parse_policy(getattr(env, "PULLWISE_PLAN_LIMITS_JSON", None)), now=int(time.time()))
         self.jev_gateway = WorkerJevGateway(env)
@@ -149,6 +152,16 @@ class _Application:
             if status == 204:
                 return Response(None, status=status, headers=response_headers)
             if isinstance(payload, CsvExport):
+                if self.bounded_exports:
+                    chunks, size = [], 0
+                    async for chunk in payload.chunks():
+                        size += len(chunk.encode("utf-8"))
+                        if size > 1024 * 1024:
+                            raise BudgetError("EXPORT_TOO_LARGE")
+                        chunks.append(chunk)
+                    return Response("".join(chunks), status=status,
+                        headers={**response_headers, "Content-Type": "text/csv; charset=utf-8",
+                                 "Content-Disposition": 'attachment; filename="expenses.csv"'})
                 return Response(_csv_stream(payload), status=status,
                     headers={**response_headers, "Content-Type": "text/csv; charset=utf-8",
                              "Content-Disposition": 'attachment; filename="expenses.csv"'})
@@ -164,8 +177,27 @@ class _Application:
                 status, payload = await read_or_refresh_catalog(
                     binding=self.binding, gateway=WorkerCreemGateway(self.env),
                     headers=headers, products=products, now=now)
-            except Exception:
+            except Exception as error:
                 status, payload = 503, {"error": {"code": "BILLING_CATALOG_UNAVAILABLE"}}
+                if getattr(self.env, "PULLWISE_MODE", "") == "preview":
+                    import traceback
+                    frames = traceback.extract_tb(error.__traceback__)
+                    if frames:
+                        frame = frames[-1]
+                        payload["error"]["diagnosticSite"] = f"{type(error).__name__}:{frame.name}:{frame.lineno}"
+                    reason = str(error)
+                    if type(error).__name__ == "JsException":
+                        safe = reason
+                        for name in ("PULLWISE_CREEM_API_KEY", "PULLWISE_CREEM_WEBHOOK_SECRET",
+                                     "PULLWISE_GITHUB_CLIENT_SECRET", "PULLWISE_GITHUB_TOKEN_KEY"):
+                            secret = str(getattr(self.env, name, ""))
+                            if secret:
+                                safe = safe.replace(secret, "[redacted]")
+                        payload["error"]["transportDiagnostic"] = safe.splitlines()[0][:180]
+                    allowed = {"unverified Creem product", "invalid Creem price period or currency",
+                               "conflicting Creem currencies", "Creem request is not configured or path is invalid"}
+                    if reason in allowed or reason.startswith("Creem HTTP ") and reason[11:].isdigit():
+                        payload["error"]["diagnostic"] = reason
             return Response.json(payload, status=status, headers={"Cache-Control": "no-store"})
         if path in {"/billing/checkout-sessions", "/billing/change-interval",
                     "/billing/cancel-subscription", "/billing/resume-subscription"}:
@@ -241,6 +273,8 @@ class ValidationBudget(DurableObject):
     def __init__(self, ctx, env):
         self.ctx, self.env = ctx, env
         self.journal = None
+        self._product_lock = asyncio.Lock()
+        self._waiting = 0
 
     def _journal(self):
         if self.journal is None:
@@ -282,6 +316,8 @@ class ValidationBudget(DurableObject):
             return _unavailable("D1_ACCESS_PAUSED")
         if getattr(self.env, "PULLWISE_MODE", "") != "preview":
             return _unavailable("VALIDATION_CONTROL_REQUIRED")
+        if str(getattr(self.env, "PULLWISE_PREVIEW_PRODUCT_ENABLED", "0")) == "1":
+            return await self._product_fetch(request)
         path = urlsplit(request.url).path
         # Lazy CSV pulls outlive a Response. Keep this path closed until a
         # finite preview stream lifetime/cardinality plan is implemented.
@@ -312,3 +348,51 @@ class ValidationBudget(DurableObject):
             if isinstance(error, asyncio.CancelledError):
                 raise
             return _unavailable(journal.snapshot()["stopped"])
+
+    async def _product_fetch(self, request):
+        path = urlsplit(request.url).path
+        if path == "/_preview/budget" and request.method == "GET":
+            state = self._journal().snapshot()
+            return Response.json({"limits": {"rowsRead": READ_CEILING, "rowsWritten": WRITE_CEILING},
+                "reserved": {"rowsRead": state["reserved_read"], "rowsWritten": state["reserved_written"]},
+                "observed": {"rowsRead": state["actual_read"], "rowsWritten": state["actual_written"]},
+                "schemaReady": bool(state.get("schema_ready")), "stopped": state["stopped"]},
+                headers={"Cache-Control": "no-store"})
+        if (request.method not in {"GET", "POST", "PATCH", "DELETE"} or
+                not (path.startswith(("/api/v1/", "/api-keys", "/auth/", "/integrations"))
+                     or path in {"/health", "/repositories", "/billing", "/webhooks/creem"}
+                     or path.startswith("/billing/"))):
+            return Response.json({"error": {"code": "NOT_FOUND"}}, status=404)
+        if self._waiting >= 16:
+            return _unavailable("VALIDATION_BUSY")
+        self._waiting += 1
+        try:
+            async with self._product_lock:
+                journal = self._journal()
+                try:
+                    async def execute():
+                        await initialize_product(self.env.DB, journal)
+                        ticket = journal.begin_product(now=time.time())
+                        binding = ProductMeteredD1(self.env.DB, journal, ticket)
+                        await binding.refresh()
+                        response = await _Application(self.env, binding).fetch(request)
+                        # Product exports are consumed within _Application;
+                        # their Response body no longer performs lazy D1 IO.
+                        # Native D1 ambiguity already stops the journal. A
+                        # provider/business HTTP error with complete D1 meta
+                        # retains its reservation but may be retried manually.
+                        journal.finish(ticket, now=time.time())
+                        return response
+                    return await asyncio.wait_for(execute(), timeout=REQUEST_SECONDS)
+                except BudgetError as error:
+                    if journal.snapshot()["active"] is not None:
+                        journal.stop(str(error))
+                    return _unavailable(str(error))
+                except BaseException as error:
+                    journal.stop("TIMEOUT" if isinstance(error, asyncio.TimeoutError)
+                                 else "REQUEST_OUTCOME_UNKNOWN")
+                    if isinstance(error, asyncio.CancelledError):
+                        raise
+                    return _unavailable(journal.snapshot()["stopped"])
+        finally:
+            self._waiting -= 1

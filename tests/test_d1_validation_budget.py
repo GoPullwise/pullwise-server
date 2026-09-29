@@ -402,3 +402,14 @@ def test_initialization_accepts_only_a_once_only_fixed_sql_plan(sql, path, reque
             await run_initialization(raw, journal, case, clock=lambda: 11)
         assert raw.calls == 0 and journal.snapshot()["requests"] == 0
     asyncio.run(run())
+
+
+def test_product_reservations_precede_dispatch_and_share_existing_totals(sql):
+    journal = BudgetJournal(sql)
+    ticket = journal.begin_product(now=10)
+    journal.reserve_operation(ticket, reads=100, writes=900, now=11)
+    assert journal.snapshot()["reserved_written"] == 900
+    with pytest.raises(BudgetError, match="BUDGET_EXHAUSTED"):
+        journal.reserve_operation(ticket, reads=1, writes=101, now=12)
+    assert journal.snapshot()["reserved_written"] == 900
+    assert BudgetJournal(sql).snapshot()["stopped"] == "BUDGET_EXHAUSTED"
