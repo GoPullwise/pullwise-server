@@ -2,6 +2,36 @@
 
 Updated 2026-09-29. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
 
+## Preview premature read exhaustion repaired (2026-09-29)
+
+User testing stopped at 9,969 reserved reads / 164 reserved writes, while native
+observations were only 955 reads / 86 writes. Commit 44f9fe5 preserves the same
+database, coordinator, 10,000-read / 1,000-write ceilings, observed counters,
+request counts and old product reservations. The complete original non-retried
+schema batch releases its unused read margin once; new complete single-attempt
+product batches settle unused read margin only. Retry/missing/ambiguous metadata
+keeps full read reservations and all write reservations always stay charged.
+There is no public reset endpoint or general recovery from unknown outcomes.
+
+Test-first: five regressions failed before implementation; final focused suite
+passed 62 tests. Full reference suite passed 198 tests / 22 subtests before the
+final write-settlement replay test was added; that test passed in the focused
+run. The earlier CI migration fingerprint failure was reproduced locally and
+fixed by hashing canonical LF bytes on Windows and Linux. Application commit
+44f9fe5 CI [36525624836](https://github.com/GoPullwise/pullwise-server/actions/runs/36525624836)
+passed. Source mirror, production/preview static checks and preview packaging
+passed; no additional native local product journey was run for this correction.
+
+Preview Server published version 8863ad4d-dc41-4d31-b95c-75ac16eabc63. One
+unauthenticated Web session GET returned 200; one subsequent DO-only budget GET
+reported stopped=null, schemaReady=true, **968 observed reads / 86 writes** and
+**8,010 reserved reads / 164 writes**. This finite check added 13 reads and zero
+writes, with exact single-attempt settlement verified by the resulting counters.
+Old ambiguous/retry margins were not reclaimed. Remaining conservative headroom
+at that checkpoint is 1,990 reads and 836 writes, not an unlimited test allowance.
+No provider call, data creation, cron or polling was part of this validation.
+The earlier preview publication checkpoints below remain historical evidence.
+
 ## Product preview is active (2026-09-29)
 
 The user explicitly requested all preview product paths to be usable now,
