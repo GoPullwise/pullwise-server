@@ -2,6 +2,30 @@
 
 Updated 2026-09-29. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
 
+## Preview switch and zero-SQL ingress check (2026-09-29)
+
+Committed the earlier local initialization/build repair checkpoint as 0c2e2c6;
+it has not been pushed. The user then explicitly requested preview access 1.
+A settings-only PATCH changed that one preview variable, inheriting all other
+bindings. Read-back verified preview mode, the original DB/coordinator, all
+Secret names and unchanged production access 0. Deployment configs still
+default to 0; a later preview upload restores the pause unless reviewed.
+
+The deployed preview source was retrieved via the Worker code API. It has one
+empty remote-plan assignment, the fixed singleton scope and UNREVIEWED_CASE
+before journal/DB/provider access; the direct DB branch is restricted to local
+mode. One no-redirect Web authorize GET returned **503 UNREVIEWED_CASE** with
+no retry. Its D1 bound and usage are 0 read / 0 written by inspected path proof,
+not a billing/dashboard measurement. No login/provider/DDL SQL was attempted.
+
+Browser inventory failed without a page navigation. One public homepage GET
+returned 200 HTML but no expected X-Robots-Tag; remaining shell cases stopped.
+The Web configuration lets assets bypass its preview middleware. The companion
+records the local repair; browser/functional acceptance remains pending.
+Only two finite site requests ran. Cumulative recorded remote D1 usage remains
+0/0, against the existing 10,000 read / 1,000 write limits. Turning on the
+switch alone did not initialize the database or admit a functional case.
+
 ## Local initialization preparation and Builds diagnosis (2026-09-29)
 
 Added test-first JSON map cardinality checks and a binding-only initialization

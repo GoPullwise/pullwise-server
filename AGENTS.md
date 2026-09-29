@@ -60,7 +60,11 @@ historical product plans to gate work.
   the earlier waiver as acceptance of the new test App.
 - Preview uses preview-api.pull-wise.com and a separate empty database, with
   test Creem IDs/Secrets only. Production keeps its original providers/DNS.
-  Both access switches stay 0. Never send a test webhook to production.
+  Production access stays 0. On 2026-09-29 the user explicitly authorized the
+  preview switch at 1 while its deployed remote plans remain empty; the
+  one-request ingress check returned UNREVIEWED_CASE before D1/provider access.
+  This does not authorize unknown-bound SQL or initialization. Checked-in
+  deployment defaults stay 0. Never send a test webhook to production.
 - `deploy-cloudflare.sh` uploads only a paused Worker and never migrates D1.
   `build-trigger-plan.json` records the approved main-branch GitHub Builds setup.
   User explicitly approved it after automatic review initially rejected it.

@@ -66,6 +66,31 @@ also remain empty. Native Python RPC/FFI acceptance is still pending.
 
 ## Budget and execution status
 
+2026-09-29 preview switch check: the user explicitly authorized setting only
+the preview D1 access switch to 1. Metadata read-back confirmed preview mode,
+the original isolated DB/coordinator and production switch 0. The deployed
+preview source was read through the Worker code API: its remote plans remain
+empty and UNREVIEWED_CASE returns before the journal, DB or provider handler.
+This is not authorization to populate unknown-bound plans or initialize D1.
+The checked-in deployment config deliberately retains its paused default 0;
+a future preview deployment restores that default unless reviewed separately.
+
+Finite ingress check plan: exactly one GET through preview Web to
+`/api/auth/github/authorize`, no redirect following, no retry/polling. Expected
+503 UNREVIEWED_CASE. The inspected pre-dispatch path has a bound of 0 Rows
+Read / 0 Rows Written and no provider attempt. Stop at any unexpected result;
+do not start a login, seed/schema operation or subsequent functional case.
+Remote SQL allowance remains zero until those cases have proven bounds.
+
+The one ingress request returned exactly 503 UNREVIEWED_CASE; no redirect or
+retry occurred. The inspected deployed path rejects before all D1/provider
+access, so the test's row usage is 0/0 by path proof, not a dashboard reading.
+The browser connector inventory failed without opening any page. Public shell
+fallback is limited to one GET each for /, /pricing and /login, at most three
+requests with no redirects/retries; stop on the first unexpected result. These
+do not execute browser JS. No SQL case is admitted, so upstream D1 usage stays
+bounded at 0/0. HTTP shell checks are not visual/browser acceptance.
+
 2026-09-28 continuation: the user waived real GitHub login/repository authorization
 testing. Test Creem IDs and test Secrets are configured in a separately deployed
 **paused** preview Server; preview Web proxies only that Server. Empty preview
