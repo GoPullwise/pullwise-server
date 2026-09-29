@@ -23,6 +23,19 @@ Remote verification is one DO-only status GET (zero D1 reads/writes, zero
 provider/account requests and zero retries). Its first access may write the
 approved marker in the existing DO journal, which is not D1.
 
+Final full reference verification passed **241 tests / 22 subtests**, plus
+source-mirror/static/shell checks and pinned Wrangler 4.136.3 preview packaging.
+Commit `1be2353` was pushed to main; CI
+[36551967847](https://github.com/GoPullwise/pullwise-server/actions/runs/36551967847)
+passed the dependency audit, compatibility, shell checks and full test step.
+
+Preview deployed version `722344d9-077c-4dfa-81af-4ac706ac2bc3`. One DO-only
+status GET returned 200 and stopped=null. Limits remain 100,000 reads / 1,000
+writes; reserved counts stayed exactly 11,605 / 243 and observed counts stayed
+exactly 4,563 / 150. The request stop was cleared without refunding/resetting
+usage or making D1/provider requests. Production access/config remains paused;
+no production activation, database migration, cron or counter reset occurred.
+
 ## Preinstalled repository discovery and popup sync repair (2026-09-29)
 
 The user has GitHub-authorized repositories but no candidates. A corrected
