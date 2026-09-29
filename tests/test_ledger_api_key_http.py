@@ -109,7 +109,7 @@ class LedgerApiKeyHttpTests(unittest.TestCase):
         status, payload, _ = call(self.binding, GitHubStub(), self.now + 3,
             "GET", "/api/v1/repositories", headers={"Authorization": "Bearer " + key["key"]})
         self.assertEqual(status, 200)
-        self.assertEqual(payload["items"], [])
+        self.assertEqual([item["githubRepoId"] for item in payload["items"]], [202])
         self.assertIsNone(payload["nextCursor"])
         status, limited = self.run_async(create_api_key(binding=self.binding, headers=cookie,
             body={"scopes": ["expenses:read"]}, now=self.now + 2))

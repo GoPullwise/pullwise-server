@@ -181,6 +181,84 @@ def test_signout_requires_origin_and_revokes_session(tmp_path):
     assert status == 200 and payload["authenticated"] is False
 
 
+def test_preinstalled_authorized_repositories_are_visible_without_setup_callback(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    binding, gateway = D1ShapedSQLite(fixture.store), GitHubStub()
+    _, _, login_headers = login(binding, gateway, fixture.now)
+    cookie = login_headers["Set-Cookie"].split(";", 1)[0]
+    with fixture.store.connect() as db:
+        db.execute("""CREATE TABLE api_keys(id TEXT PRIMARY KEY,user_id TEXT,name TEXT,
+            key_prefix TEXT,key_hash TEXT UNIQUE,scopes TEXT,expires_at INTEGER,
+            restrictions TEXT,created_at INTEGER,last_used_at INTEGER,revoked_at INTEGER)""")
+        before = db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0]
+    status, payload, _ = call(binding, gateway, fixture.now + 2, "GET",
+        "/api/v1/repositories", headers={"Cookie": cookie})
+    assert status == 200 and payload["githubAccess"] == "authorized"
+    assert payload["items"][0]["githubRepoId"] == 202
+    with fixture.store.connect() as db:
+        assert db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0] == before
+
+
+def test_explicit_sync_uses_live_github_access_and_requires_trusted_cookie_origin(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    binding, gateway = D1ShapedSQLite(fixture.store), GitHubStub()
+    _, _, login_headers = login(binding, gateway, fixture.now)
+    cookie = login_headers["Set-Cookie"].split(";", 1)[0]
+    status, payload, _ = call(binding, gateway, fixture.now + 2, "POST",
+        "/repositories/sync", headers={"Cookie": cookie, "Origin": "https://evil.example"})
+    assert status == 403
+    status, payload, _ = call(binding, gateway, fixture.now + 2, "POST",
+        "/repositories/sync", headers={"Cookie": cookie, "Origin": "https://app.example.test"})
+    assert status == 200 and payload["items"][0]["githubRepoId"] == 202
+    assert payload["needsAuthorization"] is False
+
+
+def test_live_grants_cover_multiple_installations_with_bounded_provider_calls():
+    from pullwise_server.cloudflare_github_identity_http import read_repository_access
+    class Multiple(GitHubStub):
+        async def installations(self, token):
+            return [{"id": 501}, {"id": 502}]
+
+        async def repositories(self, token, installation_id):
+            return [{"id": installation_id, "full_name": f"alice/repo-{installation_id}"}]
+    user = {"githubAccessToken": "sealed:synthetic-access-token"}
+    access = asyncio.run(read_repository_access(user, Multiple()))
+    assert [item["githubRepoId"] for item in access["items"]] == [501, 502]
+    class Excessive(Multiple):
+        async def installations(self, token):
+            return [{"id": index + 1} for index in range(11)]
+
+        async def repositories(self, *_args):
+            raise AssertionError("Excessive installations must stop before repository calls")
+    import pytest
+    with pytest.raises(ValueError, match="excessive"):
+        asyncio.run(read_repository_access(user, Excessive()))
+
+
+def test_project_eligibility_uses_live_grants_without_cached_callback():
+    from pullwise_server.cloudflare_ledger_api import _live_repos
+    user = {"githubAccessToken": "sealed:synthetic-access-token"}
+    assert asyncio.run(_live_repos(user, GitHubStub())) == {202: "alice/project"}
+    class Revoked(GitHubStub):
+        async def installations(self, token):
+            return []
+    assert asyncio.run(_live_repos(user, Revoked())) == {}
+
+
+def test_repository_sync_does_not_change_user_or_session_state(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    binding, gateway = D1ShapedSQLite(fixture.store), GitHubStub()
+    _, _, login_headers = login(binding, gateway, fixture.now)
+    cookie = login_headers["Set-Cookie"].split(";", 1)[0]
+    with fixture.store.connect() as db:
+        before = [tuple(row) for row in db.execute("SELECT * FROM app_state ORDER BY name")]
+    status, payload, _ = call(binding, gateway, fixture.now + 2, "POST", "/repositories/sync",
+        headers={"Cookie": cookie, "Origin": "https://app.example.test"})
+    assert status == 200 and len(payload["items"]) == 1
+    with fixture.store.connect() as db:
+        assert [tuple(row) for row in db.execute("SELECT * FROM app_state ORDER BY name")] == before
+
+
 class GitHubIdentityHttpTests(unittest.TestCase):
     def _run(self, check):
         with tempfile.TemporaryDirectory() as directory:

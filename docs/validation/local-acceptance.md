@@ -2,6 +2,30 @@
 
 Updated 2026-09-29. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
 
+## Preinstalled repository discovery and popup sync repair (2026-09-29)
+
+The user has GitHub-authorized repositories but no candidates. A corrected
+synthetic login/preinstalled-App regression failed against the previous committed
+handler: its absent local Setup callback cache hid real provider grants. Web
+popup completion also called an unimplemented POST `/repositories/sync` route.
+Current discovery reads fresh App user-token grants from at most ten visible
+installations, aggregates/deduplicates at most 1,000 repositories and reuses
+those facts for project eligibility. Provider/lost-access failures remain
+guarded, and GET/sync do not persist authorization cache or user/session updates.
+Sync requires a valid cookie session and trusted Origin/Referer. API-key clients
+still require projects:read. The prior scope test's stale empty fixture
+expectation was updated to the now-visible synthetic authorized repository;
+its insufficient-scope rejection is unchanged.
+
+The full suite executed 223 tests / 22 subtests: 222 tests and all subtests
+passed; the one old empty-fixture assertion was corrected and the corresponding
+API-key, GitHub identity and product-budget suites then passed 28 tests.
+Identity/project route checks passed 16 tests. Source mirror, both environment
+static checks and preview packaging passed. No real provider or D1 validation
+was performed. Publication will verify only one DO-only budget GET; its D1
+bound is zero read/write, with no retries or authorization/provider requests.
+The existing preview 100,000-read / 1,000-write caps remain unchanged.
+
 ## Main branch consolidation (2026-09-29)
 
 The user explicitly requested merging the preview read grant into main and

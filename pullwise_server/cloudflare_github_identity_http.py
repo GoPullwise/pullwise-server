@@ -142,6 +142,39 @@ def _repo_items(rows: object, installation_id: int) -> list[dict]:
     return items
 
 
+async def read_repository_access(user: dict, gateway: Any) -> dict:
+    """Read current App grants without relying on a prior Setup callback.
+
+    The App user token is the authority. GET/sync never write cached grants or
+    trust caller-provided repository IDs. Aggregate at most ten installations
+    and 1,000 repositories, using the gateway's bounded pagination.
+    """
+    access = user.get("githubRepositoryAccess")
+    missing = "lost" if isinstance(access, dict) and access.get("status") == "authorized" else "not_connected"
+    if not user.get("githubAccessToken"):
+        return {"items": [], "githubAccess": missing}
+    token = await gateway.unseal(user["githubAccessToken"])
+    installations = await gateway.installations(token)
+    if not isinstance(installations, list) or len(installations) > 10:
+        raise ValueError("invalid or excessive GitHub installations")
+    items, seen, installation_ids = [], set(), set()
+    for installation in installations:
+        installation_id = installation.get("id") if isinstance(installation, dict) else None
+        if type(installation_id) is not int or installation_id <= 0:
+            raise ValueError("invalid GitHub installation")
+        if installation_id in installation_ids:
+            continue
+        installation_ids.add(installation_id)
+        rows = _repo_items(await gateway.repositories(token, installation_id), installation_id)
+        for item in rows:
+            if item["githubRepoId"] not in seen:
+                seen.add(item["githubRepoId"])
+                items.append(item)
+        if len(items) > 1000:
+            raise ValueError("excessive authorized repositories")
+    return {"items": items, "githubAccess": "authorized" if items else missing}
+
+
 async def handle_identity_request(*, binding: Any, gateway: Any, now: int,
                                   method: str, path: str, params: Mapping[str, object],
                                   headers: Mapping[str, object], app_url: str,
@@ -150,7 +183,7 @@ async def handle_identity_request(*, binding: Any, gateway: Any, now: int,
     """Return (status, payload, headers), or None for another HTTP domain."""
     paths = {"/auth/session", "/auth/sign-out", "/auth/github/authorize",
              "/auth/github/callback", "/integrations", "/integrations/github/authorize",
-             "/integrations/github/callback", "/repositories", "/api/v1/repositories"}
+             "/integrations/github/callback", "/repositories", "/repositories/sync", "/api/v1/repositories"}
     if path not in paths:
         return None
     no_store = {"Cache-Control": "no-store"}
@@ -263,7 +296,12 @@ async def handle_identity_request(*, binding: Any, gateway: Any, now: int,
             "repositoriesNeedSync": False, "authorizedAt": now}}
         await _write_user(binding, next_user, now, expected_user=user)
         return _redirect_result(_redirect(record.get("redirectTo", ""), app_url, "/projects"))
-    if method == "GET" and path in {"/repositories", "/integrations", "/api/v1/repositories"}:
+    if (method == "GET" and path in {"/repositories", "/integrations", "/api/v1/repositories"}
+            or method == "POST" and path == "/repositories/sync"):
+        if method == "POST":
+            origin = urlsplit(_header(headers, "Origin") or _header(headers, "Referer"))
+            if f"{origin.scheme}://{origin.netloc}" not in trusted_origins:
+                return 403, {"error": {"code": "UNTRUSTED_ORIGIN"}}, no_store
         if path == "/api/v1/repositories":
             try:
                 user, _, auth, validate = await ledger_principal(
@@ -277,18 +315,9 @@ async def handle_identity_request(*, binding: Any, gateway: Any, now: int,
         if not user:
             return 401, {"error": {"code": "UNAUTHENTICATED"}}, no_store
         access = user.get("githubRepositoryAccess")
-        if not isinstance(access, dict) or access.get("status") != "authorized":
-            result = {"items": [], "githubAccess": "not_connected"}
-        else:
-            token = await gateway.unseal(user["githubAccessToken"])
-            installation_id = int(access["installationId"])
-            installations = await gateway.installations(token)
-            if not isinstance(installations, list) or not any(
-                    isinstance(item, dict) and item.get("id") == installation_id for item in installations):
-                result = {"items": [], "githubAccess": "lost"}
-            else:
-                items = _repo_items(await gateway.repositories(token, installation_id), installation_id)
-                result = {"items": items, "githubAccess": "authorized" if items else "lost"}
+        result = await read_repository_access(user, gateway)
+        if path == "/repositories/sync":
+            result = {**result, "needsAuthorization": result["githubAccess"] != "authorized"}
         if path == "/api/v1/repositories":
             result = {"items": result["items"], "nextCursor": None,
                       "githubAccess": result["githubAccess"]}

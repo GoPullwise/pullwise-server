@@ -10,6 +10,7 @@ from datetime import date, datetime, timezone
 from typing import Any, Mapping
 
 from .cloudflare_ledger_auth import ledger_principal, target_allowed
+from .cloudflare_github_identity_http import read_repository_access
 from .cloudflare_principal import PrincipalAuthError, _header
 
 
@@ -87,29 +88,9 @@ async def _authorized(binding: Any, headers: Mapping[str, object], scope: str,
 
 
 async def _live_repos(user: dict, gateway: Any) -> dict[int, str]:
-    access = user.get("githubRepositoryAccess")
-    if not isinstance(access, dict) or access.get("status") != "authorized":
-        return {}
     try:
-        token = await gateway.unseal(user["githubAccessToken"])
-        installation_id = int(access["installationId"])
-        installations = await gateway.installations(token)
-        if not isinstance(installations, list) or not any(
-                isinstance(item, dict) and item.get("id") == installation_id
-                for item in installations):
-            return {}
-        rows = await gateway.repositories(token, installation_id)
-        if not isinstance(rows, list) or len(rows) > 1000:
-            return {}
-        result = {}
-        for row in rows:
-            if not isinstance(row, dict) or type(row.get("id")) is not int or row["id"] <= 0:
-                return {}
-            name = row.get("full_name")
-            if not isinstance(name, str) or "/" not in name:
-                return {}
-            result[row["id"]] = name[:300]
-        return result
+        access = await read_repository_access(user, gateway)
+        return {item["githubRepoId"]: item["fullName"] for item in access["items"]}
     except Exception:
         return {}
 

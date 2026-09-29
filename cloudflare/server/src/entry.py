@@ -362,7 +362,7 @@ class ValidationBudget(DurableObject):
                 headers={"Cache-Control": "no-store"})
         if (request.method not in {"GET", "POST", "PATCH", "DELETE"} or
                 not (path.startswith(("/api/v1/", "/api-keys", "/auth/", "/integrations"))
-                     or path in {"/health", "/repositories", "/billing", "/webhooks/creem"}
+                       or path in {"/health", "/repositories", "/repositories/sync", "/billing", "/webhooks/creem"}
                      or path.startswith("/billing/"))):
             return Response.json({"error": {"code": "NOT_FOUND"}}, status=404)
         if self._waiting >= 16:

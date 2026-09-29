@@ -75,6 +75,12 @@ historical product plans to gate work.
   one record; soft deletion removes it from lists, reports and exports.
 - Lost repository access hides protected GitHub metadata and blocks new
   project targets; owners retain control of their historical expenses.
+- Repository candidates and new project eligibility use `read_repository_access`
+  with the current App user token; a missing installation Setup callback/cache
+  is not evidence of missing GitHub grants. Bound discovery to ten installations
+  and 1,000 repositories; preserve failure/lost-access handling and owner scopes.
+  `/repositories/sync` is a cookie-session/trusted-origin, read-only verification
+  route used by Web popup completion, with no user/session/grant writes.
 - Creem checkout does not grant entitlement. Signed, idempotent webhooks
   own payment facts; keep account revision fences, pending updates and replay
   recovery atomic. Platform payments never create ledger expenses.
