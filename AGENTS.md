@@ -55,7 +55,9 @@ historical product plans to gate work.
   Jev reserves a conservative whole-context cost before calling; it is not an
   actual-invoice meter. Keep quality/enable flags off. Free/Pro are ineligible.
 - The user waived real GitHub login/repository authorization acceptance on
-  2026-09-28. Preserve security regressions; report waived, not provider-passed.
+  2026-09-28, then requested real preview login on 2026-09-29. Real preview
+  login is now a pending gate; preserve security regressions and do not report
+  the earlier waiver as acceptance of the new test App.
 - Preview uses preview-api.pull-wise.com and a separate empty database, with
   test Creem IDs/Secrets only. Production keeps its original providers/DNS.
   Both access switches stay 0. Never send a test webhook to production.
@@ -108,12 +110,36 @@ historical product plans to gate work.
   Stop is persistent, without a reset/resume API; interrupted requests retain
   their reservations. Capture native meta through the metered batch adapter,
   including for `first()`. CSV streaming, migrations and cleanup are unadmitted.
+- Every metered SQL group must declare per-statement parameter envelopes:
+  bounded safe integers, UTF-8 byte-bounded text or explicit null. Omitted
+  envelopes permit zero bound parameters. Reject type/count/range/encoding
+  violations before dispatch and never put parameter values in budget evidence.
+  Input envelopes supplement, but do not prove, row/cardinality/index bounds.
+- Use json_object parameter bounds for reviewed app_state maps that feed
+  json_each: cap top-level entries and UTF-8 bytes; reject duplicate keys,
+  malformed/non-finite JSON and invalid Unicode. Nested collection bounds
+  still require separate review for each SQL path.
+- ValidationBudget.initialize is a binding-only RPC with no caller-supplied
+  SQL or public HTTP route. REVIEWED_INITIALIZATION_PLAN remains None until
+  DDL/empty-schema bounds pass. Reserve the full fixed plan before executing,
+  allow it once across restarts, and preserve partial initialization on failure
+  without retry/reset/unreviewed cleanup. It uses the existing fixed journal.
+- scripts/check-preview-identity-cost.py prepares a local-only, synthetic
+  identity SQL replay in ignored .agents/runtime. Never deploy its generated
+  fixture or copy synthetic users/tokens to remote D1. Its native SQL metrics
+  do not prove Python FFI, real providers or remote worst-case bounds.
 - Loopback validation clients must disable system proxies and redirects.
   This machine's proxy does not bypass 127.0.0.1; a default urllib opener can
   forward an intended local check outside loopback and time out.
 - Run Windows shell tests through a PATH-resolved Git Bash and use forward
   slash relative script paths. `PULLWISE_PYTHON` selects the deployment-check
   interpreter. SQLite test contexts must commit/rollback AND close connections.
+- Cloudflare Builds' asdf Python 3.10.12 lacks _sqlite3. The checked-in build
+  repair runs the static SQLite check through uv-managed Python 3.10.12 with
+  pinned PyYAML 6.0.3; do not rely on the host Python for that check. The user
+  explicitly approved the build-command repair on 2026-09-29; the remote
+  trigger was updated and read back. Keep deploy_command unchanged. Do not
+  repeat that approval or treat the resolved automatic rejection as a blocker.
 - `scripts/check-ledger-local-runtime.py` seeds an isolated local database and
   checks a finite loopback-only HTTP journey; migrate first and use a fresh
   persistence directory for each run. Never seed its fixture remotely.
@@ -127,6 +153,12 @@ historical product plans to gate work.
   because repository access uses `/user/installations` App user tokens.
   Distinguish the Client ID from the numeric App ID. Configure OAuth and
   installation Setup callbacks separately through the Web API proxy.
+- Preview uses the separate GoPullwise Preview App (ID 5116379, Client ID
+  Iv23liUTSufy2U2Dc5l7, slug gopullwise-preview). Its current gateway needs
+  only Repository Metadata read permission; organization/account permissions
+  are unnecessary. Keep production App configuration independent. Provider
+  callbacks and installation are user-configured prerequisites, not implied
+  by Worker settings or the presence of a Client Secret.
 - Preview/production use separate configs and databases. Deploy guards must
   reject placeholders. Keep credentials in Cloudflare Secrets; never expose
   tokens, private keys or account snapshots in logs or documentation.

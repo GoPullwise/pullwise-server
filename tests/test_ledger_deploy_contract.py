@@ -7,6 +7,7 @@ import subprocess
 import os
 import sys
 import shutil
+import shlex
 import importlib.util
 from unittest.mock import patch
 import tempfile
@@ -24,6 +25,17 @@ BASH = shutil.which("bash") or "bash"
 
 
 class LedgerDeployContractTests(unittest.TestCase):
+    def test_cloudflare_build_static_checks_use_managed_python_with_sqlite(self):
+        plan = json.loads((ROOT / "cloudflare/server/build-trigger-plan.json").read_text())
+        command = next(command for command in plan["build_command"].split(" && ")
+                       if "scripts/check-ledger-s01.py" in command)
+        args = shlex.split(command)
+        self.assertEqual(args[:2], ["uv", "run"])
+        self.assertIn("--managed-python", args)
+        self.assertEqual(args[args.index("--python") + 1], "3.10.12")
+        self.assertEqual(args[args.index("--with") + 1], "PyYAML==6.0.3")
+        self.assertIn("--no-project", args)
+
     def test_remote_config_rejects_enabled_d1_and_cron(self):
         spec = importlib.util.spec_from_file_location("ledger_config_checker", ROOT / "scripts/check-ledger-s01.py")
         checker = importlib.util.module_from_spec(spec)

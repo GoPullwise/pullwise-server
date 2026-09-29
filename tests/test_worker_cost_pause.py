@@ -127,3 +127,39 @@ def test_preview_coordinator_unknown_paths_do_not_touch_storage_d1_or_providers(
         assert options["status"] == 503
         assert payload["error"]["code"] == "UNREVIEWED_CASE"
     assert coordinator.journal is None
+
+
+def test_unreviewed_initialization_rpc_cannot_touch_storage_or_d1():
+    entry = load_entry()
+
+    class Environment:
+        PULLWISE_D1_ACCESS_ENABLED = "1"
+        PULLWISE_MODE = "preview"
+
+        def __getattr__(self, name):
+            raise AssertionError(f"Unreviewed initialization accessed {name}")
+
+    coordinator = entry.ValidationBudget(SimpleNamespace(), Environment())
+    result = asyncio.run(coordinator.initialize())
+    assert result == {"initialized": False, "error": "UNREVIEWED_INITIALIZATION"}
+    assert coordinator.journal is None
+
+
+@pytest.mark.parametrize("enabled,mode,reason", [
+    ("0", "preview", "D1_ACCESS_PAUSED"),
+    ("1", "production", "VALIDATION_CONTROL_REQUIRED"),
+    ("1", "local", "VALIDATION_CONTROL_REQUIRED"),
+])
+def test_initialization_rpc_cannot_bypass_pause_or_environment(enabled, mode, reason):
+    entry = load_entry()
+
+    class Environment:
+        PULLWISE_D1_ACCESS_ENABLED = enabled
+        PULLWISE_MODE = mode
+
+        def __getattr__(self, name):
+            raise AssertionError(f"Rejected initialization accessed {name}")
+
+    coordinator = entry.ValidationBudget(SimpleNamespace(), Environment())
+    assert asyncio.run(coordinator.initialize()) == {"initialized": False, "error": reason}
+    assert coordinator.journal is None

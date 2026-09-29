@@ -9,6 +9,7 @@ from workers import DurableObject, Response, WorkerEntrypoint
 from pullwise_server.cloudflare_validation_budget import (
     BUDGET_SCOPE, REQUEST_SECONDS, BudgetError, BudgetJournal, MeteredD1,
     REVIEWED_REMOTE_PLANS,
+    REVIEWED_INITIALIZATION_PLAN, run_initialization,
 )
 
 from pullwise_server.cloudflare_http_contract import handle_http_request
@@ -253,6 +254,28 @@ class ValidationBudget(DurableObject):
 
     async def evidence(self):
         return self._journal().snapshot()
+
+    async def initialize(self):
+        # Only a Worker possessing the coordinator binding can invoke RPC.
+        # No SQL, params, plan or reset option is supplied by the caller.
+        if str(getattr(self.env, "PULLWISE_D1_ACCESS_ENABLED", "0")) != "1":
+            return {"initialized": False, "error": "D1_ACCESS_PAUSED"}
+        if getattr(self.env, "PULLWISE_MODE", "") != "preview":
+            return {"initialized": False, "error": "VALIDATION_CONTROL_REQUIRED"}
+        if REVIEWED_INITIALIZATION_PLAN is None:
+            return {"initialized": False, "error": "UNREVIEWED_INITIALIZATION"}
+        journal = self._journal()
+        try:
+            evidence = await run_initialization(self.env.DB, journal, REVIEWED_INITIALIZATION_PLAN)
+            return {"initialized": True, "evidence": evidence}
+        except BudgetError as error:
+            return {"initialized": False, "error": str(error), "evidence": journal.snapshot()}
+        except BaseException as error:
+            journal.stop("INITIALIZATION_OUTCOME_UNKNOWN")
+            if isinstance(error, asyncio.CancelledError):
+                raise
+            return {"initialized": False, "error": journal.snapshot()["stopped"],
+                    "evidence": journal.snapshot()}
 
     async def fetch(self, request):
         if str(getattr(self.env, "PULLWISE_D1_ACCESS_ENABLED", "0")) != "1":

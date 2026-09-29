@@ -32,11 +32,67 @@ def _field(value, name, default=None):
 
 
 @dataclass(frozen=True)
+class ParameterBound:
+    """Reviewed scalar input envelope, independent of SQL row-bound proof."""
+    kind: str
+    minimum: int | None = None
+    maximum: int | None = None
+    max_bytes: int | None = None
+    max_items: int | None = None
+
+    def __post_init__(self):
+        valid = False
+        if self.kind == "integer":
+            valid = (type(self.minimum) is int and type(self.maximum) is int
+                     and -(2**53 - 1) <= self.minimum <= self.maximum <= 2**53 - 1
+                     and self.max_bytes is self.max_items is None)
+        elif self.kind in {"text", "json_object"}:
+            valid = (_integer(self.max_bytes, 1) and self.max_bytes <= 8192
+                     and self.minimum is None and self.maximum is None
+                     and (self.max_items is None if self.kind == "text" else
+                          _integer(self.max_items) and self.max_items <= 100))
+        elif self.kind == "null":
+            valid = self.minimum is self.maximum is self.max_bytes is self.max_items is None
+        if not valid:
+            raise ValueError("invalid parameter bound")
+
+    def accepts(self, value):
+        if self.kind == "integer":
+            return type(value) is int and self.minimum <= value <= self.maximum
+        if self.kind in {"text", "json_object"}:
+            if type(value) is not str:
+                return False
+            try:
+                if len(value.encode("utf-8")) > self.max_bytes:
+                    return False
+                if self.kind == "text":
+                    return True
+                decoded = json.loads(value, object_pairs_hook=_unique_object)
+                # Reject ambiguous/non-finite JSON and escaped invalid Unicode
+                # before SQL json_each/json() can interpret it differently.
+                json.dumps(decoded, ensure_ascii=False, allow_nan=False).encode("utf-8")
+                return isinstance(decoded, dict) and len(decoded) <= self.max_items
+            except (ValueError, UnicodeError, RecursionError):
+                return False
+        return value is None
+
+
+def _unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
+@dataclass(frozen=True)
 class OperationBound:
     sql: tuple[str, ...]
     rows_read: int
     rows_written: int
     max_calls: int = 1
+    parameters: tuple[tuple[ParameterBound, ...], ...] = ()
 
     def __post_init__(self):
         if (not isinstance(self.sql, tuple) or not 1 <= len(self.sql) <= 64
@@ -44,6 +100,12 @@ class OperationBound:
                 or not _integer(self.rows_read) or not _integer(self.rows_written)
                 or not _integer(self.max_calls, 1) or self.max_calls > 100):
             raise ValueError("invalid operation bound")
+        if (not isinstance(self.parameters, tuple)
+                or self.parameters and len(self.parameters) != len(self.sql)
+                or any(not isinstance(group, tuple) or len(group) > 100
+                       or any(not isinstance(item, ParameterBound) for item in group)
+                       for group in self.parameters)):
+            raise ValueError("invalid operation parameters")
 
 
 @dataclass(frozen=True)
@@ -81,6 +143,9 @@ class RequestPlan:
 # No remote case has a proven bound yet. Neither env vars nor request headers
 # can supply plans. OAuth, webhooks, migrations and cleanup remain unadmitted.
 REVIEWED_REMOTE_PLANS: tuple[RequestPlan, ...] = ()
+# Initialization is an internal RPC, never an HTTP route. Local observations
+# alone cannot populate this plan; remote DDL bounds remain unproven.
+REVIEWED_INITIALIZATION_PLAN: RequestPlan | None = None
 
 
 class BudgetJournal:
@@ -198,6 +263,12 @@ class MeteredD1:
         if index is None:
             self.journal._reject("UNREVIEWED_SQL")
         bound = self.plan.operations[index]
+        parameters = bound.parameters or tuple(() for _ in bound.sql)
+        for statement, reviewed in zip(statements, parameters):
+            if (len(statement.params) != len(reviewed)
+                    or any(not check.accepts(value)
+                           for check, value in zip(reviewed, statement.params))):
+                self.journal._reject("UNREVIEWED_PARAMETERS")
         if self._calls[index] >= bound.max_calls:
             self.journal._reject("OPERATION_LIMIT")
         self._calls[index] += 1  # Consume before yielding; concurrent calls cannot reuse it.
@@ -254,3 +325,30 @@ class _Statement:
         rows = _field(result, "results")
         row = rows[0] if rows else None
         return _field(row, column) if column is not None and row is not None else row
+
+
+async def run_initialization(binding, journal, plan, *, clock=time.time):
+    """Execute fixed, parameter-free SQL once under the same cumulative journal.
+
+    Caller code owns the reviewed schema/empty-database prerequisites. Partial
+    initialization is preserved on failure; there is no retry/reset/cleanup.
+    """
+    if (not isinstance(plan, RequestPlan) or plan.method != "POST"
+            or plan.path != "/_internal/initialize" or plan.max_requests != 1
+            or any(op.max_calls != 1 or any(op.parameters) for op in plan.operations)):
+        raise BudgetError("UNREVIEWED_INITIALIZATION")
+    ticket = journal.begin(plan, now=clock())
+    meter = MeteredD1(binding, journal, ticket, plan, clock=clock)
+
+    async def execute():
+        for operation in plan.operations:
+            await meter.batch([meter.prepare(sql) for sql in operation.sql])
+        journal.finish(ticket, now=clock())
+
+    try:
+        await asyncio.wait_for(execute(), timeout=REQUEST_SECONDS)
+    except BaseException as error:
+        journal.stop("TIMEOUT" if isinstance(error, asyncio.TimeoutError)
+                     else "INITIALIZATION_OUTCOME_UNKNOWN")
+        raise
+    return journal.snapshot()

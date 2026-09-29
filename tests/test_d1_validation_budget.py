@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from pullwise_server.cloudflare_validation_budget import (
-    BudgetError, BudgetJournal, MeteredD1, OperationBound, RequestPlan,
+    BudgetError, BudgetJournal, MeteredD1, OperationBound, ParameterBound, RequestPlan,
 )
 
 
@@ -32,9 +32,10 @@ def sql():
         connection.close()
 
 
-def plan(name="case", reads=10, writes=5, calls=1, requests=1):
+def plan(name="case", reads=10, writes=5, calls=1, requests=1, parameter=None):
     return RequestPlan(name, "POST", "/case", requests,
-                       (OperationBound(("SELECT ?",), reads, writes, calls),))
+                       (OperationBound(("SELECT ?",), reads, writes, calls,
+                        parameters=((parameter or ParameterBound("integer", minimum=7, maximum=7),),)),))
 
 
 class RawD1:
@@ -158,9 +159,10 @@ def test_uncertain_or_excess_usage_stops_without_retry(sql, kwargs, reason):
 def test_first_retains_meta_and_records_only_numeric_evidence(sql):
     async def run():
         journal = BudgetJournal(sql)
-        ticket = journal.begin(plan(), now=10)
+        case = plan(parameter=ParameterBound("text", max_bytes=16))
+        ticket = journal.begin(case, now=10)
         raw = RawD1()
-        meter = MeteredD1(raw, journal, ticket, plan(), clock=lambda: 11)
+        meter = MeteredD1(raw, journal, ticket, case, clock=lambda: 11)
         assert await meter.prepare("SELECT ?").bind("sensitive").first("value") == 7
         journal.finish(ticket, now=12)
         state = journal.snapshot()
@@ -224,7 +226,7 @@ def test_manual_stop_during_dispatch_keeps_returned_meta(sql):
         raw = RawD1()
         raw.entered, raw.release = asyncio.Event(), asyncio.Event()
         meter = MeteredD1(raw, journal, ticket, plan(), clock=lambda: 11)
-        task = asyncio.create_task(meter.prepare("SELECT ?").first())
+        task = asyncio.create_task(meter.prepare("SELECT ?").bind(7).first())
         await raw.entered.wait()
         journal.stop("MANUAL_STOP")
         raw.release.set()
@@ -233,4 +235,170 @@ def test_manual_stop_during_dispatch_keeps_returned_meta(sql):
         state = journal.snapshot()
         assert state["actual_read"] == 2 and state["actual_written"] == 1
         assert state["reserved_written"] == 5 and raw.calls == 1
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("params", [(0,), (9,), (True,), (1.5,), ("2",), (), (2, 3)])
+def test_reviewed_limit_parameters_are_checked_before_dispatch(sql, params):
+    from pullwise_server.cloudflare_validation_budget import ParameterBound
+
+    async def run():
+        case = RequestPlan("limited", "GET", "/case", 1, (OperationBound(
+            ("SELECT * FROM expenses LIMIT ?",), 10, 0,
+            parameters=((ParameterBound("integer", minimum=1, maximum=8),),)),))
+        journal = BudgetJournal(sql)
+        ticket = journal.begin(case, now=10)
+        raw = RawD1(writes=0)
+        meter = MeteredD1(raw, journal, ticket, case, clock=lambda: 11)
+        with pytest.raises(BudgetError, match="UNREVIEWED_PARAMETERS"):
+            await meter.prepare(case.operations[0].sql[0]).bind(*params).all()
+        assert raw.calls == 0
+        assert journal.snapshot()["reserved_read"] == 10
+        assert journal.snapshot()["stopped"] == "UNREVIEWED_PARAMETERS"
+    asyncio.run(run())
+
+
+def test_unreviewed_binding_and_multibyte_text_never_dispatch(sql):
+    from pullwise_server.cloudflare_validation_budget import ParameterBound
+
+    async def run():
+        case = RequestPlan("text", "POST", "/case", 1, (OperationBound(
+            ("SELECT ?", "SELECT ?"), 10, 0, parameters=(
+                (ParameterBound("text", max_bytes=4),), (ParameterBound("null"),))),))
+        journal = BudgetJournal(sql)
+        ticket = journal.begin(case, now=10)
+        raw = RawD1(writes=0)
+        meter = MeteredD1(raw, journal, ticket, case, clock=lambda: 11)
+        with pytest.raises(BudgetError, match="UNREVIEWED_PARAMETERS"):
+            await meter.batch([meter.prepare("SELECT ?").bind("中文"),
+                               meter.prepare("SELECT ?").bind(None)])
+        assert raw.calls == 0
+        assert "中文" not in str(journal.snapshot())
+    asyncio.run(run())
+
+
+def test_parameter_envelope_accepts_reviewed_boundaries_and_null(sql):
+    async def run():
+        case = RequestPlan("boundaries", "POST", "/case", 1, (OperationBound(
+            ("SELECT ?, ?, ?",), 10, 0, parameters=((
+                ParameterBound("integer", minimum=1, maximum=8),
+                ParameterBound("text", max_bytes=3), ParameterBound("null")),)),))
+        journal = BudgetJournal(sql)
+        ticket = journal.begin(case, now=10)
+        raw = RawD1(writes=0)
+        meter = MeteredD1(raw, journal, ticket, case, clock=lambda: 11)
+        await meter.prepare("SELECT ?, ?, ?").bind(8, "中", None).all()
+        journal.finish(ticket, now=12)
+        assert raw.calls == 1
+        assert "中" not in str(journal.snapshot())
+    asyncio.run(run())
+
+
+def test_undeclared_parameters_fail_closed(sql):
+    async def run():
+        case = RequestPlan("unbound", "GET", "/case", 1,
+                           (OperationBound(("SELECT ?",), 10, 0),))
+        journal = BudgetJournal(sql)
+        ticket = journal.begin(case, now=10)
+        raw = RawD1(writes=0)
+        meter = MeteredD1(raw, journal, ticket, case, clock=lambda: 11)
+        with pytest.raises(BudgetError, match="UNREVIEWED_PARAMETERS"):
+            await meter.prepare("SELECT ?").bind(7).all()
+        assert raw.calls == 0
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("options", [
+    {"kind": "integer", "minimum": 2, "maximum": 1},
+    {"kind": "integer", "minimum": True, "maximum": 8},
+    {"kind": "integer", "minimum": 0, "maximum": 2**53},
+    {"kind": "text", "max_bytes": 0},
+    {"kind": "text", "max_bytes": 8193},
+    {"kind": "null", "max_bytes": 1},
+    {"kind": "unknown"},
+])
+def test_invalid_parameter_envelopes_cannot_create_a_plan(options):
+    with pytest.raises(ValueError, match="invalid parameter bound"):
+        ParameterBound(**options)
+
+
+@pytest.mark.parametrize("payload", ['{"a":{},"b":{}}', '{"a":1,"a":2}',
+    '[]', '{"a":NaN}', '{"a":Infinity}', '{"a":', '{"a":"\\ud800"}'])
+def test_json_map_cardinality_and_ambiguous_json_stop_before_dispatch(sql, payload):
+    async def run():
+        case = RequestPlan("json", "POST", "/case", 1, (OperationBound(
+            ("SELECT value FROM json_each(?)",), 10, 0, parameters=((
+                ParameterBound("json_object", max_bytes=128, max_items=1),),)),))
+        journal = BudgetJournal(sql)
+        ticket = journal.begin(case, now=10)
+        raw = RawD1(writes=0)
+        meter = MeteredD1(raw, journal, ticket, case, clock=lambda: 11)
+        with pytest.raises(BudgetError, match="UNREVIEWED_PARAMETERS"):
+            await meter.prepare(case.operations[0].sql[0]).bind(payload).all()
+        assert raw.calls == 0 and journal.snapshot()["reserved_read"] == 10
+    asyncio.run(run())
+
+
+def test_json_map_allows_empty_and_one_entry_without_recording_values():
+    bound = ParameterBound("json_object", max_bytes=128, max_items=1)
+    assert bound.accepts('{}')
+    assert bound.accepts('{"user":{"providers":["github"]}}')
+
+
+def test_initialization_reserves_once_and_cannot_replay_after_restart(sql):
+    from pullwise_server.cloudflare_validation_budget import run_initialization
+
+    async def run():
+        case = RequestPlan("schema", "POST", "/_internal/initialize", 1,
+            (OperationBound(("CREATE TABLE fixture(value INTEGER)",), 10, 5),
+             OperationBound(("INSERT INTO fixture VALUES(7)",), 5, 3)))
+        journal = BudgetJournal(sql)
+
+        class CheckedD1(RawD1):
+            async def batch(self, statements):
+                state = journal.snapshot()
+                assert state["reserved_read"] == 15 and state["reserved_written"] == 8
+                return await super().batch(statements)
+
+        raw = CheckedD1()
+        await run_initialization(raw, journal, case, clock=lambda: 11)
+        assert raw.calls == 2 and journal.snapshot()["active"] is None
+        restarted = BudgetJournal(sql)
+        with pytest.raises(BudgetError, match="CASE_LIMIT"):
+            await run_initialization(raw, restarted, case, clock=lambda: 12)
+        assert raw.calls == 2
+    asyncio.run(run())
+
+
+def test_initialization_failure_stops_remaining_sql_and_retains_reservation(sql):
+    from pullwise_server.cloudflare_validation_budget import run_initialization
+
+    async def run():
+        case = RequestPlan("schema", "POST", "/_internal/initialize", 1,
+            (OperationBound(("CREATE TABLE fixture(value INTEGER)",), 10, 5),
+             OperationBound(("INSERT INTO fixture VALUES(7)",), 5, 3)))
+        journal, raw = BudgetJournal(sql), RawD1(meta=False)
+        with pytest.raises(BudgetError, match="METERING_MISSING"):
+            await run_initialization(raw, journal, case, clock=lambda: 11)
+        assert raw.calls == 1 and journal.snapshot()["reserved_written"] == 8
+        assert BudgetJournal(sql).snapshot()["stopped"] == "METERING_MISSING"
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("path,requests,calls,parameters", [
+    ("/public", 1, 1, ()),
+    ("/_internal/initialize", 2, 1, ()),
+    ("/_internal/initialize", 1, 2, ()),
+    ("/_internal/initialize", 1, 1, ((ParameterBound("text", max_bytes=8),),)),
+])
+def test_initialization_accepts_only_a_once_only_fixed_sql_plan(sql, path, requests, calls, parameters):
+    from pullwise_server.cloudflare_validation_budget import run_initialization
+
+    async def run():
+        case = RequestPlan("schema", "POST", path, requests,
+            (OperationBound(("SELECT 1",), 10, 0, calls, parameters),))
+        journal, raw = BudgetJournal(sql), RawD1()
+        with pytest.raises(BudgetError, match="UNREVIEWED_INITIALIZATION"):
+            await run_initialization(raw, journal, case, clock=lambda: 11)
+        assert raw.calls == 0 and journal.snapshot()["requests"] == 0
     asyncio.run(run())

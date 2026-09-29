@@ -1,6 +1,89 @@
 # Current local acceptance
 
-Updated 2026-09-28. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
+Updated 2026-09-29. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
+
+## Local initialization preparation and Builds diagnosis (2026-09-29)
+
+Added test-first JSON map cardinality checks and a binding-only initialization
+RPC using the same fixed budget journal, full upfront reservation and once-only
+execution. Missing metadata/failure/restart retains reservations and stops;
+no public initialization endpoint, caller SQL, reset or retry exists. Both
+reviewed remote HTTP plans and the initialization plan remain disabled.
+
+The finite synthetic identity SQL trace replay completed one local request and
+55 native D1 operations: **62 reads / 89 writes**, including schema **28 / 60**
+and identity **34 / 29**. All native metadata was complete, and the process was
+stopped. Exact phases, local artifact locations and limits are in the
+[budget record](d1-validation-budget.md). These are local SQL observations,
+not remote row bounds, Python RPC/FFI or real GitHub acceptance.
+
+Full reference suite: **184 tests / 22 subtests passed**, 161.10 seconds.
+Module mirror, production/preview static checks and diff whitespace passed.
+Locked Python 3.14.2 / Wrangler 4.136.3 production packaging **dry run passed**;
+no Worker upload or D1 SQL was executed. Missing pinned cache wheels were
+restored within the existing dependency authorization; no versions were changed.
+
+Existing Server HEAD GitHub Actions run 36412958473 remains successful.
+Cloudflare Builds run 7326ca8c-8284-40b2-b5d4-834fc298b7df failed at the same
+4a55cd5 commit: the build host's asdf Python 3.10.12 has no _sqlite3 module,
+so the static checker fails before the deploy stage. The local command repair
+uses uv-managed Python 3.10.12 with pinned PyYAML 6.0.3 for that check; the
+actual managed-interpreter check and regression test pass. Deploy command,
+branch restriction, D1 pause and no-migration/no-cron policy are preserved.
+
+Automatic approval review rejected the remote trigger command update as a
+persistent production pipeline change lacking explicit approval for this
+modification. The user then explicitly approved it on 2026-09-29. A scoped
+PATCH updated only build_command on trigger 38570661-f72d-4ee1-a97c-83db00a3003b.
+Read-back confirmed the exact repaired command, unchanged deploy_command,
+main branch and root directory. Production settings confirmed D1 access 0.
+`cloudflare/server/build-trigger-plan.json` matches the remote repair. This
+approval is resolved; no retry/new build, push, remote schema operation or
+activation was performed. Current changes have no new CI/build result, and
+the failed historical build is not evidence that the repaired build passed.
+
+Remaining before remote login: proven DDL/bookkeeping and failure-path bounds,
+reviewed finite SQL/input/cardinality/provider plans, Python initializer RPC
+acceptance and provider callback/selected-repository confirmation. Production
+and preview stay paused; cumulative recorded remote D1 usage remains 0/0.
+
+## Separate preview GitHub App and parameter admission (2026-09-29)
+
+The user requested real preview login, superseding the earlier GitHub waiver
+for this preview flow, and supplied the separate GoPullwise Preview App:
+App ID 5116379, Client ID Iv23liUTSufy2U2Dc5l7, slug gopullwise-preview.
+Its Client Secret was stored directly in pullwise-server-preview through the
+Cloudflare Secret API; no value was written to source or this record.
+Settings-only multipart PATCH updated just the preview Client ID and slug,
+inheriting all other bindings. Read-back confirmed both public values, all
+four Secret names, the existing preview DB and the unchanged validation
+namespace. D1 and both Jev flags remain 0. Production was not modified.
+
+The user reported D1_ACCESS_PAUSED after GitHub authorization. This is the
+expected paused callback response, not a completed login. Provider callback
+configuration and installation on a selected test repository remain to be
+confirmed. The current gateway reads user identity, user App installations
+and accessible repository metadata, requiring only Metadata read repository
+permission; no code-content or account-email permission is needed.
+
+Test-first parameter admission was added to MeteredD1: reviewed SQL groups
+now constrain parameter counts, scalar types, safe integer ranges and UTF-8
+text bytes before native dispatch. Undeclared bound parameters stop the
+journal. Eight new cases failed before implementation; the focused budget,
+pause and deployment-contract run subsequently passed **48 tests**. The
+first deployment-contract attempt resolved Windows/WSL bash instead of Git
+Bash and failed to find python3; selecting D:/Git/bin through PATH passed.
+These checks are Python/SQLite and offline shell checks, not workerd evidence.
+
+Row bounds for DDL/schema bookkeeping, initialization, OAuth/session and
+provider operations remain unproven. Parameter envelopes are an additional
+input guard, not remote row-bound proof. REVIEWED_REMOTE_PLANS stays empty.
+No remote D1 SQL, provider request or access activation was performed by this
+agent; cumulative recorded remote D1 usage remains 0 read / 0 written.
+Existing Server HEAD CI 36412958473 was reviewed as successful at 4a55cd5;
+this local checkpoint has no corresponding CI run until pushed. The Cloudflare
+Builds failure and approved command repair are recorded above; a repaired cloud
+build result remains pending.
 
 ## Preview variables handoff checkpoint (2026-09-28)
 

@@ -1,8 +1,68 @@
 # S17/S18 bounded D1 validation
 
-Updated 2026-09-28. The user authorized S17/S18 conditional on controlling
+Updated 2026-09-29. The user authorized S17/S18 conditional on controlling
 D1 usage, especially Rows Written. This is an execution candidate, not a
 record of completed runtime acceptance or authorization to release production.
+
+2026-09-29: MeteredD1 additionally checks per-statement parameter envelopes
+before dispatch (count, scalar type, safe integer range and UTF-8 byte bound).
+Missing envelopes allow no parameters. Violations stop without a D1 call;
+the full reservation remains consumed and no parameter values enter evidence.
+These input limits do not prove JSON cardinality, database cardinality, scans,
+DDL/index effects or provider behavior. The remote allowlist remains empty.
+Preview now has a separate GitHub App and all required Secret names; real
+login is requested but cannot complete while the D1 pause remains enabled.
+
+## Finite schema and identity local replay (2026-09-29)
+
+`scripts/check-preview-identity-cost.py` prepares the canonical migration SQL
+and captures SQL batches from the current Python identity handlers with
+synthetic GitHub responses. The trace is replayed through an isolated local JS
+Worker and native D1: this measures the same SQL/parameters/batch boundaries,
+not the live Python FFI or real GitHub transport. A single no-proxy/no-redirect
+POST executed 55 operations; all statement results supplied valid native meta.
+The local process was stopped. No remote D1 or provider request was made.
+
+| Local phase | SQL operations | Observed Rows Read | Observed Rows Written |
+| --- | ---: | ---: | ---: |
+| All four migrations and four app_state seed rows | 22 | 28 | 60 |
+| Login authorize | 2 | 1 | 4 |
+| New-user callback, authority and session | 11 | 13 | 13 |
+| Session read | 2 | 2 | 0 |
+| Used callback replay | 1 | 1 | 0 |
+| Installation authorize | 4 | 4 | 3 |
+| Installation callback | 6 | 6 | 6 |
+| Repository read | 2 | 2 | 0 |
+| Sign out | 4 | 4 | 3 |
+| Signed-out session read | 1 | 1 | 0 |
+| Total | **55** | **62** | **89** |
+
+The reference fixture has 14 tables / 24 indexes (7 explicit, 17 implicit),
+one user, at most one active state/session and one repository. Final user/state/
+session cardinalities are 1/0/0. Migration names and SHA-256 fingerprints are
+in the local manifest. Evidence is stored outside version control under
+`F:/Pullwise/.agents/runtime/identity-cost-20260929/`: manifest.json, trace.json
+and native-evidence.json. The reference SQLite database and synthetic parameter
+trace are local fixtures, not remote seed data or credentials.
+
+The observed 89 writes are **not** a remote ceiling. SQL grouping/schema/input
+drift, D1 DDL/bookkeeping overhead, rejection/provider-failure cases and any
+cleanup still need reviewed bounds. No arbitrary multiplier becomes a proof.
+The trace bypasses no remote control: its generated config is local-only,
+and `remote_admissible` is false. Remote totals remain 0/0.
+
+JSON map parameter envelopes now enforce top-level item limits in addition to
+UTF-8 bytes, rejecting duplicate keys, non-finite JSON and invalid Unicode
+before dispatch. Reviewed plans must supply the appropriate field policies;
+these policies do not automatically establish nested collection/row bounds.
+
+Initialization now has a binding-only RPC using the existing singleton journal,
+full upfront reservation and exactly one fixed execution across restarts.
+Unknown/missing metadata stops the remaining SQL and retains all reservations.
+The RPC accepts no SQL/params from callers; no public route, reset, retry or
+cleanup was added. `REVIEWED_INITIALIZATION_PLAN` is None, so this capability
+remains disabled pending concrete DDL/empty-schema proofs. Remote HTTP plans
+also remain empty. Native Python RPC/FFI acceptance is still pending.
 
 ## Budget and execution status
 
@@ -51,7 +111,8 @@ uses its synchronous SQLite storage to persist a full worst-case reservation
 before any application/provider call. It does not spend D1 rows on budgeting.
 The fixed scope is `pullwise-s17-s18-2026-09-28`: any future preview binding
 must share ONE authoritative namespace across stages/databases, not provision
-one per environment. No coordinator binding or migration was deployed remotely.
+one per environment. The preview coordinator namespace is now configured;
+no remote D1 migration or schema initialization has been executed.
 
 - Hard ceilings: 1,000 written / 10,000 read rows, 40 admitted requests, finite
   per-case requests and at most 64 D1 batch operations per request.
@@ -99,7 +160,7 @@ ignored workspace runtime directory; generated mirrors are not authority.
 | Creem ingress/replay; `cloudflare_creem_handler`, `cloudflare_webhook_receipts` | Receipt/guard writes occur even for a duplicate; an applied receipt can still refresh dirty authority; unknown owner may park a pending event; settlement writes account/events/pending/receipt/authority and guards |
 | Jev; `cloudflare_ledger_suggestions` | Suggestion budget/event/guard writes are separate from expense writes; disabled and unadmitted |
 | SQL helper; `cloudflare_d1_batch` | Trusted finite command lists preserve one transaction; statement count is not a row bound |
-| Migration/seed/cleanup | Three migrations create 13 tables and 23 SQLite indexes (7 explicit, 16 implicit), plus four app_state seed rows; include DDL and migration-bookkeeping rows, and teardown/index effects; remote bounds unknown |
+| Migration/seed/cleanup | Four migrations create 14 tables and 24 SQLite indexes (7 explicit, 17 implicit), plus four app_state seed rows; include DDL and migration-bookkeeping rows, and teardown/index effects; remote bounds unknown |
 
 Logical success-path table writes below assume serial execution and an empty
 guard table. They omit billed index/internal rows and failure paths and are
@@ -249,9 +310,10 @@ unknown. Real anonymized Jev quality samples are unavailable; keep Jev off.
 - Real local Worker/D1 migrations and 17 HTTP acceptance requests passed,
   including the 251-record paginated CSV/ReadableStream bridge, Cookie/API key,
   CRUD, idempotency, conflict and reports. They incurred no remote D1 usage.
-- Server preview configuration still has placeholder values. Production points
-  to the user's approved API domain and empty production database. Web's
-  existing remote origin is already `https://api.pull-wise.com`.
+- Preview public variables and all four Secret names are configured, including
+  the separate gopullwise-preview App. Provider callbacks/installation and
+  credential validity are not implied by configuration. Production stays on
+  its separate App/domain/database; neither remote schema has been initialized.
 - `PULLWISE_D1_ACCESS_ENABLED=0` rejects every route before D1/provider access;
   missing/invalid values also fail closed. Both remote configs keep it off.
   This is a verified zero-access pause, not an implemented metered quota for
