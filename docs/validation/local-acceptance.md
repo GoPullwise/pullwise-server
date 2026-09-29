@@ -26,6 +26,15 @@ was performed. Publication will verify only one DO-only budget GET; its D1
 bound is zero read/write, with no retries or authorization/provider requests.
 The existing preview 100,000-read / 1,000-write caps remain unchanged.
 
+Commit `dc6adf4` was pushed to main. CI
+[36549930938](https://github.com/GoPullwise/pullwise-server/actions/runs/36549930938)
+passed dependency audit/compatibility, shell/static checks and the entire current
+test suite. Server preview deployed as `7001ca49-1c49-45b9-91f6-7d134e3d1324`.
+One DO-only budget GET returned 200, stopped=null, limits 100,000 read / 1,000
+written, reserved 10,332 / 223 and observed 3,290 / 134. No user/provider/D1
+request was made by the publication checks; the counters include user activity.
+User-specific real GitHub results remain manual acceptance, not synthetic proof.
+
 ## Main branch consolidation (2026-09-29)
 
 The user explicitly requested merging the preview read grant into main and
