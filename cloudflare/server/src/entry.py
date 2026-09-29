@@ -278,7 +278,9 @@ class ValidationBudget(DurableObject):
 
     def _journal(self):
         if self.journal is None:
-            self.journal = BudgetJournal(self.ctx.storage.sql)
+            preview_product = (getattr(self.env, "PULLWISE_MODE", "") == "preview"
+                and str(getattr(self.env, "PULLWISE_PREVIEW_PRODUCT_ENABLED", "0")) == "1")
+            self.journal = BudgetJournal(self.ctx.storage.sql, preview_product=preview_product)
         return self.journal
 
     async def stop(self):
@@ -353,7 +355,7 @@ class ValidationBudget(DurableObject):
         path = urlsplit(request.url).path
         if path == "/_preview/budget" and request.method == "GET":
             state = self._journal().snapshot()
-            return Response.json({"limits": {"rowsRead": READ_CEILING, "rowsWritten": WRITE_CEILING},
+            return Response.json({"limits": {"rowsRead": self._journal().read_ceiling, "rowsWritten": WRITE_CEILING},
                 "reserved": {"rowsRead": state["reserved_read"], "rowsWritten": state["reserved_written"]},
                 "observed": {"rowsRead": state["actual_read"], "rowsWritten": state["actual_written"]},
                 "schemaReady": bool(state.get("schema_ready")), "stopped": state["stopped"]},

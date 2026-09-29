@@ -6,10 +6,35 @@ record of completed runtime acceptance or authorization to release production.
 
 ## Product-wide preview authorization (2026-09-29)
 
+### Later preview-only read grant (2026-09-29)
+
+After a new BUDGET_EXHAUSTED login failure, the user approved cumulative preview
+Rows Read of 100,000, explicitly limited to preview. Rows Written stays 1,000.
+Default/non-product plans stay at 10,000 reads; production remains paused. The
+fixed namespace/database and all observed/reserved counters are preserved.
+
+Only the enabled preview product selects this ceiling. One journal marker
+records the approved expansion. The previous read-budget stop may close its
+rejected pre-dispatch ticket only with a ready schema, in-budget counters and
+complete evidence matching observed totals. Other stop reasons, incomplete
+evidence and subsequent exhaustion never recover through this grant. No legacy
+read margin or write reservation is released. Request/SQL/statement limits,
+native accounting and input/cardinality/index bounds remain enforced.
+
+Deployment acceptance has one case: one GET of `/_preview/budget`, no retries,
+providers or D1 queries. Its initial DO access may record the one grant in the
+existing DO SQLite journal, which is not D1. Expected limits: 100,000 read /
+1,000 written, stopped=null, counters at least 9,898 / 218 reserved and
+2,856 / 131 observed. Total validation D1 bounds: 0 Rows Read / 0 Rows Written.
+Manual product traffic thereafter consumes the expanded cumulative ceiling;
+there is no automatic polling, reset, new database or namespace.
+
 The user subsequently explicitly requested all preview product functionality,
 including deployment/initialization needed to make it usable now. Production
 stays paused. The cumulative 1,000 written / 10,000 read limits remain active;
 this is not authorization to remove/reset the budget or use production data.
+This is the historical baseline; the later grant above supersedes only the
+enabled preview product's read ceiling.
 
 Product preview uses the same fixed ValidationBudget namespace/name. It replaces
 HTTP case denial with serialized product requests and durable reservation before

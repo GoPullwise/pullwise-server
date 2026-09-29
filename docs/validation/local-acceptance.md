@@ -2,6 +2,52 @@
 
 Updated 2026-09-29. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
 
+## Preview-only 100,000 read grant (2026-09-29)
+
+The user approved raising cumulative Rows Read to 100,000, only for preview;
+Rows Written remains 1,000. Default and non-product budgets remain 10,000 reads,
+and production stays paused. One internal grant marker preserves the original
+database/namespace, every observed/reserved counter, request count and evidence.
+Only the existing budget stop with complete accounting can close its rejected
+pre-dispatch ticket; unknown outcomes/timeouts/manual stops and later exhaustion
+remain blocked. No read margin or write reservation is refunded.
+
+Nineteen new regressions cover recovery without refunds, the original default,
+all other stop reasons, incomplete/invalid/out-of-bound state, both hard ceilings,
+repeat exhaustion and the actual Worker method's preview-only selection. The
+first 15 tests failed before implementation; final focused budget suites passed
+77 tests, and the new grant/deployment suites passed 27 tests with Git Bash.
+The full suite ran all 218 tests and 22 subtests: 217 tests and all subtests
+passed; one shell test failed because PATH selected WSL without python3. That
+same deployment suite passed after selecting D:/Git/bin; no application fix was
+needed. Python compilation, exact source mirror, both environment static checks,
+shell syntax and pinned Wrangler 4.136.3 preview packaging passed.
+
+Publication uses a separate preview branch because main triggers automatic
+production Builds. The only post-deploy case is one DO-only budget GET, zero
+retries, zero D1 Rows Read/Rows Written and no provider/account requests. The
+first access may persist the authorized grant in DO SQLite, not D1. Deployment
+and live limit/counter/stop evidence are recorded after publication.
+
+## Preview login budget stop observed (2026-09-29)
+
+The user reported 503 during GitHub login/authorization. Exactly one
+`GET /_preview/budget` returned 200 from the preview Server's DO-only numeric
+status path, before any D1/provider dispatch. It reported `BUDGET_EXHAUSTED`,
+schemaReady=true, 9,898 / 10,000 reserved reads and 218 / 1,000 reserved writes;
+native observations were 2,856 reads / 131 writes. Only 102 reserved reads
+remain. These counters are application protection evidence, not a live
+Cloudflare billing or CPU/memory quota measurement.
+
+The 7,042-row reserved-minus-observed read margin matches the previous repaired
+checkpoint (8,010 minus 968). That is consistent with retained legacy margins,
+not proof that any of those reservations can safely be released. Source keeps
+budget stops persistent and rejects subsequent product/login requests before
+D1 access. Deployment/refresh does not reset the journal. No retry, account
+request, provider call, D1 query, counter reset or ceiling change was performed.
+Restoring preview access requires a separately reviewed and authorized budget
+adjustment or an evidence-backed recovery allowed by the existing controls.
+
 ## Preview premature read exhaustion repaired (2026-09-29)
 
 User testing stopped at 9,969 reserved reads / 164 reserved writes, while native

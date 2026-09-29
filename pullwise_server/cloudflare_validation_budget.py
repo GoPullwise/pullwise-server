@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 BUDGET_SCOPE = "pullwise-s17-s18-2026-09-28"
 READ_CEILING = 10_000
+PREVIEW_PRODUCT_READ_CEILING = 100_000
 WRITE_CEILING = 1_000
 REQUEST_CEILING = 40
 REQUEST_SECONDS = 30
@@ -156,8 +157,9 @@ class BudgetJournal:
     A live ticket excludes overlapping requests. Object restart with a pending
     ticket stops permanently: its outcome is unknown. There is no reset API.
     """
-    def __init__(self, sql):
+    def __init__(self, sql, *, preview_product=False):
         self.sql = sql
+        self.read_ceiling = PREVIEW_PRODUCT_READ_CEILING if preview_product is True else READ_CEILING
         sql.exec("CREATE TABLE IF NOT EXISTS validation_budget (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL)")
         initial = {"scope": BUDGET_SCOPE, "requests": 0, "reserved_read": 0,
                    "reserved_written": 0, "actual_read": 0, "actual_written": 0,
@@ -167,8 +169,43 @@ class BudgetJournal:
         state = self.snapshot()
         if state["scope"] != BUDGET_SCOPE:
             self.stop("BUDGET_SCOPE_MISMATCH")
+        elif preview_product is True and self._apply_preview_read_grant(state):
+            pass
         elif state["active"] is not None:
             self.stop("INCOMPLETE_REQUEST")
+
+    def _apply_preview_read_grant(self, state):
+        """One reviewed preview-only ceiling expansion, never a usage refund.
+
+        BUDGET_EXHAUSTED is raised before dispatch of the rejected SQL group.
+        Complete earlier groups remain charged. All other persistent stop
+        reasons and incomplete evidence stay blocked, including after restart.
+        """
+        if state.get("preview_read_grant") or state["stopped"] not in {None, "BUDGET_EXHAUSTED"}:
+            return False
+        if (any(not _integer(state.get(key)) for key in
+                ("requests", "reserved_read", "reserved_written", "actual_read", "actual_written"))
+                or not state["actual_read"] <= state["reserved_read"] <= READ_CEILING
+                or not state["actual_written"] <= state["reserved_written"] <= WRITE_CEILING):
+            return False
+        if state["stopped"] == "BUDGET_EXHAUSTED":
+            evidence = state.get("evidence", [])
+            if (state.get("schema_ready") is not True or not isinstance(evidence, list)
+                    or any(not isinstance(item, dict) or item.get("complete", True) is not True
+                           or not _integer(item.get("rows_read"))
+                           or not _integer(item.get("rows_written")) for item in evidence)
+                    or sum(item["rows_read"] for item in evidence) != state["actual_read"]
+                    or sum(item["rows_written"] for item in evidence) != state["actual_written"]
+                    or state["active"] is not None and
+                       (not _integer(state["active"], 1) or state["active"] > state["requests"])):
+                return False
+        elif state["active"] is not None:
+            return False
+        state["preview_read_grant"] = {"from": READ_CEILING, "to": PREVIEW_PRODUCT_READ_CEILING,
+                                       "authorized": "2026-09-29"}
+        state["stopped"] = state["active"] = state["deadline"] = None
+        self._save(state)
+        return True
 
     def snapshot(self):
         row = self.sql.exec("SELECT payload FROM validation_budget WHERE id=1").one()
@@ -200,7 +237,7 @@ class BudgetJournal:
             self._reject("REQUEST_LIMIT")
         if state["cases"].get(plan.name, 0) >= plan.max_requests:
             self._reject("CASE_LIMIT")
-        if (state["reserved_read"] + plan.rows_read > READ_CEILING
+        if (state["reserved_read"] + plan.rows_read > self.read_ceiling
                 or state["reserved_written"] + plan.rows_written > WRITE_CEILING):
             self._reject("BUDGET_EXHAUSTED")
         state["requests"] += 1
@@ -241,7 +278,7 @@ class BudgetJournal:
         state = self.check(ticket, now=now)
         if not _integer(reads) or not _integer(writes):
             self._reject("UNREVIEWED_BOUND")
-        if (state["reserved_read"] + reads > READ_CEILING
+        if (state["reserved_read"] + reads > self.read_ceiling
                 or state["reserved_written"] + writes > WRITE_CEILING):
             self._reject("BUDGET_EXHAUSTED")
         state["reserved_read"] += reads

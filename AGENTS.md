@@ -10,6 +10,12 @@ historical product plans to gate work.
 
 ## Runtime and ownership
 
+- User approved preview-only cumulative reads of 100,000 on 2026-09-29;
+  writes remain 1,000. Default/non-product budgets remain 10,000 reads.
+  The fixed preview journal applies one read-ceiling grant without resetting
+  counts or reclaiming legacy reservations. Only proven BUDGET_EXHAUSTED state
+  with complete accounting may resume; all other stops and later exhaustion
+  remain blocked. Keep production access 0 and the same namespace/database.
 - Product read reservations settle only after complete, in-bound native meta
   reports total_attempts=1 for every result. Keep all write reservations and
   retry/missing/ambiguous read reservations; actual counters/evidence never reset.
@@ -20,8 +26,9 @@ historical product plans to gate work.
 - The user's latest 2026-09-29 requirement is usable, product-wide preview.
   PULLWISE_PREVIEW_PRODUCT_ENABLED=1 selects the product budget wrapper; it
   admits product paths with per-SQL reservations instead of the empty case
-  list. Keep production access 0 and the same cumulative 1,000 write / 10,000
-  read ceilings, namespace/name and no-reset/no-retry/no-cron policy.
+  list. Keep production access 0, cumulative writes at 1,000 and enabled
+  preview-product reads at the later-approved 100,000. Preserve the same
+  namespace/name and no-reset/no-retry/no-cron policy.
 - Product preview initializes the frozen canonical schema only on an empty
   isolated DB, behind the same journal. cloudflare_preview_schema.py embeds
   the four migrations; its fingerprint regression must match every canonical
