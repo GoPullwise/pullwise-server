@@ -21,6 +21,28 @@ retain their reservations; a subsequent manual request is separately capped.
 
 ### Executable row-bound rules
 
+Read settlement correction (2026-09-29): actual usage was 955 read / 86 written,
+while reservations reached 9,969 / 164 and blocked the user. New product groups
+still reserve the same worst-case bound before dispatch. Only complete, in-bound
+results with native `total_attempts=1` for every statement settle unused READ
+margin; retries, missing attempt metadata and ambiguous outcomes retain the full
+reservation. WRITE reservations never decrease. Observed counters and evidence
+remain cumulative. See [D1 result metadata](https://developers.cloudflare.com/d1/worker-api/return-object/).
+
+The original successful initialization's non-read-only DDL/seed batch cannot
+be automatically retried. Its complete operation-1 metadata can therefore settle
+only its 2,000-read margin once, with the schema-ready flag, one initialization,
+matching complete evidence totals and original request-1 operation order verified.
+The empty-schema read retains all 384 reads, all old product reservations remain,
+and the 128-write initialization reservation stays intact. Only BUDGET_EXHAUSTED
+may recover; unknown outcomes/timeouts/incomplete metadata never recover. This
+is a journal-only reconciliation with an audit marker, no D1 request, public reset,
+budget reset, raised ceiling or replacement namespace/database.
+
+Publication validation is finite: one unauthenticated session GET, followed by
+one DO-only status GET. Session reads cannot write D1; its read bound uses existing
+cardinality and the three-attempt reserve. No polling/provider call or write test.
+
 - Initialization first reads sqlite_master with LIMIT 65, reserving 384 reads
   including native read retries. Nonempty application schemas are rejected.
   Only the frozen four migrations execute, as one atomic D1 batch: 14 tables,
@@ -46,7 +68,8 @@ retain their reservations; a subsequent manual request is separately capped.
   8,192 bytes. Read reservations cover table traversals, indexed probes and
   JSON iteration using current cardinalities/parameter collection bounds.
 - D1 can retry read-only queries twice, so each read-only group's reservation
-  covers all three attempts. There is no application retry or refund. Details:
+  covers all three attempts. There is no application retry; proven unused single-
+  attempt read margin may settle as specified above. Details:
   [automatic read retries](https://developers.cloudflare.com/d1/best-practices/retry-queries/).
 - CSV is materialized inside the active budget ticket, capped at 1 MiB. No lazy
   D1 pull remains after releasing the response. Queue depth is capped at 16;

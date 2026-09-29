@@ -1,6 +1,106 @@
 import pytest
 
 
+def test_legacy_schema_read_margin_recovery_is_once_and_preserves_consumption():
+    import sqlite3
+    from test_d1_validation_budget import LocalSql
+    from pullwise_server.cloudflare_validation_budget import BudgetJournal
+    from pullwise_server.cloudflare_preview_budget import reconcile_schema_reads
+    with sqlite3.connect(":memory:") as connection:
+        journal = BudgetJournal(LocalSql(connection))
+        state = journal.snapshot()
+        state.update(requests=12, cases={"product-schema": 1, "product": 11},
+                     schema_ready=True, reserved_read=9969, reserved_written=164,
+                     actual_read=955, actual_written=86, active=12, deadline=30,
+                     stopped="BUDGET_EXHAUSTED", evidence=[
+                         {"request": 1, "operation": 0, "rows_read": 10, "rows_written": 0},
+                         {"request": 1, "operation": 1, "rows_read": 28, "rows_written": 60},
+                         {"request": 2, "operation": 1, "rows_read": 917, "rows_written": 26}])
+        journal._save(state)
+        reconcile_schema_reads(journal)
+        new = journal.snapshot()
+        assert new["reserved_read"] == 7997
+        assert new["reserved_written"] == 164
+        assert new["actual_read"] == 955 and new["actual_written"] == 86
+        assert new["requests"] == 12 and new["evidence"] == state["evidence"]
+        assert new["stopped"] is None and new["active"] is None
+        reconcile_schema_reads(journal)
+        assert journal.snapshot() == new
+
+
+@pytest.mark.parametrize("reason,incomplete", [("D1_OUTCOME_UNKNOWN", False),
+    ("TIMEOUT", False), ("BUDGET_EXHAUSTED", True)])
+def test_schema_reconciliation_never_recovers_ambiguous_usage(reason, incomplete):
+    import sqlite3
+    from test_d1_validation_budget import LocalSql
+    from pullwise_server.cloudflare_validation_budget import BudgetJournal
+    from pullwise_server.cloudflare_preview_budget import reconcile_schema_reads
+    with sqlite3.connect(":memory:") as connection:
+        journal = BudgetJournal(LocalSql(connection))
+        state = journal.snapshot()
+        state.update(schema_ready=True, cases={"product-schema": 1}, stopped=reason,
+            reserved_read=2384, actual_read=28, actual_written=60, evidence=[
+                {"request": 1, "operation": 1, "rows_read": 28, "rows_written": 60,
+                 "complete": not incomplete}])
+        journal._save(state)
+        reconcile_schema_reads(journal)
+        assert journal.snapshot() == state
+
+
+@pytest.mark.parametrize("attempts,expected", [(1, 2), (2, 90), (None, 90)])
+def test_product_read_reservation_settles_only_proven_single_attempt(attempts, expected):
+    import asyncio
+    import sqlite3
+    from test_d1_validation_budget import LocalSql, RawD1
+    from pullwise_server.cloudflare_validation_budget import BudgetJournal
+    from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initial_data
+    class Raw(RawD1):
+        async def batch(self, statements):
+            results = await super().batch(statements)
+            for result in results:
+                result.meta.total_attempts = attempts
+            return results
+    with sqlite3.connect(":memory:") as connection:
+        journal = BudgetJournal(LocalSql(connection))
+        state = journal.snapshot()
+        state["product_data"] = initial_data()
+        journal._save(state)
+        ticket = journal.begin_product(now=10)
+        meter = ProductMeteredD1(Raw(reads=2, writes=0), journal, ticket, clock=lambda: 11)
+        asyncio.run(meter._operation([meter.prepare("SELECT 1")], 90, 0))
+        assert journal.snapshot()["reserved_read"] == expected
+        assert journal.snapshot()["actual_read"] == 2
+        assert journal.snapshot()["reserved_written"] == 0
+
+
+def test_product_settlement_preserves_write_reservations_and_rejects_replay():
+    import asyncio
+    import sqlite3
+    from test_d1_validation_budget import LocalSql, RawD1
+    from pullwise_server.cloudflare_validation_budget import BudgetJournal, BudgetError
+    from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initial_data
+    class Raw(RawD1):
+        async def batch(self, statements):
+            results = await super().batch(statements)
+            for result in results:
+                result.meta.total_attempts = 1
+            return results
+    with sqlite3.connect(":memory:") as connection:
+        journal = BudgetJournal(LocalSql(connection))
+        state = journal.snapshot()
+        state["product_data"] = initial_data()
+        journal._save(state)
+        ticket = journal.begin_product(now=10)
+        meter = ProductMeteredD1(Raw(reads=2, writes=1), journal, ticket, clock=lambda: 11)
+        asyncio.run(meter._operation([meter.prepare("INSERT INTO app_state VALUES (?,?)")], 90, 9))
+        state = journal.snapshot()
+        assert state["reserved_read"] == 2 and state["reserved_written"] == 9
+        assert state["actual_written"] == 1 and state["read_margin_released"] == 88
+        with pytest.raises(BudgetError, match="SETTLEMENT_INVALID"):
+            journal.settle_product_reads(ticket, 1, 90, now=12)
+        assert journal.snapshot()["reserved_read"] == 2
+
+
 def test_point_mutations_include_indexes_and_guard_cleanup():
     from pullwise_server.cloudflare_preview_budget import sql_write_bound
     assert sql_write_bound("UPDATE expenses SET purpose=? WHERE id=? AND owner_id=?") == 9
@@ -43,7 +143,8 @@ def test_compiled_preview_schema_matches_canonical_migrations():
     directory = Path(__file__).resolve().parents[1] / "cloudflare/server/migrations"
     assert {item["name"] for item in MIGRATIONS} == {p.name for p in directory.glob("*.sql")}
     for item in MIGRATIONS:
-        assert hashlib.sha256((directory / item["name"]).read_bytes()).hexdigest() == item["sha256"]
+        canonical = (directory / item["name"]).read_bytes().replace(b"\r\n", b"\n")
+        assert hashlib.sha256(canonical).hexdigest() == item["sha256"]
 
 
 def test_product_meter_runs_login_installation_and_signout_with_one_cumulative_budget(tmp_path):

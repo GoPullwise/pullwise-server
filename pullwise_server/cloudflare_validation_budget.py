@@ -1,7 +1,8 @@
 """One durable, non-resetting validation budget; journal storage is NOT D1.
 
-Only reviewed finite SQL groups may execute. Reservations are never refunded,
-including on failure. Bounds must be proven separately against the exact schema,
+Only reviewed finite SQL groups may execute. Failed/ambiguous reservations and
+all write reservations are retained. Product reads may settle a proven unused
+single-attempt margin. Bounds must be proven separately against the exact schema,
 fixture cardinalities, indexes and inputs; measuring afterwards cannot prove one.
 """
 from __future__ import annotations
@@ -252,6 +253,22 @@ class BudgetJournal:
         state["product_data"] = data
         if initialized:
             state["schema_ready"] = True
+        self._save(state)
+
+    def settle_product_reads(self, ticket, operation, reserved, *, now):
+        state = self.check(ticket, now=now)
+        evidence = state["evidence"][-1] if state["evidence"] else {}
+        if (evidence.get("request") != ticket or evidence.get("operation") != operation
+                or evidence.get("complete", True) is not True
+                or "read_margin_released" in evidence or not _integer(reserved)
+                or evidence.get("rows_read", reserved + 1) > reserved):
+            self._reject("SETTLEMENT_INVALID")
+        margin = reserved - evidence["rows_read"]
+        if state["reserved_read"] - margin < state["actual_read"]:
+            self._reject("SETTLEMENT_INVALID")
+        state["reserved_read"] -= margin
+        state["read_margin_released"] = state.get("read_margin_released", 0) + margin
+        evidence["read_margin_released"] = margin
         self._save(state)
 
     def record(self, ticket, operation, reads, writes, *, complete=True):

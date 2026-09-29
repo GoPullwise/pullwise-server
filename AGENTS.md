@@ -10,6 +10,13 @@ historical product plans to gate work.
 
 ## Runtime and ownership
 
+- Product read reservations settle only after complete, in-bound native meta
+  reports total_attempts=1 for every result. Keep all write reservations and
+  retry/missing/ambiguous read reservations; actual counters/evidence never reset.
+  One audited schema-only read-margin reconciliation can recover BUDGET_EXHAUSTED
+  with complete initialization evidence. Preserve every legacy product reservation,
+  original namespace/name, ceilings and request count; no general reset endpoint.
+
 - The user's latest 2026-09-29 requirement is usable, product-wide preview.
   PULLWISE_PREVIEW_PRODUCT_ENABLED=1 selects the product budget wrapper; it
   admits product paths with per-SQL reservations instead of the empty case

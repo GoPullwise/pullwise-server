@@ -25,7 +25,7 @@ from pullwise_server.cloudflare_jev_gateway import WorkerJevGateway
 from pullwise_server.cloudflare_ledger_reports import CsvExport
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1, PlanLimitError
 from pullwise_server.ledger_plan_policy import parse_policy
-from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initialize_product
+from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initialize_product, reconcile_schema_reads
 
 
 def _csv_stream(export):
@@ -371,6 +371,7 @@ class ValidationBudget(DurableObject):
                 journal = self._journal()
                 try:
                     async def execute():
+                        reconcile_schema_reads(journal)
                         await initialize_product(self.env.DB, journal)
                         ticket = journal.begin_product(now=time.time())
                         binding = ProductMeteredD1(self.env.DB, journal, ticket)

@@ -161,6 +161,41 @@ def initial_data():
             "json": {}, "arrays": 0}
 
 
+def reconcile_schema_reads(journal):
+    """One audited release of the successful, non-retried schema batch margin.
+
+    Keep every legacy product/read-retry reservation and every write reservation.
+    No D1 dispatch, counter reset, or recovery from unknown outcomes is allowed.
+    """
+    state = journal.snapshot()
+    if (state.get("schema_read_reconciled") or not state.get("schema_ready")
+            or state["stopped"] != "BUDGET_EXHAUSTED"
+            or state["cases"].get("product-schema") != 1):
+        return
+    evidence = state["evidence"]
+    if (len(evidence) < 2 or any(e.get("complete", True) is not True for e in evidence)
+            or any(type(e.get(k)) is not int or e[k] < 0
+                   for e in evidence for k in ("rows_read", "rows_written"))
+            or sum(e["rows_read"] for e in evidence) != state["actual_read"]
+            or sum(e["rows_written"] for e in evidence) != state["actual_written"]):
+        return
+    first, ddl = evidence[:2]
+    if (first.get("request") != 1 or first.get("operation") != 0
+            or first["rows_written"] != 0 or first["rows_read"] > 384
+            or ddl.get("request") != 1 or ddl.get("operation") != 1
+            or not 0 < ddl["rows_written"] <= 128 or ddl["rows_read"] > 2000
+            or any(e.get("request") == 1 for e in evidence[2:])):
+        return
+    margin = 2000 - ddl["rows_read"]
+    if not margin or state["reserved_read"] < 2384 or state["reserved_read"] - margin < state["actual_read"]:
+        return
+    state["reserved_read"] -= margin
+    state["read_margin_released"] = state.get("read_margin_released", 0) + margin
+    state["schema_read_reconciled"] = {"request": 1, "released": margin}
+    state["stopped"] = state["active"] = state["deadline"] = None
+    journal._save(state)
+
+
 async def initialize_product(binding, journal, *, clock=time.time):
     if journal.snapshot().get("schema_ready"):
         return
@@ -193,7 +228,14 @@ class ProductMeteredD1(MeteredD1):
         self.calls += 1
         self.journal.reserve_operation(self.ticket, reads=reads, writes=writes, now=self.clock())
         bound = OperationBound(tuple(s.sql for s in statements), reads, writes)
-        return await self._dispatch(statements, self.calls, bound)
+        results = await self._dispatch(statements, self.calls, bound)
+        # A complete single-attempt result proves this group's unused read
+        # margin. Missing attempts or any retry retains the entire reservation.
+        # Write reservations always remain charged, including index effects.
+        if all(type(_field(_field(r, "meta"), "total_attempts")) is int
+               and _field(_field(r, "meta"), "total_attempts") == 1 for r in results):
+            self.journal.settle_product_reads(self.ticket, self.calls, reads, now=self.clock())
+        return results
 
     async def refresh(self, upper=None):
         rows = upper or self.data["rows"]
