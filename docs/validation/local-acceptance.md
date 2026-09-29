@@ -29,6 +29,16 @@ retries, zero D1 Rows Read/Rows Written and no provider/account requests. The
 first access may persist the authorized grant in DO SQLite, not D1. Deployment
 and live limit/counter/stop evidence are recorded after publication.
 
+Commit `e9b8e0c` was pushed on `preview/read-budget-100k-20260929`, preserving
+main so its production Builds trigger did not run. Preview Server deployed as
+`03cfe963-6888-4f19-ad39-79966656ff79`. One DO-only status GET returned 200,
+limits 100,000 read / 1,000 written, schemaReady=true and stopped=null. Reserved
+counts remained exactly 9,898 reads / 218 writes; observed counts remained
+exactly 2,856 reads / 131 writes. No D1 query, migration, provider traffic, retry,
+usage refund, counter reset or production deployment was performed. Preview
+budget admission is restored; a real user OAuth journey remains user acceptance.
+No CI run exists for this branch; the checked-in push workflow targets main.
+
 ## Preview login budget stop observed (2026-09-29)
 
 The user reported 503 during GitHub login/authorization. Exactly one

@@ -16,6 +16,8 @@ historical product plans to gate work.
   counts or reclaiming legacy reservations. Only proven BUDGET_EXHAUSTED state
   with complete accounting may resume; all other stops and later exhaustion
   remain blocked. Keep production access 0 and the same namespace/database.
+  Main pushes trigger production Builds; preview-only releases use an independent
+  branch and the explicit preview deployment config.
 - Product read reservations settle only after complete, in-bound native meta
   reports total_attempts=1 for every result. Keep all write reservations and
   retry/missing/ambiguous read reservations; actual counters/evidence never reset.
