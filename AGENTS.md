@@ -2,6 +2,11 @@
 
 ## Product and authority
 
+Use `main` for all work unless the user explicitly requests another branch.
+Main pushes trigger production Builds, which must keep D1 access paused.
+Select preview-only deployments with the explicit preview config; never use
+branch separation as a substitute for runtime environment guards.
+
 The current product is the GitHub project expense ledger in
 `docs/design/github-project-ledger/README.md`. Use repository state, current
 user instructions, local documentation and tests as authority. Keep Web and
@@ -16,8 +21,8 @@ historical product plans to gate work.
   counts or reclaiming legacy reservations. Only proven BUDGET_EXHAUSTED state
   with complete accounting may resume; all other stops and later exhaustion
   remain blocked. Keep production access 0 and the same namespace/database.
-  Main pushes trigger production Builds; preview-only releases use an independent
-  branch and the explicit preview deployment config.
+  The user now requires main for all work; retain the explicit preview runtime
+  guards even when this source is merged into main.
 - Product read reservations settle only after complete, in-bound native meta
   reports total_attempts=1 for every result. Keep all write reservations and
   retry/missing/ambiguous read reservations; actual counters/evidence never reset.

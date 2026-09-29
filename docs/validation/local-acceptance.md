@@ -2,6 +2,16 @@
 
 Updated 2026-09-29. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
 
+## Main branch consolidation (2026-09-29)
+
+The user explicitly requested merging the preview read grant into main and
+using main for all subsequent work. The merge is a fast-forward of the already
+tested/deployed `e9b8e0c` and `4a57a5a` commits; no runtime code or deployment
+config changed during consolidation. Both repositories now use main. The
+preview grant remains selected only by enabled preview-product mode; production
+stays paused and default/non-product reads remain 10,000. No additional D1 or
+provider validation is needed for this branch/documentation operation.
+
 ## Preview-only 100,000 read grant (2026-09-29)
 
 The user approved raising cumulative Rows Read to 100,000, only for preview;
