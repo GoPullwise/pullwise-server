@@ -2,6 +2,27 @@
 
 Updated 2026-09-29. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
 
+## Preview cumulative request gate removal (2026-09-29)
+
+The user explicitly requested removing the preview site's 200 cumulative
+request cap, then committing/pushing/deploying. Enabled preview product requests
+can now proceed beyond 200; request/case/row counters and evidence remain
+cumulative. D1 ceilings remain 100,000 reads / 1,000 writes. Default/non-product
+request limits and all SQL, deadline, concurrency and native-accounting guards
+remain enforced. Only the existing inactive, schema-ready REQUEST_LIMIT stop
+with matching complete evidence and in-budget counters receives one internal
+policy marker and may resume. No counter, reservation or evidence is reset.
+Unknown outcomes, active tickets, manual stops and row-budget stops stay closed.
+
+Two regressions failed before the fix. The final focused suites passed 99 tests,
+including 18 new request-policy cases: requests after 200, no-refund recovery,
+restart persistence, environment boundaries, incomplete/invalid accounting and
+both row ceilings. Source mirror, both environment static checks and shell
+syntax passed. Full suite/preview packaging and publication evidence follow.
+Remote verification is one DO-only status GET (zero D1 reads/writes, zero
+provider/account requests and zero retries). Its first access may write the
+approved marker in the existing DO journal, which is not D1.
+
 ## Preinstalled repository discovery and popup sync repair (2026-09-29)
 
 The user has GitHub-authorized repositories but no candidates. A corrected

@@ -159,6 +159,7 @@ class BudgetJournal:
     """
     def __init__(self, sql, *, preview_product=False):
         self.sql = sql
+        self.preview_product = preview_product is True
         self.read_ceiling = PREVIEW_PRODUCT_READ_CEILING if preview_product is True else READ_CEILING
         sql.exec("CREATE TABLE IF NOT EXISTS validation_budget (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL)")
         initial = {"scope": BUDGET_SCOPE, "requests": 0, "reserved_read": 0,
@@ -169,10 +170,41 @@ class BudgetJournal:
         state = self.snapshot()
         if state["scope"] != BUDGET_SCOPE:
             self.stop("BUDGET_SCOPE_MISMATCH")
-        elif preview_product is True and self._apply_preview_read_grant(state):
-            pass
-        elif state["active"] is not None:
-            self.stop("INCOMPLETE_REQUEST")
+        else:
+            if self.preview_product:
+                self._apply_preview_read_grant(state)
+                self._remove_preview_request_limit(self.snapshot())
+            if self.snapshot()["active"] is not None:
+                self.stop("INCOMPLETE_REQUEST")
+
+    def _remove_preview_request_limit(self, state):
+        """Remove the authorized product request gate, preserving all accounting.
+
+        The old gate rejected before opening a ticket or dispatching SQL.
+        Only that exact inactive, completely accounted stop can resume.
+        """
+        if state.get("preview_request_limit_removed") or state["stopped"] not in {None, "REQUEST_LIMIT"}:
+            return
+        if state["active"] is not None:
+            return
+        if (any(not _integer(state.get(key)) for key in
+                ("requests", "reserved_read", "reserved_written", "actual_read", "actual_written"))
+                or not state["actual_read"] <= state["reserved_read"] <= self.read_ceiling
+                or not state["actual_written"] <= state["reserved_written"] <= WRITE_CEILING):
+            return
+        if state["stopped"] == "REQUEST_LIMIT":
+            evidence = state.get("evidence", [])
+            if (state["requests"] < 200 or state.get("schema_ready") is not True
+                    or not isinstance(evidence, list)
+                    or any(not isinstance(item, dict) or item.get("complete", True) is not True
+                           or not _integer(item.get("rows_read"))
+                           or not _integer(item.get("rows_written")) for item in evidence)
+                    or sum(item["rows_read"] for item in evidence) != state["actual_read"]
+                    or sum(item["rows_written"] for item in evidence) != state["actual_written"]):
+                return
+        state["preview_request_limit_removed"] = {"previous_limit": 200, "authorized": "2026-09-29"}
+        state["stopped"] = None
+        self._save(state)
 
     def _apply_preview_read_grant(self, state):
         """One reviewed preview-only ceiling expansion, never a usage refund.
@@ -265,7 +297,7 @@ class BudgetJournal:
             raise BudgetError(state["stopped"])
         if state["active"] is not None:
             raise BudgetError("VALIDATION_BUSY")
-        if state["requests"] >= 200:
+        if not self.preview_product and state["requests"] >= 200:
             self._reject("REQUEST_LIMIT")
         state["requests"] += 1
         state["cases"]["product"] = state["cases"].get("product", 0) + 1

@@ -15,12 +15,18 @@ historical product plans to gate work.
 
 ## Runtime and ownership
 
+- The user removed the enabled preview product's cumulative 200-request gate
+  on 2026-09-29. Keep counters/evidence cumulative and row/SQL/timeout/concurrency
+  caps. One audited inactive REQUEST_LIMIT recovery is allowed; do not recover
+  other stops or incomplete accounting. Default/generic finite plans keep their
+  request/case limits. Deploy this policy through the existing preview config.
 - User approved preview-only cumulative reads of 100,000 on 2026-09-29;
   writes remain 1,000. Default/non-product budgets remain 10,000 reads.
   The fixed preview journal applies one read-ceiling grant without resetting
   counts or reclaiming legacy reservations. Only proven BUDGET_EXHAUSTED state
-  with complete accounting may resume; all other stops and later exhaustion
-  remain blocked. Keep production access 0 and the same namespace/database.
+  with complete accounting may resume; unsafe stops and later exhaustion
+  remain blocked. The separately approved REQUEST_LIMIT policy above is the
+  only additional recovery. Keep production access 0 and the same namespace/database.
   The user now requires main for all work; retain the explicit preview runtime
   guards even when this source is merged into main.
 - Product read reservations settle only after complete, in-bound native meta

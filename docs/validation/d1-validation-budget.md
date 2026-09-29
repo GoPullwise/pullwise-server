@@ -38,11 +38,21 @@ enabled preview product's read ceiling.
 
 Product preview uses the same fixed ValidationBudget namespace/name. It replaces
 HTTP case denial with serialized product requests and durable reservation before
-each SQL group. At most 200 admitted requests, 128 SQL groups per request and
-64 statements per group are permitted. No application retry, cron, polling,
+each SQL group. The original 200 cumulative request cap was explicitly removed
+by the user on 2026-09-29 for the enabled preview product. Request accounting
+continues cumulatively; 128 SQL groups per request and 64 statements per group
+remain enforced. No application retry, cron, polling,
 new namespace or reset endpoint is introduced. Missing/ambiguous native D1 meta
 stops persistently. Normal business/provider HTTP errors with complete D1 meta
 retain their reservations; a subsequent manual request is separately capped.
+
+The existing REQUEST_LIMIT stop may be cleared once only for an inactive,
+schema-ready preview journal with at least 200 requests, complete matching
+evidence and in-bound 100,000-read / 1,000-write counters. Preserve all usage,
+requests, cases and prior grants. Other reasons, active tickets, incomplete meta
+and row-budget exhaustion remain blocked. Default/generic request plans retain
+their original finite request/case caps. Publication checks one DO-only budget
+GET (zero D1 rows, zero provider/account requests, zero retries).
 
 ### Executable row-bound rules
 
