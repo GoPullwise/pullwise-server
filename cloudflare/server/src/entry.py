@@ -27,6 +27,7 @@ from pullwise_server.cloudflare_plan_limits import PlanLimitedD1, PlanLimitError
 from pullwise_server.ledger_plan_policy import parse_policy
 from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initialize_product, reconcile_schema_reads
 from pullwise_server.cloudflare_native_d1 import NativeD1
+from pullwise_server.json_input import validate_json_unicode
 
 
 def _csv_stream(export):
@@ -135,6 +136,7 @@ class _Application:
                         return Response.json({"error": {"code": "REQUEST_TOO_LARGE"}},
                             status=413, headers={"Cache-Control": "no-store"})
                     body = json.loads(raw)
+                    validate_json_unicode(body)
                 result = await handle_ledger_request(
                     binding=self.binding, gateway=WorkerGitHubGateway(self.env),
                     method=request.method, path=path,
@@ -195,6 +197,7 @@ class _Application:
                 if len(raw) > 8192:
                     return Response.json({"error": {"code": "REQUEST_TOO_LARGE"}}, status=413)
                 body = json.loads(raw)
+                validate_json_unicode(body)
                 status, payload = await handle_billing_mutation(
                     binding=self.binding, gateway=WorkerCreemGateway(self.env),
                     now=now, method=request.method, path=path, headers=headers, body=body,

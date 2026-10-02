@@ -118,6 +118,11 @@ historical product plans to gate work.
   regardless of SameSite mode. Malformed Authorization must never bypass
   this check. Preview diagnostics expose fixed codes/type/site and numeric
   status only; never return provider exception text or partially redacted bodies.
+- Use json_input.validate_json_unicode for all decoded request JSON strings
+  and object keys before route/auth/provider/write work. ASCII JSON escapes
+  can contain unpaired surrogates that would otherwise stop the preview's
+  UTF-8 parameter admission. Valid emoji and decoded surrogate pairs remain
+  valid; preserve ordinary request accounting and global stop rules.
 - Creem product bindings map explicit month/year keys, never positional lists.
   Claim subscription upgrades before provider dispatch; provider acknowledgement
   returns pendingChange but cannot grant the target plan. Signed target/terminal

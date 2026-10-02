@@ -20,7 +20,7 @@ behavior. No schema or database migration is required.
 | Security | Trusted Origin is required for Cookie writes in all SameSite modes, including malformed Authorization. Jev rejects redirects and bounds timeout/body size. Provider exception text is excluded from preview diagnostics. |
 | Preview admission | Daily 20-attempt and monthly USD exhaustion exit before optional D1 mutations. Long UTF-8 notes retain ordinary writes, compact audit snapshots and exact replay within narrowly reviewed 16 KiB expense-JSON bounds. |
 
-The full Python 3.10.12 suite passed **395 tests**, with cached PyYAML 6.0.3
+Before the final Unicode repair, the full Python 3.10.12 suite passed **395 tests**, with cached PyYAML 6.0.3
 available and one finite loopback fixture allowed by the execution sandbox.
 The expiry/concurrent-archival cases are included in the same
 17-case automatic-assistance suite. Default/preview/production static checks,
@@ -63,6 +63,32 @@ attempts retain their conservative reservation. Maximum 8 KiB ingress with
 pass; unrelated text/app_state retains 8 KiB limits, and invalid/oversized JSON
 is rejected. These fixtures prove adapter composition and SQL admission, not
 native billed row counts. No schema, migration or global stop policy changed.
+
+A separate native Python Worker gateway proof passed **3/3** with unchanged
+gateway/validator source and the full pinned SDK 1.9.0 inventory. One temporary
+process served exactly three loopback POSTs against a closed outbound mock
+that allowed only the fixed TypeSafe URL. Native to_js/Object.fromEntries,
+headers, compact UTF-8 and AbortSignal construction passed. A 355-byte response
+split inside a Chinese UTF-8 code point reconstructed exactly and passed the
+strict validator; 302 was rejected without following, and a 65,537-byte stream
+without Content-Length was rejected. No real provider, D1 or forbidden outbound
+operation occurred; the process stopped and its ports closed. This proves
+local native transport behavior, separately from remote model quality.
+
+The final input repair rejects unpaired Unicode surrogates in every decoded
+JSON string/key at ledger, API-key and Worker ingress. Eight failures reproduced
+a persistent UNREVIEWED_SQL_BOUND before the fix; **21 new Unicode cases** and
+**94 focused cases** then passed, including valid emoji round-trips. Schema,
+SQL envelopes and global stop policy did not change. The user subsequently
+requested stopping all testing and proceeding to commit, push and deployment;
+no further test suite, runtime or model evaluation was run after that request.
+
+The user authorized 36 self-authored en/zh provider cases under an approximately
+$0.10 conservative ceiling. Temporary private Cloudflare previews never reached
+provider readiness: full-SDK Python returned 503/1105, and JS isolation did not
+complete authenticated startup. All captured processes stopped. Actual provider
+calls and remote D1 operations were **0**; no model quality metric or gate was
+claimed. Both Jev flags remain 0 for the requested repair publication.
 
 ### Product audit publication (2026-10-02)
 

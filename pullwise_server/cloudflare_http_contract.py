@@ -15,6 +15,7 @@ from .cloudflare_api_key_read import list_api_keys
 from .cloudflare_api_key_write import revoke_api_key, create_api_key
 from .cloudflare_billing_read import read_billing
 from .cloudflare_billing_catalog import read_public_plan
+from .json_input import validate_json_unicode
 
 
 def _header(headers: Mapping[str, object], name: str) -> str:
@@ -77,6 +78,7 @@ async def handle_http_request(*, method: str, path: str,
             if not isinstance(raw, bytes) or len(raw) != int(length_text):
                 raise ValueError("invalid body length")
             body = json.loads(raw)
+            validate_json_unicode(body)
         except Exception:
             return 400, {"error": {"code": "INVALID_REQUEST"}}
         try:

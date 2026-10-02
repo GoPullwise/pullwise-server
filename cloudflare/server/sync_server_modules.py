@@ -45,6 +45,7 @@ MODULES = (
     "cloudflare_plan_limits",
     "ledger_plan_policy",
     "ledger_money_totals",
+    "json_input",
     "creem_event_rules",
     "creem_public_catalog_rules",
     "creem_signature",

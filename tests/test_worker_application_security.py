@@ -10,6 +10,8 @@ from urllib.parse import urlsplit, parse_qs
 import pytest
 
 from pullwise_server.cloudflare_plan_limits import PlanLimitError
+from pullwise_server.cloudflare_ledger_reports import CsvExport
+from pullwise_server.json_input import validate_json_unicode
 
 
 class Response:
@@ -32,10 +34,15 @@ def application(*, same_site="Lax", catalog_failure=None):
         return 204, None
     async def catalog(**kwargs):
         raise catalog_failure
+    async def billing(**kwargs):
+        calls.append("billing")
+        return 200, {"accepted": True}
     namespace = {"Response": Response, "time": time, "urlsplit": urlsplit,
         "parse_qs": parse_qs, "json": json, "PlanLimitError": PlanLimitError,
         "handle_identity_request": identity, "handle_ledger_request": ledger,
         "read_or_refresh_catalog": catalog,
+        "handle_billing_mutation": billing, "validate_json_unicode": validate_json_unicode,
+        "CsvExport": CsvExport,
         "WorkerGitHubGateway": lambda _: None, "WorkerCreemGateway": lambda _: None}
     node = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "_Application")
     exec(compile(ast.Module(body=[node], type_ignores=[]), str(source), "exec"), namespace)
@@ -47,9 +54,9 @@ def application(*, same_site="Lax", catalog_failure=None):
     return instance, calls
 
 
-def request(path="/api/v1/expenses", *, method="POST", headers=None):
+def request(path="/api/v1/expenses", *, method="POST", headers=None, raw=b"{}"):
     async def body():
-        return b"{}"
+        return raw
     return SimpleNamespace(url="https://api.example.test" + path, method=method,
         headers=headers or {}, bytes=body)
 

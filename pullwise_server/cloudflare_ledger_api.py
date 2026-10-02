@@ -14,6 +14,7 @@ from .cloudflare_github_identity_http import read_repository_access
 from .cloudflare_github_gateway import GitHubFailure
 from .cloudflare_principal import PrincipalAuthError, _header
 from .ledger_money_totals import AGGREGATE_SQL, aggregate_minor, public_minor
+from .json_input import validate_json_unicode
 
 
 def _error(status: int, code: str):
@@ -110,6 +111,10 @@ async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path
                                 headers: Mapping[str, object], params: Mapping[str, object],
                                 body: object, now: int, suggestion_gateway=None) -> tuple[int, object] | None:
     """Return None for non-ledger paths; structured status and payload otherwise."""
+    try:
+        validate_json_unicode(body)
+    except UnicodeError:
+        return _error(422, "INVALID_INPUT")
     if path.startswith("/api/v1/expense-suggestions/") and path.endswith("/decision"):
         from .cloudflare_ledger_suggestions import handle_suggestion_decision
         return await handle_suggestion_decision(binding=binding, method=method, path=path,
