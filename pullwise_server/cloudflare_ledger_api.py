@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 from .cloudflare_ledger_auth import ledger_principal, target_allowed
 from .cloudflare_github_identity_http import read_repository_access
+from .cloudflare_github_gateway import GitHubFailure
 from .cloudflare_principal import PrincipalAuthError, _header
 
 
@@ -37,12 +38,12 @@ def _revision(headers: Mapping[str, object]):
     return int(match.group(1)) if match else -1
 
 
-def _project(row: dict, allowed_repos: dict[int, str], totals: list[dict]):
+def _project(row: dict, allowed_repos: dict[int, str], totals: list[dict], github_access="lost"):
     repo_id = row["github_repo_id"]
     name = allowed_repos.get(repo_id)
     return {"id": row["id"], "githubRepoId": repo_id,
             "githubFullName": name, "description": row["description"],
-            "status": row["status"], "githubAccess": "authorized" if name else "lost",
+            "status": row["status"], "githubAccess": "authorized" if name else github_access,
             "revision": row["revision"], "totals": [{"currency": total["currency"],
                 "amountMinor": total.get("amountMinor", total.get("amount_minor"))} for total in totals]}
 
@@ -88,11 +89,19 @@ async def _authorized(binding: Any, headers: Mapping[str, object], scope: str,
 
 
 async def _live_repos(user: dict, gateway: Any) -> dict[int, str]:
+    access = await read_repository_access(user, gateway)
+    return {item["githubRepoId"]: item["fullName"] for item in access["items"]}
+
+
+async def _project_repos(user: dict, gateway: Any):
+    """History reads remain usable without claiming an outage revoked grants."""
     try:
         access = await read_repository_access(user, gateway)
-        return {item["githubRepoId"]: item["fullName"] for item in access["items"]}
+        repos = {item["githubRepoId"]: item["fullName"] for item in access["items"]}
+        state = "reauthorization_required" if access["githubAccess"] == "reauthorization_required" else "lost"
+        return repos, state
     except Exception:
-        return {}
+        return {}, "unavailable"
 
 
 async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path: str,
@@ -113,8 +122,11 @@ async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path
             headers=headers, params=params, now=now)
     if path.startswith("/api/v1/expenses"):
         from .cloudflare_ledger_expenses import handle_expense_request
-        return await handle_expense_request(binding=binding, gateway=gateway,
-            method=method, path=path, headers=headers, params=params, body=body, now=now)
+        try:
+            return await handle_expense_request(binding=binding, gateway=gateway,
+                method=method, path=path, headers=headers, params=params, body=body, now=now)
+        except GitHubFailure as exc:
+            return _error(exc.status, exc.code)
     parts = path.strip("/").split("/")
     if len(parts) < 3 or parts[:2] != ["api", "v1"] or parts[2] not in {"projects", "categories"}:
         return None
@@ -135,6 +147,8 @@ async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path
             return await _projects(binding, gateway, method, item_id, headers, params, body, now, scope)
         return await _categories(binding, method, item_id, headers, body, now, scope)
     except PrincipalAuthError as exc:
+        return _error(exc.status, exc.code)
+    except GitHubFailure as exc:
         return _error(exc.status, exc.code)
 
 
@@ -163,7 +177,8 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
             project_rows, totals = [part.results for part in rows[len(auth):]]
             if not project_rows:
                 return _error(404, "NOT_FOUND")
-            return 200, _project(project_rows[0], await _live_repos(user, gateway), totals)
+            repos, state = await _project_repos(user, gateway)
+            return 200, _project(project_rows[0], repos, totals, state)
         limit_text = _param(params, "limit")
         limit = int(limit_text) if limit_text.isdigit() else 50 if not limit_text else 0
         if not 1 <= limit <= 100:
@@ -200,8 +215,8 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
         for total in totals:
             by_project.setdefault(total["project_id"], []).append({
                 "currency": total["currency"], "amountMinor": total["amount_minor"]})
-        repos = await _live_repos(user, gateway)
-        return 200, {"items": [_project(row, repos, by_project.get(row["id"], [])) for row in page],
+        repos, state = await _project_repos(user, gateway)
+        return 200, {"items": [_project(row, repos, by_project.get(row["id"], []), state) for row in page],
                      "nextCursor": page[-1]["id"] if len(projects) > limit else None}
     user, restrictions, proof, rows = await _authorized(binding, headers, scope, now,
         [binding.prepare("SELECT * FROM ledger_projects WHERE id=?").bind(item_id or "")],
@@ -259,7 +274,8 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
         return _error(412, "PRECONDITION_FAILED")
     updated = {**existing, "description": body.get("description", existing["description"]),
                "status": status, "revision": expected + 1}
-    return 200, _project(updated, await _live_repos(user, gateway), [])
+    repos, state = await _project_repos(user, gateway)
+    return 200, _project(updated, repos, [], state)
 
 
 async def _categories(binding, method, item_id, headers, body, now, scope):

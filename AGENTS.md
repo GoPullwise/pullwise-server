@@ -81,6 +81,14 @@ historical product plans to gate work.
   one record; soft deletion removes it from lists, reports and exports.
 - Lost repository access hides protected GitHub metadata and blocks new
   project targets; owners retain control of their historical expenses.
+- GitHub 401 means `reauthorization_required`, never a revoked Pullwise session.
+  Ordinary repository GET/sync must not refresh/persist tokens or cached grants.
+  Discard partial/cached grants on credential/permission rejection. Rate limits,
+  transport/5xx, invalid responses and crypto/config failures remain distinct
+  errors. Project history hides GitHub names and uses `unavailable` for unknown
+  grants; new targets fail closed while historical edits retain owner/key fences.
+  Preview identity diagnostics contain only code, exception type/function/line
+  and numeric provider status; never stringify exceptions or log credentials.
 - Repository candidates and new project eligibility use `read_repository_access`
   with the current App user token; a missing installation Setup callback/cache
   is not evidence of missing GitHub grants. Bound discovery to ten installations

@@ -15,7 +15,7 @@ from pullwise_server.cloudflare_validation_budget import (
 
 from pullwise_server.cloudflare_http_contract import handle_http_request
 from pullwise_server.cloudflare_github_identity_http import handle_identity_request
-from pullwise_server.cloudflare_github_gateway import WorkerGitHubGateway
+from pullwise_server.cloudflare_github_gateway import GitHubFailure, WorkerGitHubGateway
 from pullwise_server.cloudflare_billing_mutations import handle_billing_mutation
 from pullwise_server.cloudflare_billing_catalog_refresh import read_or_refresh_catalog
 from pullwise_server.cloudflare_creem_gateway import WorkerCreemGateway, product_bindings, webhook_product_ids
@@ -100,8 +100,9 @@ class _Application:
                 cookie_same_site=getattr(self.env, "PULLWISE_COOKIE_SAME_SITE", "Lax"),
                 trusted_origins=trusted_origins,
             )
-        except Exception:
-            return Response.json({"error": {"code": "IDENTITY_UNAVAILABLE"}}, status=503,
+        except Exception as error:
+            status, payload = _identity_failure(self.env, error)
+            return Response.json(payload, status=status,
                                  headers={"Cache-Control": "no-store"})
         if identity is not None:
             identity_status, identity_payload, identity_headers = identity
@@ -237,6 +238,23 @@ class _Application:
                or path.startswith("/api-keys/")
                or path.startswith("/api/v1/") else None)
         return Response.json(payload, status=status, headers=response_headers)
+
+
+def _identity_failure(env, error):
+    status = error.status if isinstance(error, GitHubFailure) else 503
+    payload = {"error": {"code": error.code if isinstance(error, GitHubFailure) else "IDENTITY_UNAVAILABLE"}}
+    if getattr(env, "PULLWISE_MODE", "") == "preview":
+        import traceback
+        frames = traceback.extract_tb(error.__traceback__)
+        if frames:
+            frame = frames[-1]
+            payload["error"]["diagnosticSite"] = f"{type(error).__name__}:{frame.name}:{frame.lineno}"
+        if isinstance(error, GitHubFailure) and error.provider_status is not None:
+            payload["error"]["providerStatus"] = error.provider_status
+        # Only allowlisted codes, function/line and numeric HTTP status. Never
+        # stringify the exception, request, user, provider body or credentials.
+        print(json.dumps({"identityFailure": payload["error"]}))
+    return status, payload
 
 
 def _unavailable(code):

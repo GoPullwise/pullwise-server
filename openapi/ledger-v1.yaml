@@ -33,6 +33,8 @@ paths:
         '200': {description: Current GitHub App authorized repositories, content: {application/json: {schema: {$ref: '#/components/schemas/RepositoryPage'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+        '502': {description: Invalid bounded GitHub response; error code GITHUB_RESPONSE_INVALID}
+        '503': {description: GitHub temporarily unavailable, rate limited, or credential decryption/configuration failure; no automatic retry or token refresh}
   /api/v1/projects:
     get:
       operationId: listLedgerProjects
@@ -265,10 +267,14 @@ components:
         fullName: {type: string}
     RepositoryPage:
       type: object
-      required: [items, nextCursor]
+      required: [items, nextCursor, githubAccess]
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/Repository'}}
         nextCursor: {type: [string, 'null']}
+        githubAccess:
+          type: string
+          enum: [authorized, not_connected, lost, reauthorization_required]
+          description: Reauthorization requires an explicit GitHub login; expired/revoked credentials never revoke the Pullwise session or write on a GET. Unavailable/unknown grants return an error rather than a successful empty page.
     Target:
       oneOf:
         - {type: object, required: [kind, projectId], additionalProperties: false, properties: {kind: {const: project}, projectId: {type: string}}}
@@ -290,10 +296,10 @@ components:
       properties:
         id: {type: string}
         githubRepoId: {type: integer, minimum: 1}
-        githubFullName: {type: [string, 'null'], description: Null when GitHub authorization is lost}
+        githubFullName: {type: [string, 'null'], description: Null whenever current GitHub authorization cannot be verified; owner history remains available}
         description: {type: string}
         status: {type: string, enum: [active, archived]}
-        githubAccess: {type: string, enum: [authorized, lost]}
+        githubAccess: {type: string, enum: [authorized, lost, reauthorization_required, unavailable]}
         revision: {type: integer, minimum: 1}
         totals: {type: array, items: {$ref: '#/components/schemas/MoneyTotal'}}
     ProjectPage:

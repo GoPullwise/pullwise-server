@@ -143,6 +143,18 @@ def _repo_items(rows: object, installation_id: int) -> list[dict]:
 
 
 async def read_repository_access(user: dict, gateway: Any) -> dict:
+    from .cloudflare_github_gateway import GitHubFailure
+    try:
+        return await _read_repository_access(user, gateway)
+    except GitHubFailure as error:
+        if error.code == "GITHUB_REAUTHORIZATION_REQUIRED":
+            return {"items": [], "githubAccess": "reauthorization_required"}
+        if error.code == "GITHUB_PERMISSION_DENIED":
+            return {"items": [], "githubAccess": "lost"}
+        raise
+
+
+async def _read_repository_access(user: dict, gateway: Any) -> dict:
     """Read current App grants without relying on a prior Setup callback.
 
     The App user token is the authority. GET/sync never write cached grants or

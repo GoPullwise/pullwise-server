@@ -206,6 +206,72 @@ class LedgerRoutesTests(unittest.TestCase):
             {"description": "takeover"}, {**self.headers, "If-Match": '"1"'})
         self.assertEqual(status, 404)
 
+    def test_github_failure_preserves_history_and_blocks_new_targets_without_writes(self):
+        from pullwise_server.cloudflare_github_gateway import GitHubFailure
+        _, project = self.call("POST", "/api/v1/projects", {"githubRepoId": 202})
+        _, category = self.call("POST", "/api/v1/categories", {"name": "Tools"})
+        draft = {"target": {"kind": "project", "projectId": project["id"]},
+                 "occurredOn": "2026-09-27", "amount": "1.00", "currency": "USD",
+                 "categoryId": category["id"], "purpose": "History"}
+        _, expense = self.call("POST", "/api/v1/expenses", draft,
+                              {**self.headers, "Idempotency-Key": "history-failure"})
+        for code, state, status in (("GITHUB_REAUTHORIZATION_REQUIRED", "reauthorization_required", 403),
+                                    ("GITHUB_PERMISSION_DENIED", "lost", 403),
+                                    ("GITHUB_UNAVAILABLE", "unavailable", 503),
+                                    ("GITHUB_RATE_LIMITED", "unavailable", 503),
+                                    ("GITHUB_TOKEN_UNREADABLE", "unavailable", 503)):
+            with self.subTest(code=code):
+                class Broken(GitHubStub):
+                    async def installations(self, _token):
+                        raise GitHubFailure(code)
+                gateway = Broken()
+                with self.store.connect() as db:
+                    before = list(db.iterdump())
+                read_status, hidden = self.call("GET", "/api/v1/projects/" + project["id"], gateway=gateway)
+                self.assertEqual(read_status, 200)
+                self.assertIsNone(hidden["githubFullName"])
+                self.assertEqual(hidden["githubAccess"], state)
+                self.assertEqual(hidden["totals"], [{"currency": "USD", "amountMinor": 100}])
+                read_status, page = self.call("GET", "/api/v1/projects", gateway=gateway)
+                self.assertEqual(read_status, 200)
+                self.assertEqual(page["items"][0]["githubAccess"], state)
+                write_status, _ = self.call("POST", "/api/v1/projects", {"githubRepoId": 303}, gateway=gateway)
+                self.assertEqual(write_status, status)
+                write_status, _ = self.call("POST", "/api/v1/expenses", draft,
+                    {**self.headers, "Idempotency-Key": "failure-new"}, gateway=gateway)
+                self.assertEqual(write_status, status)
+                with self.store.connect() as db:
+                    self.assertEqual(list(db.iterdump()), before)
+        status, updated = self.call("PATCH", "/api/v1/expenses/" + expense["id"],
+            {**draft, "purpose": "Edited during outage"}, {**self.headers, "If-Match": '"1"'}, gateway=gateway)
+        self.assertEqual(status, 200)
+        self.assertEqual(updated["purpose"], "Edited during outage")
+
+    def test_explicit_reauthorization_restores_grants_for_the_same_owner_and_history(self):
+        _, project = self.call("POST", "/api/v1/projects", {"githubRepoId": 202, "description": "Retained history"})
+        class Renewed(GitHubStub):
+            async def exchange(self, code, redirect_uri, verifier):
+                await super().exchange(code, redirect_uri, verifier)
+                return "synthetic-renewed-token"
+
+            async def profile(self, token):
+                assert token == "synthetic-renewed-token"
+                return {"id": 77, "login": "alice"}
+
+            async def installations(self, token):
+                assert token == "synthetic-renewed-token"
+                return [{"id": 501}]
+        gateway = Renewed()
+        status, _, headers = login(self.binding, gateway, self.now + 5)
+        self.assertEqual(status, 302)
+        new_headers = {"Cookie": headers["Set-Cookie"].split(";", 1)[0]}
+        status, history = self.call("GET", "/api/v1/projects/" + project["id"],
+                                   headers=new_headers, gateway=gateway)
+        self.assertEqual(status, 200)
+        self.assertEqual(history["description"], "Retained history")
+        self.assertEqual(history["githubAccess"], "authorized")
+        self.assertEqual(history["githubFullName"], "alice/project")
+
     def test_currency_exponents_and_invalid_business_dates(self):
         _, category = self.call("POST", "/api/v1/categories", {"name": "Tools"})
         draft = {"target": {"kind": "shared"}, "occurredOn": "2026-09-27",

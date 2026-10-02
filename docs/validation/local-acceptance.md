@@ -1,6 +1,62 @@
 # Current local acceptance
 
-Updated 2026-09-29. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
+Updated 2026-10-02. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
+
+## Preview repository identity failure (2026-10-02)
+
+The user's existing browser record confirms GET
+`https://preview.pull-wise.com/api/api/v1/repositories` returned 503 and the
+Projects screen displayed `IDENTITY_UNAVAILABLE`. The double `/api` is the
+documented proxy path. Source proves that GitHub non-success responses become
+generic ValueError, the Worker masks all identity exceptions with that code,
+and Web treats repository failure as a whole-page failure. These defects are
+reproduced locally. The actual preview trigger (expired/revoked token, GitHub
+outage/rate limit, crypto configuration, or identity exception) is **unproven**.
+
+Read-only Cloudflare management settings confirm the original preview DB,
+Client ID/slug, enabled preview switch and Secret **names only**. Observability
+is absent, Logpush is false and there are no tail consumers. Historical logs
+therefore provide no root-cause evidence. No logging configuration was changed,
+runtime Secret value read, business request, login/sign-out, D1 query or budget request
+was executed. Initial management connections failed; the bounded follow-up succeeded.
+The previously supplied DO budget snapshot remains historical, not a fresh check.
+
+The gateway now distinguishes credential rejection, permission denial, rate
+limits, transport/5xx, invalid response and crypto/config failure. Rejected user
+credentials return empty candidates with `reauthorization_required`, keep the
+Pullwise session and never trust cached/partially loaded grants. Renewal uses
+the existing explicit OAuth flow; ordinary GET/sync never refresh or write.
+Unknown provider failures remain errors. Project reads hide GitHub names and
+keep owner history available as `unavailable`; new targets fail closed, while
+same-target historical edits/removal retain all owner/key/revision guards.
+Preview diagnostics expose only fixed codes, exception type/function/line and
+numeric provider status. Exception text, provider bodies and credentials are
+excluded. No schema, migration, budget, namespace or runtime switch changed.
+
+GitHub's [token documentation](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens)
+states expiration is enabled by default for new Apps and expiring access tokens
+last eight hours. That supports a hypothesis, not this user's token diagnosis.
+The [REST troubleshooting documentation](https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api)
+distinguishes rate-limit 403/429 from permission failures. No provider token was
+obtained or tested against GitHub in this investigation.
+
+Test-first evidence: 23 gateway/identity cases and the new history/target case
+failed before implementation (24 failures / 8 existing passes); the first Web
+batch failed five cases, and the unavailable-history UI regression also failed
+before its notice was implemented. The completed Server suite passed **271 tests**;
+CI/publication status follows after review. Local synthetic SQLite
+fixtures include setup/explicit-callback/write simulations; these are not
+Cloudflare D1 operations or preview acceptance. Source mirror sync/`--check`,
+default/preview/production static checks and shell syntax passed. Python 3.10.12
+uses cached PyYAML 6.0.3 via PYTHONPATH; no dependency download was needed. The
+full test run needs loopback socket permission for one finite HTTP fixture.
+
+Preview backend publication needs separate authorization. Its proposed content
+is these source modules and the safe Worker error handler; it must use the same
+preview config/DB/journal and unchanged limits, without migrations or business
+validation. Main pushes trigger the already authorized paused production Build;
+`PULLWISE_D1_ACCESS_ENABLED=0` remains mandatory. A deployment or local mock pass
+must never be described as real preview repository/login acceptance.
 
 ## Preview cumulative request gate removal (2026-09-29)
 
