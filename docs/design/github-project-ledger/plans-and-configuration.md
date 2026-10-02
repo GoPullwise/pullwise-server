@@ -33,7 +33,9 @@ API-key clients. It protects against runaway scripts and rapid duplicate edits;
 normal manual entry usually stays well below it. It uses fixed UTC minute
 buckets, not a rolling 60-second window. A boundary burst can span two buckets.
 The monthly cap separately bounds sustained usage. Each protected domain batch
-counts once: project/category/expense/key creation and suggestion bookkeeping.
+counts once: project/category/expense/key creation. Jev reservation and suggestion
+event batches do not consume commercial write slots; ordinary assisted expense
+saves still count once. All batches retain independent D1 accounting.
 Key revocation is exempt so exhausted quota cannot trap a compromised key.
 OAuth and provider payment facts are not blocked by this commercial quota;
 they still require the independent runtime admission/security controls.

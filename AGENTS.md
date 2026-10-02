@@ -85,6 +85,11 @@ historical product plans to gate work.
   the maximum 1,000,000-record operator cap. Aggregate DTOs use numeric
   amountMinor through 9007199254740991 and a decimal integer string above it.
   Project PATCH returns its totals from the same guarded mutation batch.
+- Wrap native env.DB in NativeD1 underneath quota/budget adapters. Keep logical
+  parameters as Python integers for envelope checks; convert safe integers to
+  exactly representable JavaScript Numbers only at native bind. Python FFI
+  binding of 9007199254740991 can otherwise fail before transaction dispatch.
+  Reject unsafe integers, preserve atomic batches and native result/meta.
 - Lost repository access hides protected GitHub metadata and blocks new
   project targets; owners retain control of their historical expenses.
 - GitHub 401 means `reauthorization_required`, never a revoked Pullwise session.
@@ -113,6 +118,8 @@ historical product plans to gate work.
   returns pendingChange but cannot grant the target plan. Signed target/terminal
   webhooks clear the claim. Unknown provider outcomes retain it to avoid another
   prorated charge; known rejected requests may release it.
+  Terminal webhooks with no valid cadence preserve the existing subscription's
+  annual/monthly history; never infer month from missing provider facts.
 - `PULLWISE_CREEM_PRODUCT_IDS_JSON` is a plain_text binding containing a JSON
   string, because entry parses it with json.loads. Keep pro/max objects and
   distinct product IDs, with month/year keys as available. Mirror public IDs
@@ -166,7 +173,11 @@ historical product plans to gate work.
   GETs never call Jev. Provider failures or exhausted Jev budget do not block
   ordinary writes with an explicit category. The advanced draft endpoint
   shares the 100-attempt UTC daily cap and Max monthly reservation.
-  Keep enable/evaluated flags off until real anonymized en/zh quality and runtime gates pass.
+  Keep enable/evaluated flags off until real provider/Worker validation and
+  labeled en/zh quality gates pass. The user authorized agent-authored synthetic
+  samples for preview evaluation on 2026-10-02; record that provenance and actual
+  model results, never substitute fabricated predictions or claim customer-data
+  validation. This does not authorize production D1 activation.
   `typesafe_client.py` is the shared bounded input/response validator;
   Worker transport is `cloudflare_jev_gateway.py`, not a local child process.
 

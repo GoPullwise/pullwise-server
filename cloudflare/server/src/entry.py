@@ -26,6 +26,7 @@ from pullwise_server.cloudflare_ledger_reports import CsvExport
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1, PlanLimitError
 from pullwise_server.ledger_plan_policy import parse_policy
 from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initialize_product, reconcile_schema_reads
+from pullwise_server.cloudflare_native_d1 import NativeD1
 
 
 def _csv_stream(export):
@@ -258,7 +259,7 @@ class Default(WorkerEntrypoint):
             # Only the explicitly local-only config has this mode. Offline
             # config checks reject it in every remote deployment config.
             try:
-                return await _Application(self.env, self.env.DB).fetch(request)
+                return await _Application(self.env, NativeD1(self.env.DB)).fetch(request)
             except ValueError:
                 return _unavailable("PLAN_POLICY_INVALID")
         if mode != "preview" or getattr(self.env, "VALIDATION_BUDGET", None) is None:
@@ -307,7 +308,7 @@ class ValidationBudget(DurableObject):
             return {"initialized": False, "error": "UNREVIEWED_INITIALIZATION"}
         journal = self._journal()
         try:
-            evidence = await run_initialization(self.env.DB, journal, REVIEWED_INITIALIZATION_PLAN)
+            evidence = await run_initialization(NativeD1(self.env.DB), journal, REVIEWED_INITIALIZATION_PLAN)
             return {"initialized": True, "evidence": evidence}
         except BudgetError as error:
             return {"initialized": False, "error": str(error), "evidence": journal.snapshot()}
@@ -340,7 +341,7 @@ class ValidationBudget(DurableObject):
         except BudgetError as error:
             return _unavailable(str(error))
         try:
-            binding = MeteredD1(self.env.DB, journal, ticket, plan)
+            binding = MeteredD1(NativeD1(self.env.DB), journal, ticket, plan)
             response = await asyncio.wait_for(
                 _Application(self.env, binding).fetch(request), timeout=REQUEST_SECONDS)
             if response.status not in plan.expected_statuses:
@@ -379,9 +380,10 @@ class ValidationBudget(DurableObject):
                 try:
                     async def execute():
                         reconcile_schema_reads(journal)
-                        await initialize_product(self.env.DB, journal)
+                        native = NativeD1(self.env.DB)
+                        await initialize_product(native, journal)
                         ticket = journal.begin_product(now=time.time())
-                        binding = ProductMeteredD1(self.env.DB, journal, ticket)
+                        binding = ProductMeteredD1(native, journal, ticket)
                         await binding.refresh()
                         response = await _Application(self.env, binding).fetch(request)
                         # Product exports are consumed within _Application;

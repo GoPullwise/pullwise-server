@@ -34,6 +34,7 @@ MODULES = (
     "cloudflare_ledger_profile",
     "cloudflare_ledger_reports",
     "cloudflare_ledger_suggestions",
+    "cloudflare_native_d1",
     "cloudflare_oauth_state_adapter",
     "cloudflare_principal",
     "cloudflare_session_adapter",

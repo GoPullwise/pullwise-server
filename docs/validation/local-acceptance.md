@@ -15,22 +15,37 @@ behavior. No schema or database migration is required.
 | Max / REST | Ordinary expense POST/PATCH includes assistance for Max and expense-write keys; create can omit category. Confidence-gated existing categories only; explicit money, category and target stay authoritative. |
 | Inference failures | Manual-category writes remain usable on provider failure, daily/monthly Jev exhaustion or absent configuration. Auxiliary model bookkeeping no longer consumes business-write slots; monthly provider reservation remains conservative. |
 | Replay and authority | Caller intent is hashed before inference. Exact replay returns the saved result without provider/quota work, including after archival. Expired Max, restricted/revoked keys and concurrent category archival remain fenced. |
-| Money | Split SQL integer aggregates reconstruct exact Python totals; totals exceeding JavaScript's safe integer use decimal strings. Project PATCH preserves totals. |
+| Money | Split SQL integer aggregates reconstruct exact Python totals; totals exceeding JavaScript's safe integer use decimal strings. Project PATCH preserves totals. Native D1 converts safe Python integers only at the final JS bind, preserving exact MAX_SAFE_INTEGER and logical budget envelopes. |
 | Payment | Claim upgrades before chargeable dispatch, retain unknown outcomes, wait for signed payment facts before granting Max. Verified product/subscription IDs and owner association are required; historical events cannot overwrite the current subscription. Missing terminal cadence preserves annual history. |
 | Security | Trusted Origin is required for Cookie writes in all SameSite modes, including malformed Authorization. Jev rejects redirects and bounds timeout/body size. Provider exception text is excluded from preview diagnostics. |
 
-The full Python 3.10.12 suite passed **356 tests**, with cached PyYAML 6.0.3
+The full Python 3.10.12 suite passed **369 tests**, with cached PyYAML 6.0.3
 available and one finite loopback fixture allowed by the execution sandbox.
-Two subsequently added expiry/concurrent-archival cases passed in the same
+The expiry/concurrent-archival cases are included in the same
 16-case automatic-assistance suite. Default/preview/production static checks,
 source mirror/import closure and shell syntax passed. Pinned Python 3.14.2 /
 workers-py 1.17.4 / Wrangler 4.136.3 preview packaging passed; it includes the
 new exact-money module.
 
+Actual local Python Worker/D1 acceptance then exposed a native bind failure for
+9007199254740991 that synthetic SQLite did not catch. The NativeD1 fix preserves
+integer envelopes until the final FFI call; 11 regressions passed after their
+failing baseline. A fresh isolated fixture used exactly **30 local HTTP requests**:
+17 baseline cases, the failing maximum-value create, two bounded diagnostic
+reads and ten post-fix cases. Maximum-value create/PATCH/detail, all three
+reports, project list/detail/PATCH and a 1,025-row CSV passed. Shared total
+`9232379236109515775` (above int64) and project KRW total `18014398509481982`
+were exact decimal strings. Four migrations and fixture SQL were local only;
+zero remote D1/provider calls ran. The temporary diagnostic was removed, source
+hashes matched current source and the captured Worker was stopped.
+
 Four bounded Cloudflare management GETs confirmed original databases, the fixed
 preview budget namespace, preview product access 1, production access 0 and both
-Jev flags 0. Both Workers lacked TYPESAFE_API_KEY at that inspection. The user
-will configure the preview Secret. Its value must never be read back or logged.
+Jev flags 0. Both Workers lacked TYPESAFE_API_KEY at the initial inspection.
+After user configuration, a names-only read-back confirmed the preview Secret
+on 2026-10-02. Its value was not read back or logged. The user explicitly
+authorized agent-authored test data for real-provider en/zh evaluation rather
+than supplying customer samples; report that evaluation's provenance honestly.
 Real Jev quality/runtime and real payment/login acceptance remain separate from
 synthetic local tests. Do not claim the model is live or change production D1
 pause based on this implementation evidence. Publication and CI evidence follow

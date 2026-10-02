@@ -34,7 +34,7 @@ flowchart LR
     S --> D1[(D1: 账户、项目、支出、类别、平台账单)]
     S -->|登录及仓库权限| GH[GitHub OAuth + GitHub App]
     S -->|平台交易| C[Creem]
-    S -. 用户请求建议 .-> J[Jev]
+    S -. Max 正常保存时辅助 .-> J[Jev]
 ```
 
 - Web 只调用 Server REST API；浏览器不持有 GitHub App 私钥、Creem 密钥、Jev 密钥或 API Key。沿用 `worker.js` 的同源代理与 `/api` 前缀剥离规则，Cookie 登录通过 `/api/auth/*`；脚本可直连 Server `/api/v1/*`，使用 `Authorization: Bearer pwk_…`。
@@ -100,7 +100,7 @@ Session Cookie 和 Bearer Key 共用业务授权与 DTO；登录/支付/API Key 
 | 归属提示 | 用途/备注；Choice 判断项目专用、公共或不确定 | 返回建议供核对，不自动移动、复制或分摊支出 |
 | 疑似重复 | 同账户、同目标、同币种金额、前后七日内最多 30 条记录；本地精确用途匹配 | 普通保存响应提示记录 ID，不阻挡保存，不将历史记录发送给模型；幂等重放仍由 Idempotency-Key 精确保证 |
 
-类别 ID 必须由后端验证为该账户当前允许的类别；即使 Jev 高置信度也不能创建类别、入账、改金额、推断汇率或决定 GitHub/支付权限。服务端设请求大小、超时、费用/调用次数上限和故障降级；保存问题版本、模型版本、候选、概率与用户接受/改选结果，便于评估。先用中英文真实匿名样本标注准确率、误提示率和“不确定”覆盖率，再决定阈值；未通过评估时保持功能关闭。建议问题和调用预算由 `cloudflare_ledger_suggestions.py` 定义；`typesafe_client.py` 验证固定模型、输入与响应，`cloudflare_jev_gateway.py` 提供 Worker 传输。Cloudflare Python Worker 对目标 SDK/网络调用的生产适配需在完成实现后验证，必要时使用 Server Worker 内受控 HTTP 调用。服务端密钥使用 Cloudflare Secret。
+类别 ID 必须由后端验证为该账户当前允许的类别；即使 Jev 高置信度也不能自行发起记账、创建类别、改金额、推断汇率或决定 GitHub/支付权限。用户正常保存时，后端将可靠类别与授权、版本、幂等和审计校验一起提交。服务端设请求大小、超时、费用/调用次数上限和故障降级，并保存问题版本、模型版本、概率与结果；高级建议接口另可记录接受/改选。先用中英文真实匿名样本标注准确率、误提示率和“不确定”覆盖率，再决定阈值；未通过评估时保持功能关闭。建议问题和调用预算由 `cloudflare_ledger_suggestions.py` 定义；`typesafe_client.py` 验证固定模型、输入与响应，`cloudflare_jev_gateway.py` 提供固定端点的 Worker HTTP 传输。真实运行时验证仍须通过。服务端密钥使用 Cloudflare Secret。
 
 ## 8. 验证与发布门槛
 
