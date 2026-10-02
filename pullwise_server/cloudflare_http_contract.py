@@ -63,7 +63,7 @@ async def handle_http_request(*, method: str, path: str,
         except Exception:
             return 503, {"error": {"code": "BILLING_CATALOG_UNAVAILABLE"}}
     if method == "POST" and path == "/api-keys":
-        if cookie_same_site.casefold() == "none" and _cookie_sessions(headers):
+        if _cookie_sessions(headers):
             claimed_origin = _header(headers, "Origin") or _header(headers, "Referer")
             parsed = urlsplit(claimed_origin)
             origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else ""
@@ -88,7 +88,7 @@ async def handle_http_request(*, method: str, path: str,
         key_id = path[len("/api-keys/"):]
         if not key_id or "/" in key_id:
             return 404, {"error": {"code": "NOT_FOUND"}}
-        if cookie_same_site.casefold() == "none" and _cookie_sessions(headers):
+        if _cookie_sessions(headers):
             claimed_origin = _header(headers, "Origin") or _header(headers, "Referer")
             parsed = urlsplit(claimed_origin)
             origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else ""

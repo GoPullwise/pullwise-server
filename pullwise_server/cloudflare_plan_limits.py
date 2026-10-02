@@ -40,12 +40,14 @@ _USAGE_SQL = """INSERT INTO ledger_plan_usage(owner_id,projects,records,month,wr
         ELSE (SELECT COUNT(*) FROM ledger_projects WHERE owner_id=?) END + ?,
       CASE WHEN EXISTS(SELECT 1 FROM ledger_plan_usage WHERE owner_id=?) THEN 0
         ELSE (SELECT COUNT(*) FROM expenses WHERE owner_id=?) END + ?,
-      ?,1,?,1,?,?,?,?,?,?,?,?,?,?,?)
+      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(owner_id) DO UPDATE SET
       projects=ledger_plan_usage.projects+excluded.project_delta,
       records=ledger_plan_usage.records+excluded.record_delta,
-      writes=CASE WHEN ledger_plan_usage.month=excluded.month THEN ledger_plan_usage.writes+1 ELSE 1 END,
-      minute_writes=CASE WHEN ledger_plan_usage.minute=excluded.minute THEN ledger_plan_usage.minute_writes+1 ELSE 1 END,
+      writes=CASE WHEN ledger_plan_usage.month=excluded.month
+        THEN ledger_plan_usage.writes+excluded.writes ELSE excluded.writes END,
+      minute_writes=CASE WHEN ledger_plan_usage.minute=excluded.minute
+        THEN ledger_plan_usage.minute_writes+excluded.minute_writes ELSE excluded.minute_writes END,
       jev_reserved_microusd=CASE WHEN ledger_plan_usage.month=excluded.month
         THEN ledger_plan_usage.jev_reserved_microusd+excluded.jev_delta ELSE excluded.jev_delta END,
       previous_month=ledger_plan_usage.month,previous_minute=ledger_plan_usage.minute,
@@ -75,6 +77,11 @@ class PlanLimitedD1:
                 r"^\s*UPDATE\s+api_keys\s+SET\s+revoked_at\s*=", item.sql, re.I)
                 for item, table in mutations):
             return await self.binding.batch(raw)
+        # Model events are internal bookkeeping. Their original credential
+        # fence remains atomic and the underlying global D1 meter still runs,
+        # but neither a usage UPSERT nor a business write charge is needed.
+        if mutations and all(table == "expense_suggestion_events" for _, table in mutations):
+            return await self.binding.batch(raw)
         if not mutations:
             return await self.binding.batch(raw)
         # Trusted fences contain the account ID and exact persisted user JSON.
@@ -99,13 +106,15 @@ class PlanLimitedD1:
         record_delta = sum(table == "expenses" and item.sql.lstrip().upper().startswith("INSERT")
                            for item, table in mutations)
         jev_delta = JEV_RESERVATION_MICROUSD if any(table == "expense_suggestion_budget" for _, table in mutations) else 0
+        write_delta = int(any(table not in {"expense_suggestion_budget", "expense_suggestion_events"}
+                              for _, table in mutations))
         if jev_delta and plan != "max":
             raise PlanLimitError(403, "MAX_REQUIRED")
         if jev_delta and not usd_micros(limits["jevMonthlyBudgetUsd"]):
             raise PlanLimitError(429, "JEV_BUDGET_LIMIT")
         period = datetime.fromtimestamp(self.now, timezone.utc).strftime("%Y-%m")
         counter = self.binding.prepare(_USAGE_SQL).bind(owner, owner, owner, project_delta,
-            owner, owner, record_delta, period, self.now // 60, jev_delta,
+            owner, owner, record_delta, period, write_delta, self.now // 60, write_delta, jev_delta,
             limits["projects"], limits["records"], limits["writesPerMinute"], limits["writesPerMonth"],
             usd_micros(limits["jevMonthlyBudgetUsd"]), project_delta, record_delta, jev_delta, period, self.now // 60)
         try:

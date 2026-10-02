@@ -56,7 +56,7 @@ historical product plans to gate work.
   ValidationBudget class and test Creem origin. This supersedes the old blanket
   preview-pause notes below; it does not permit production activation or Jev.
 - Workers fetch supports follow/manual, not redirect='error'. GitHub/Creem
-  gateways use manual and reject unsuccessful/3xx responses without following
+  and Jev gateways use manual and reject unsuccessful/3xx responses without following
   them. Preview diagnostics must redact all credentials and omit provider body.
 - /_preview/budget is a preview-only, read-only numeric status, served from DO
   storage without D1. It is not a reset/stop/SQL endpoint and must never return
@@ -79,6 +79,12 @@ historical product plans to gate work.
 - Money is integer minor units with fixed currency exponents. Shared
   expenses have no project ID; reports never combine currencies. Moves keep
   one record; soft deletion removes it from lists, reports and exports.
+- Aggregate money uses `ledger_money_totals.AGGREGATE_SQL` split integer sums,
+  then Python integer reconstruction; direct SQLite SUM(amount_minor) can
+  overflow on valid records. Both D1 components stay JavaScript-safe through
+  the maximum 1,000,000-record operator cap. Aggregate DTOs use numeric
+  amountMinor through 9007199254740991 and a decimal integer string above it.
+  Project PATCH returns its totals from the same guarded mutation batch.
 - Lost repository access hides protected GitHub metadata and blocks new
   project targets; owners retain control of their historical expenses.
 - GitHub 401 means `reauthorization_required`, never a revoked Pullwise session.
@@ -98,6 +104,15 @@ historical product plans to gate work.
 - Creem checkout does not grant entitlement. Signed, idempotent webhooks
   own payment facts; keep account revision fences, pending updates and replay
   recovery atomic. Platform payments never create ledger expenses.
+- Cookie-authenticated ledger and API-key writes require a trusted Origin
+  regardless of SameSite mode. Malformed Authorization must never bypass
+  this check. Preview diagnostics expose fixed codes/type/site and numeric
+  status only; never return provider exception text or partially redacted bodies.
+- Creem product bindings map explicit month/year keys, never positional lists.
+  Claim subscription upgrades before provider dispatch; provider acknowledgement
+  returns pendingChange but cannot grant the target plan. Signed target/terminal
+  webhooks clear the claim. Unknown provider outcomes retain it to avoid another
+  prorated charge; known rejected requests may release it.
 - `PULLWISE_CREEM_PRODUCT_IDS_JSON` is a plain_text binding containing a JSON
   string, because entry parses it with json.loads. Keep pro/max objects and
   distinct product IDs, with month/year keys as available. Mirror public IDs
@@ -115,6 +130,10 @@ historical product plans to gate work.
   mutation, idempotency and audit batch. GETs do not initialize usage; capacity
   includes archived projects/soft-deleted expenses. Quota changes do not reset
   totals. Late requests cannot roll UTC minute/month counters backwards.
+  Automatic Jev reservations and suggestion events do not consume commercial
+  write/minute allowances; the expense operation counts once. Reserve Jev USD
+  atomically with its budget mutation; event-only batches retain the original
+  credential fence and global D1 accounting without an extra usage UPSERT.
   Key revocation is exempt from commercial quotas so a compromised key can
   always be revoked; the normal credential fence and global validation cap stay.
 - Migration 0004 and quota initialization/index effects need new S18 bounds.
@@ -136,8 +155,18 @@ historical product plans to gate work.
   User explicitly approved it after automatic review initially rejected it.
   Keep its static pause check, pinned tools/lock, no-migration command and main
   branch restriction; this approval does not authorize activating D1.
-- Jev suggestions are optional and never save expenses. Keep enable/evaluated
-  flags off until real anonymized en/zh quality and runtime gates pass.
+- Max Jev assistance runs inside ordinary POST/PATCH expense workflows,
+  including expenses:write keys without suggestions:use. POST can omit a
+  category; select only a confident active account category or return 422
+  CATEGORY_REQUIRED with assistance. PATCH requires an explicit category.
+  Preserve every explicit field; target and duplicate results are advisory.
+  Authenticate and check target restrictions before model calls. Hash the
+  normalized caller intent before inference; replay stored responses before
+  archived-target/category validation, without another provider/budget attempt.
+  GETs never call Jev. Provider failures or exhausted Jev budget do not block
+  ordinary writes with an explicit category. The advanced draft endpoint
+  shares the 100-attempt UTC daily cap and Max monthly reservation.
+  Keep enable/evaluated flags off until real anonymized en/zh quality and runtime gates pass.
   `typesafe_client.py` is the shared bounded input/response validator;
   Worker transport is `cloudflare_jev_gateway.py`, not a local child process.
 

@@ -21,7 +21,6 @@ async def _owner_for_update(binding: Any, update: dict) -> str | None:
         account = users[direct_id]
         if not isinstance(account, dict) or account.get("id") != direct_id:
             raise ValueError("persisted billing owner is invalid")
-        return direct_id
     matches = [owner_id for owner_id, account in users.items()
         if isinstance(account, dict) and account.get("id") == owner_id
         and billing_account_rules.billing_update_matches_user(update, account)]

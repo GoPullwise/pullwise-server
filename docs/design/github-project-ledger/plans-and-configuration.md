@@ -83,11 +83,25 @@ a new month replaces the period counters; it does not add unused old credit.
 Annual subscriptions use the same monthly periods. A named constraint rejects
 late requests that would move counters back to an older month/minute.
 
-The existing daily suggestion guard (10/day by default, capped at 20/day) and
+The shared daily assistance guard (100/day) and
 request/response bounds remain additional safety controls. Free/Pro cannot
 invoke Jev even with suggestions scope. Max eligibility does not imply that
 Jev is active: public DTOs distinguish `eligible` and `available`. Preserve
 enable/evaluated flags at 0 until real quality, metering and provider gates pass.
+
+Max assistance is part of ordinary `POST /api/v1/expenses` and expense PATCH,
+including `expenses:write` API keys. No extra suggestion action or scope is
+required. A create may omit `categoryId`; confidence at least 0.80 selects an
+active existing category. Explicit category, amount, date and target are kept.
+When category selection is uncertain/unavailable, create returns 422
+`CATEGORY_REQUIRED` without saving; clients preserve the draft and request a
+manual category. Edits always provide a category. The response `assistance`
+contains advisory category/target/duplicate results and `categorySource`.
+Duplicate hints use a bounded exact-purpose check on the same authorized target,
+same currency/amount and seven-day date window; they do not reject a write.
+GETs perform no inference. Idempotent create replay returns the stored response
+without another provider call or reservation, including after category/project
+archival, while still enforcing current key/owner/target restrictions.
 
 ## Atomicity and D1 cost impact
 

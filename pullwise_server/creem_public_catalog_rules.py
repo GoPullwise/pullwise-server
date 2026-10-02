@@ -30,10 +30,10 @@ def verified_public_catalog(configured_ids: dict,
     currency = None
     for plan in ("pro", "max"):
         ids = configured_ids[plan]
-        if not isinstance(ids, (list, tuple)) or any(
-                not isinstance(value, str) or not value for value in ids):
+        if (not isinstance(ids, dict) or set(ids) - {"month", "year"} or any(
+                not isinstance(value, str) or not value for value in ids.values())):
             raise ValueError("invalid configured Creem product IDs")
-        for product_id in ids:
+        for configured_interval, product_id in ids.items():
             if product_id in all_ids:
                 raise ValueError("duplicate Creem product binding")
             all_ids.add(product_id)
@@ -46,7 +46,7 @@ def verified_public_catalog(configured_ids: dict,
             period = product.get("billing_period")
             interval = {"every-month": "month", "every-year": "year"}.get(period)
             product_currency = product.get("currency")
-            if (interval is None or interval in found[plan]
+            if (interval is None or interval != configured_interval or interval in found[plan]
                     or not isinstance(product_currency, str)
                     or not re.fullmatch(r"[A-Za-z]{3}", product_currency)):
                 raise ValueError("invalid Creem price period or currency")
@@ -64,8 +64,7 @@ def verified_public_catalog(configured_ids: dict,
     for plan, title in (("pro", "Pullwise Pro"), ("max", "Pullwise Max")):
         products = found[plan]
         product = products.get("month") or products.get("year") or {}
-        name = product.get("name") if isinstance(product.get("name"), str) else title
-        plans.append({"id": plan, "name": name.strip() or title,
+        plans.append({"id": plan, "name": title,
             "description": "Pullwise project expense ledger subscription.",
             "currency": currency, "entitlements": None,
             "prices": {interval: (_price(products[interval], interval)

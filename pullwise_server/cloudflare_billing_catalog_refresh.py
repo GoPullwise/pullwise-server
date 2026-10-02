@@ -14,7 +14,7 @@ async def read_or_refresh_catalog(*, binding, gateway, headers, products: dict, 
     if set(ids) != {"pro", "max"} or not any(ids.values()):
         return 503, {"error": {"code": "BILLING_CATALOG_UNAVAILABLE", "diagnostic": "PRODUCT_BINDINGS_INVALID"}}
     fetched = {}
-    for product_id in {item for values in ids.values() for item in values}:
+    for product_id in {item for values in ids.values() for item in values.values()}:
         fetched[product_id] = await gateway.product(product_id)
     revision = max(now, int(row["source_revision"]) + 1) if row else max(1, now)
     await D1BillingCatalogTransactions(binding).stage_from_products(

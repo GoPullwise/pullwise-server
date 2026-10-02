@@ -6,6 +6,10 @@ import re
 from urllib.parse import quote
 
 
+class CreemRequestRejected(ValueError):
+    """A request was not dispatched, or the provider definitively rejected it."""
+
+
 def product_bindings(raw: object) -> dict:
     if not isinstance(raw, dict):
         return {}
@@ -23,7 +27,7 @@ def product_bindings(raw: object) -> dict:
 
 
 def webhook_product_ids(products: dict) -> dict:
-    return {plan: tuple(group.values()) for plan, group in products.items()}
+    return {plan: dict(group) for plan, group in products.items()}
 
 
 class WorkerCreemGateway:
@@ -38,7 +42,7 @@ class WorkerCreemGateway:
         from js import fetch, Object, AbortSignal
         from pyodide.ffi import to_js
         if not self.api_key or not re.fullmatch(r"v1/(checkouts|products\?product_id=[A-Za-z0-9_-]{3,128}|subscriptions/[A-Za-z0-9_-]{3,128}/(upgrade|cancel|resume))", path):
-            raise ValueError("Creem request is not configured or path is invalid")
+            raise CreemRequestRejected("Creem request is not configured or path is invalid")
         headers = {"x-api-key": self.api_key, "Accept": "application/json"}
         init = {"method": method, "headers": headers, "redirect": "manual",
                 "signal": AbortSignal.timeout(10000)}
@@ -51,6 +55,8 @@ class WorkerCreemGateway:
             raise ValueError("Creem response too large")
         body = await response.text()
         if not response.ok:
+            if 400 <= int(response.status) < 500 and int(response.status) != 408:
+                raise CreemRequestRejected(f"Creem HTTP {int(response.status)}")
             raise ValueError(f"Creem HTTP {int(response.status)}")
         if len(body) > 1024 * 1024:
             raise ValueError("Creem request failed")

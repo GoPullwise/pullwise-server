@@ -176,6 +176,23 @@ def reduce_billing_update(user: dict, update: dict, *, processed_at: int) -> dic
     """Return the account and event write set; never mutate the input account."""
     next_user = deepcopy(user)
     current = next_user.get("billing") or {}
+    subscription_id = billing_update_text(update.get("subscriptionId"))
+    current_subscription_id = billing_update_text(current.get("subscriptionId"))
+    records = next_user.get("billingSubscriptions") if isinstance(next_user.get("billingSubscriptions"), list) else []
+    historical = next((record for record in records
+        if isinstance(record, dict) and record.get("subscriptionId") == subscription_id), {})
+    if (subscription_id and current_subscription_id and subscription_id != current_subscription_id
+            and (historical or billing_update_text(update.get("status")) not in {"active", "trialing", "canceling"})):
+        history_state = {**historical, **update, "lastEventId": billing_event_id(update),
+            "lastEventType": billing_update_text(update.get("eventType")),
+            "lastEventCreated": billing_event_created(update), "updatedAt": processed_at}
+        upsert_billing_subscription_record(next_user, history_state, processed_at=processed_at)
+        append_billing_subscription_event(next_user, update, historical, processed_at=processed_at)
+        return {"user": next_user, "eventRecord": billing_event_record(update,
+            processed_at=processed_at, applied=False), "applied": False, "quotaRefresh": False}
+    if subscription_id and current_subscription_id and subscription_id != current_subscription_id:
+        upsert_billing_subscription_record(next_user, current, processed_at=processed_at)
+        current = {}
     incoming_created = billing_event_created(update)
     current_created = billing_event_created({"eventCreated": current.get("lastEventCreated")})
     stale = current_created is not None and (incoming_created is None or incoming_created < current_created)
@@ -188,7 +205,6 @@ def reduce_billing_update(user: dict, update: dict, *, processed_at: int) -> dic
 
     customer_id = billing_update_text(update.get("customerId"))
     customer_email = billing_update_text(update.get("customerEmail"))
-    subscription_id = billing_update_text(update.get("subscriptionId"))
     subscription_item_id = billing_update_text(update.get("subscriptionItemId"))
     status = billing_update_text(update.get("status"))
     plan = billing_update_text(update.get("plan"))
@@ -216,7 +232,7 @@ def reduce_billing_update(user: dict, update: dict, *, processed_at: int) -> dic
         "currentPeriodStart": current_period_start if current_period_start is not None else current.get("currentPeriodStart"),
         "currentPeriodEnd": current_period_end if current_period_end is not None else current.get("currentPeriodEnd"),
         "cancelAtPeriodEnd": cancel_at_period_end if cancel_at_period_end is not None else current.get("cancelAtPeriodEnd"),
-        "canceledAt": canceled_at if canceled_at is not None else current.get("canceledAt"),
+        "canceledAt": None if status in {"active", "trialing"} else canceled_at if canceled_at is not None else current.get("canceledAt"),
         "updatedAt": processed_at,
         "lastEventType": event_type or current.get("lastEventType"),
         "lastEventId": event_id or current.get("lastEventId"),
@@ -226,6 +242,12 @@ def reduce_billing_update(user: dict, update: dict, *, processed_at: int) -> dic
     if request_id and checkout.get("requestId") == request_id:
         next_user["billingCheckout"] = {**checkout, "status": "completed",
             "completedAt": processed_at, "eventId": event_id or checkout.get("eventId")}
+    pending = next_user.get("billingChange") if isinstance(next_user.get("billingChange"), dict) else {}
+    if pending.get("subscriptionId") == next_user["billing"].get("subscriptionId") and (
+            (pending.get("plan") == next_user["billing"].get("plan")
+             and pending.get("interval") == next_user["billing"].get("interval"))
+            or status in {"canceled", "past_due", "unpaid", "paused"}):
+        next_user.pop("billingChange", None)
     upsert_billing_subscription_record(next_user, next_user["billing"], processed_at=processed_at)
     append_billing_subscription_event(next_user, update, next_user["billing"],
         processed_at=processed_at)

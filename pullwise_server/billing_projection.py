@@ -59,6 +59,12 @@ def subscription_events_dto(user: dict) -> list[dict]:
 
 def billing_account_dto(user: dict, plan: str) -> dict:
     current = user.get("billing") if isinstance(user.get("billing"), dict) else {}
+    pending = user.get("billingChange") if isinstance(user.get("billingChange"), dict) else {}
+    pending_change = None
+    if (pending.get("subscriptionId") == current.get("subscriptionId")
+            and pending.get("plan") in _PAID and pending.get("interval") in {"month", "year"}):
+        pending_change = {"plan": pending["plan"], "interval": pending["interval"],
+                          "requestedAt": _timestamp(pending.get("requestedAt"))}
     return {"provider": _text(current.get("provider")),
         "status": _status(current.get("status")),
         "plan": plan,
@@ -76,4 +82,5 @@ def billing_account_dto(user: dict, plan: str) -> dict:
         "lastEventCreated": _timestamp(current.get("lastEventCreated")),
         "updatedAt": _timestamp(current.get("updatedAt")),
         "entitlements": None,
+        "pendingChange": pending_change,
         "subscriptionEvents": subscription_events_dto(user)}

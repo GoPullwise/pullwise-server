@@ -13,6 +13,7 @@ from .cloudflare_ledger_auth import ledger_principal, target_allowed
 from .cloudflare_github_identity_http import read_repository_access
 from .cloudflare_github_gateway import GitHubFailure
 from .cloudflare_principal import PrincipalAuthError, _header
+from .ledger_money_totals import AGGREGATE_SQL, aggregate_minor, public_minor
 
 
 def _error(status: int, code: str):
@@ -45,7 +46,8 @@ def _project(row: dict, allowed_repos: dict[int, str], totals: list[dict], githu
             "githubFullName": name, "description": row["description"],
             "status": row["status"], "githubAccess": "authorized" if name else github_access,
             "revision": row["revision"], "totals": [{"currency": total["currency"],
-                "amountMinor": total.get("amountMinor", total.get("amount_minor"))} for total in totals]}
+                "amountMinor": total["amountMinor"] if "amountMinor" in total
+                else public_minor(aggregate_minor(total))} for total in totals]}
 
 
 def _category(row: dict):
@@ -124,7 +126,8 @@ async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path
         from .cloudflare_ledger_expenses import handle_expense_request
         try:
             return await handle_expense_request(binding=binding, gateway=gateway,
-                method=method, path=path, headers=headers, params=params, body=body, now=now)
+                method=method, path=path, headers=headers, params=params, body=body, now=now,
+                suggestion_gateway=suggestion_gateway)
         except GitHubFailure as exc:
             return _error(exc.status, exc.code)
     parts = path.strip("/").split("/")
@@ -170,7 +173,7 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
             user, _, auth, validate = await ledger_principal(binding=binding, headers=headers,
                 scope=scope, now=now, target_kind="project", project_id=item_id)
             commands = [binding.prepare("SELECT * FROM ledger_projects WHERE owner_id=? AND id=?").bind(user["id"], item_id),
-                binding.prepare("""SELECT currency,SUM(amount_minor) amount_minor FROM expenses
+                binding.prepare(f"""SELECT currency,{AGGREGATE_SQL} FROM expenses
                     WHERE owner_id=? AND project_id=? AND deleted_at IS NULL GROUP BY currency""").bind(user["id"], item_id)]
             rows = await binding.batch([*auth, *commands])
             validate([part.results for part in rows[:len(auth)]])
@@ -204,7 +207,7 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
         commands = [binding.prepare("SELECT * FROM ledger_projects WHERE owner_id=? AND id>?" +
             visible + " ORDER BY id LIMIT ?").bind(user["id"], cursor,
                 *(project_ids or []), limit + 1),
-            binding.prepare("""SELECT project_id,currency,SUM(amount_minor) amount_minor FROM expenses
+            binding.prepare(f"""SELECT project_id,currency,{AGGREGATE_SQL} FROM expenses
             WHERE owner_id=? AND deleted_at IS NULL""" + date_where +
                 " GROUP BY project_id,currency").bind(user["id"], *date_values)]
         rows = await binding.batch([*auth, *commands])
@@ -214,7 +217,7 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
         by_project = {}
         for total in totals:
             by_project.setdefault(total["project_id"], []).append({
-                "currency": total["currency"], "amountMinor": total["amount_minor"]})
+                "currency": total["currency"], "amountMinor": public_minor(aggregate_minor(total))})
         repos, state = await _project_repos(user, gateway)
         return 200, {"items": [_project(row, repos, by_project.get(row["id"], []), state) for row in page],
                      "nextCursor": page[-1]["id"] if len(projects) > limit else None}
@@ -265,9 +268,12 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
             body.get("description", existing["description"]), status, _timestamp(now), item_id,
             user["id"], expected),
         binding.prepare("INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN changes()=1 THEN 1 ELSE 0 END)"),
-        binding.prepare("DELETE FROM d1_command_guard")]
+        binding.prepare("DELETE FROM d1_command_guard"),
+        binding.prepare(f"""SELECT currency,{AGGREGATE_SQL} FROM expenses
+            WHERE owner_id=? AND project_id=? AND deleted_at IS NULL GROUP BY currency""").bind(
+                user["id"], item_id)]
     try:
-        await binding.batch(commands)
+        result = await binding.batch(commands)
     except PlanLimitError as error:
         return error.response()
     except Exception:
@@ -275,7 +281,7 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
     updated = {**existing, "description": body.get("description", existing["description"]),
                "status": status, "revision": expected + 1}
     repos, state = await _project_repos(user, gateway)
-    return 200, _project(updated, repos, [], state)
+    return 200, _project(updated, repos, result[-1].results, state)
 
 
 async def _categories(binding, method, item_id, headers, body, now, scope):

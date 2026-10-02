@@ -13,6 +13,7 @@ from typing import Any, Mapping
 from .cloudflare_ledger_api import _error, _live_repos, _param, _revision, _timestamp, _write_guard
 from .cloudflare_ledger_auth import ledger_principal, target_allowed
 from .cloudflare_principal import PrincipalAuthError, _header
+from .account_cycle_rules import effective_user_plan
 
 # ISO 4217 active alphabetic units; exponents are fixed here so Worker runtime
 # does not depend on the host locale or a floating point conversion library.
@@ -46,10 +47,11 @@ def _amount(value, currency):
     return minor
 
 
-def _input(body):
+def _input(body, *, allow_missing_category=False):
     fields = {"target", "occurredOn", "amount", "currency", "categoryId", "purpose",
               "note", "quantity", "unit"}
-    if not isinstance(body, dict) or set(body) - fields or not fields.difference({"note", "quantity", "unit"}) <= set(body):
+    optional = {"note", "quantity", "unit"} | ({"categoryId"} if allow_missing_category else set())
+    if not isinstance(body, dict) or set(body) - fields or not fields.difference(optional) <= set(body):
         raise ValueError("fields")
     target = body["target"]
     if (not isinstance(target, dict) or target.get("kind") not in {"project", "shared"}
@@ -69,7 +71,9 @@ def _input(body):
     if not isinstance(currency, str):
         raise ValueError("currency")
     minor = _amount(body["amount"], currency)
-    if (not isinstance(body["categoryId"], str) or not body["categoryId"]
+    category_id = body.get("categoryId")
+    if ((category_id not in (None, "") and not isinstance(category_id, str))
+            or (not allow_missing_category and not category_id)
             or not isinstance(body["purpose"], str) or not 1 <= len(body["purpose"].strip()) <= 500):
         raise ValueError("text")
     for field, maximum in (("note", 4000), ("unit", 40)):
@@ -82,15 +86,19 @@ def _input(body):
         raise ValueError("quantity")
     return {"target_kind": target["kind"], "project_id": target.get("projectId"),
             "occurred_on": occurred, "amount_minor": minor, "currency": currency,
-            "category_id": body["categoryId"], "purpose": body["purpose"].strip(),
+            "category_id": category_id or None, "purpose": body["purpose"].strip(),
             "note": body.get("note"), "quantity_decimal": quantity, "unit": body.get("unit")}
+
+
+def _decimal_amount(minor, currency):
+    exponent = EXPONENTS.get(currency, 2)
+    return str(minor) if exponent == 0 else f"{minor // 10**exponent}.{minor % 10**exponent:0{exponent}d}"
 
 
 def _dto(row):
     currency = row["currency"]
-    exponent = EXPONENTS.get(currency, 2)
     minor = row["amount_minor"]
-    amount = str(minor) if exponent == 0 else f"{minor // 10**exponent}.{minor % 10**exponent:0{exponent}d}"
+    amount = _decimal_amount(minor, currency)
     return {"id": row["id"], "target": {"kind": row["target_kind"],
             **({"projectId": row["project_id"]} if row["target_kind"] == "project" else {})},
             "occurredOn": row["occurred_on"], "amount": amount, "amountMinor": minor,
@@ -131,7 +139,7 @@ async def _valid_target(binding, user, restrictions, data, gateway, writing):
 
 async def handle_expense_request(*, binding: Any, gateway: Any, method: str, path: str,
                                  headers: Mapping[str, object], params: Mapping[str, object],
-                                 body: object, now: int):
+                                 body: object, now: int, suggestion_gateway=None):
     if not path.startswith("/api/v1/expenses") or path not in {"/api/v1/expenses"} and not path.startswith("/api/v1/expenses/"):
         return None
     item_id = path[len("/api/v1/expenses/"):] if path.startswith("/api/v1/expenses/") else None
@@ -148,12 +156,12 @@ async def handle_expense_request(*, binding: Any, gateway: Any, method: str, pat
             return await _read(binding, headers, params, item_id, now)
         if method in {"POST", "PATCH"}:
             try:
-                data = _input(body)
+                data = _input(body, allow_missing_category=method == "POST")
             except ValueError:
                 return _error(422, "INVALID_INPUT")
         else:
             data = None
-        return await _write(binding, gateway, method, item_id, headers, data, now)
+        return await _write(binding, gateway, method, item_id, headers, data, now, suggestion_gateway)
     except PrincipalAuthError as exc:
         return _error(exc.status, exc.code)
 
@@ -191,7 +199,7 @@ async def _read(binding, headers, params, item_id, now):
                  "nextCursor": page[-1]["id"] if len(items) > limit else None}
 
 
-async def _write(binding, gateway, method, item_id, headers, data, now):
+async def _write(binding, gateway, method, item_id, headers, data, now, suggestion_gateway=None):
     key = _header(headers, "Idempotency-Key") if method == "POST" else ""
     if method == "POST" and (not 1 <= len(key) <= 128 or any(ord(c) < 33 for c in key)):
         return _error(422, "INVALID_INPUT")
@@ -212,30 +220,50 @@ async def _write(binding, gateway, method, item_id, headers, data, now):
         return 204, None
     if method != "POST" and expected != current["revision"]:
         return _error(412, "PRECONDITION_FAILED")
+    digest = None
+    if method == "POST":
+        # Hash the caller's normalized intent, before any inferred category.
+        # A replay authenticates current key/target authority but does not
+        # revalidate archived categories/projects or call any provider.
+        digest = hashlib.sha256(json.dumps(data, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        if not target_allowed(restrictions, data["target_kind"], data["project_id"]):
+            return _error(403, "TARGET_FORBIDDEN")
+        if rows[1]:
+            saved = rows[1][0]
+            return (201, json.loads(saved["response_json"])) if saved["request_sha256"] == digest else _error(409, "IDEMPOTENCY_CONFLICT")
+    assistance = None
     if method == "POST" or method == "PATCH":
         new_target = method == "POST" or (current is not None and (
             data["target_kind"] != current["target_kind"] or data["project_id"] != current["project_id"]))
         target_error = await _valid_target(binding, user, restrictions, data, gateway, new_target)
         if target_error:
             return target_error
-        unchanged_category = method == "PATCH" and current["category_id"] == data["category_id"]
-        category = await binding.prepare("""SELECT id FROM expense_categories WHERE owner_id=?
-            AND id=? AND (archived_at IS NULL OR ?)""").bind(
-                user["id"], data["category_id"], 1 if unchanged_category else 0).first()
-        if category is None:
-            return _error(422, "INVALID_CATEGORY")
+        if data["category_id"]:
+            unchanged_category = method == "PATCH" and current["category_id"] == data["category_id"]
+            category = await binding.prepare("""SELECT id FROM expense_categories WHERE owner_id=?
+                AND id=? AND (archived_at IS NULL OR ?)""").bind(
+                    user["id"], data["category_id"], 1 if unchanged_category else 0).first()
+            if category is None:
+                return _error(422, "INVALID_CATEGORY")
+        if effective_user_plan(user, timestamp=now) == "max":
+            assistance = await _automatic_assistance(binding, headers, data, now, suggestion_gateway, item_id)
+            if not data["category_id"]:
+                data = {**data, "category_id": assistance["suggestions"].get("categoryId")}
+                if not data["category_id"]:
+                    return 422, {"error": {"code": "CATEGORY_REQUIRED"}, "assistance": assistance}
+                assistance["categorySource"] = "jev"
+        elif not data["category_id"]:
+            return _error(422, "CATEGORY_REQUIRED")
     stamp = _timestamp(now)
     actor_kind, actor_id = _actor(proof)
     event_id = "evt_" + uuid.uuid4().hex
     if method == "POST":
-        digest = hashlib.sha256(json.dumps(data, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        if rows[1]:
-            saved = rows[1][0]
-            return (201, json.loads(saved["response_json"])) if saved["request_sha256"] == digest else _error(409, "IDEMPOTENCY_CONFLICT")
         expense_id = "exp_" + uuid.uuid4().hex
         record = {**data, "id": expense_id, "owner_id": user["id"], "revision": 1,
                   "created_at": stamp, "updated_at": stamp, "deleted_at": None}
         payload = _dto(record)
+        if assistance is not None:
+            payload["assistance"] = assistance
         values = [record[name] for name in ("id", "owner_id", "target_kind", "project_id", "category_id",
             "occurred_on", "amount_minor", "currency", "purpose", "note", "quantity_decimal", "unit",
             "revision", "created_at", "updated_at", "deleted_at")]
@@ -277,6 +305,8 @@ async def _write(binding, gateway, method, item_id, headers, data, now):
     if method == "PATCH":
         record = {**current, **data, "revision": expected + 1, "updated_at": stamp}
         after = _dto(record)
+        if assistance is not None:
+            after["assistance"] = assistance
         sql = """UPDATE expenses SET target_kind=?,project_id=?,category_id=?,occurred_on=?,
           amount_minor=?,currency=?,purpose=?,note=?,quantity_decimal=?,unit=?,revision=revision+1,
           updated_at=? WHERE id=? AND owner_id=? AND revision=? AND deleted_at IS NULL"""
@@ -313,3 +343,22 @@ async def _write(binding, gateway, method, item_id, headers, data, now):
     except Exception:
         return _error(412, "PRECONDITION_FAILED")
     return (200, after) if method == "PATCH" else (204, None)
+
+
+async def _automatic_assistance(binding, headers, data, now, gateway, item_id):
+    """Use the ordinary expense-write authorization; inference never writes money."""
+    if gateway is None or not gateway.enabled:
+        return {"status": "unavailable", "reason": "disabled", "suggestions": {},
+            "categorySource": "user" if data["category_id"] else None}
+    from .cloudflare_ledger_suggestions import handle_suggestion_request
+    status, result = await handle_suggestion_request(binding=binding, method="POST",
+        headers=headers, now=now, gateway=gateway, scope="expenses:write",
+        exclude_expense_id=item_id, body={"target": {"kind": data["target_kind"],
+            **({"projectId": data["project_id"]} if data["project_id"] else {})},
+            "purpose": data["purpose"], "note": data["note"] or "",
+            "occurredOn": data["occurred_on"], "amount": _decimal_amount(data["amount_minor"], data["currency"]),
+            "currency": data["currency"]})
+    if status != 200:
+        return {"status": "unavailable", "reason": result.get("error", {}).get("code", "unavailable"),
+            "suggestions": {}, "categorySource": "user" if data["category_id"] else None}
+    return {**result, "categorySource": "user" if data["category_id"] else None}

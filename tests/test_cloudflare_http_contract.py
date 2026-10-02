@@ -25,7 +25,7 @@ def _request(binding, *, method, path, raw=b"", signature=None, secret="syntheti
         headers["creem-signature"] = signature
     result = asyncio.run(handle_http_request(method=method, path=path,
         headers=headers, read_body=read_body, binding=binding,
-        creem_secret=secret, configured_products=products or {"pro": (), "max": ()},
+        creem_secret=secret, configured_products=products or {"pro": {}, "max": {}},
         now=1800000000))
     return result, reads
 

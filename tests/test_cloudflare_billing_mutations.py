@@ -8,6 +8,7 @@ from pathlib import Path
 from test_cloudflare_github_identity_http import Store, D1ShapedSQLite
 from pullwise_server.cloudflare_billing_mutations import handle_billing_mutation
 from pullwise_server.cloudflare_billing_catalog_refresh import read_or_refresh_catalog
+from pullwise_server.cloudflare_creem_gateway import CreemRequestRejected
 
 
 PRODUCTS = {"pro": {"month": "prod-pro-month", "year": "prod-pro-year"},
@@ -94,6 +95,63 @@ class BillingMutationTests(unittest.TestCase):
         status, _ = self.call("/billing/checkout-sessions", {"successUrl": 42})
         self.assertEqual(status, 422)
         self.assertEqual(self.gateway.calls, [])
+
+    def test_upgrade_waits_for_signed_confirmation_and_coalesces_pending_requests(self):
+        self.user["billing"] = {"provider": "creem", "plan": "pro", "interval": "month",
+                                "status": "active", "subscriptionId": "sub_1"}
+        self._save_user()
+        status, payload = self.call("/billing/change-interval", {"plan": "max", "interval": "month"})
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["pending"])
+        with self.store.connect() as db:
+            saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])["owner"]
+        self.assertEqual(saved["billing"]["plan"], "pro")
+        self.assertEqual(saved["billingChange"]["plan"], "max")
+        status, repeated = self.call("/billing/change-interval", {"plan": "max", "interval": "month"})
+        self.assertEqual(status, 200)
+        self.assertTrue(repeated["pending"])
+        self.assertEqual(len(self.gateway.calls), 1)
+
+    def test_non_string_plan_and_interval_are_rejected_without_provider_calls(self):
+        for field in ("plan", "interval"):
+            for value in ([], {}, True, 1):
+                status, _ = self.call("/billing/checkout-sessions", {field: value})
+                self.assertEqual(status, 422)
+        self.assertEqual(self.gateway.calls, [])
+
+    def test_unknown_upgrade_response_keeps_claim_so_retry_cannot_double_charge(self):
+        self.user["billing"] = {"provider": "creem", "plan": "pro", "interval": "month",
+                                "status": "active", "subscriptionId": "sub_1"}
+        self._save_user()
+
+        async def lose_response(path, payload):
+            self.gateway.calls.append((path, payload))
+            raise TimeoutError("provider response was lost")
+
+        self.gateway.post = lose_response
+        with self.assertRaises(TimeoutError):
+            self.call("/billing/change-interval", {"plan": "max", "interval": "month"})
+        status, repeated = self.call("/billing/change-interval", {"plan": "max", "interval": "month"})
+        self.assertEqual(status, 200)
+        self.assertTrue(repeated["pending"])
+        self.assertEqual(len(self.gateway.calls), 1)
+
+    def test_definitively_rejected_upgrade_releases_pending_claim(self):
+        self.user["billing"] = {"provider": "creem", "plan": "pro", "interval": "month",
+                                "status": "active", "subscriptionId": "sub_1"}
+        self._save_user()
+
+        async def reject_request(path, payload):
+            self.gateway.calls.append((path, payload))
+            raise CreemRequestRejected("provider rejected request")
+
+        self.gateway.post = reject_request
+        with self.assertRaises(CreemRequestRejected):
+            self.call("/billing/change-interval", {"plan": "max", "interval": "month"})
+        with self.store.connect() as db:
+            saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])["owner"]
+        self.assertNotIn("billingChange", saved)
+        self.assertEqual(saved["billing"]["plan"], "pro")
 
     def test_catalog_refresh_uses_configured_products_and_reuses_fresh_snapshot(self):
         with self.store.connect() as db:

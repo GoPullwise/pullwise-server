@@ -9,11 +9,12 @@ from contextlib import closing
 import pytest
 
 from pullwise_server.cloudflare_creem_handler import accept_signed_creem_webhook
+from pullwise_server.cloudflare_account_adapter import D1AccountTransactions
 from ledger_d1_fixture import D1ShapedSQLite
 from ledger_d1_fixture import seed
 
 
-PRODUCTS = {"pro": ("prod-pro",), "max": ("prod-max",)}
+PRODUCTS = {"pro": {"month": "prod-pro"}, "max": {"month": "prod-max"}}
 
 
 def _signed(raw: bytes) -> str:
@@ -134,3 +135,21 @@ def test_ambiguous_customer_binding_does_not_charge_an_arbitrary_owner(tmp_path)
             "WHERE event_id='evt-ambiguous'").fetchone()[0] == "pending"
         assert db.execute("SELECT revision FROM account_entitlement_authority").fetchone()[0] == 1
         assert db.execute("SELECT payload FROM app_state WHERE name='billingEvents'").fetchone()[0] == '{"event_fixture":{"status":"processed"}}'
+
+
+def test_metadata_owner_cannot_override_a_subscription_bound_to_another_account(tmp_path):
+    fixture, _, frozen = seed(tmp_path / "domain.db")
+    binding = D1ShapedSQLite(fixture.store)
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE app_state SET payload=? WHERE name='users'",
+            (json.dumps({"owner": json.loads(frozen), "another": {"id": "another"}}),))
+    asyncio.run(D1AccountTransactions(binding).initialize_account(owner_id="another", now=fixture.now))
+    raw = b'{"id":"evt-conflicting-owner","eventType":"subscription.canceled","object":{"id":"sub_fixture","metadata":{"userId":"another"}}}'
+    with pytest.raises(ValueError, match="ambiguous"):
+        asyncio.run(accept_signed_creem_webhook(binding=binding,
+            raw_body=raw, signature=_signed(raw), secret="synthetic-secret",
+            configured_products=PRODUCTS, now=fixture.now))
+    with closing(fixture.store.connect()) as db:
+        users = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])
+        assert users["owner"] == json.loads(frozen)
+        assert users["another"] == {"id": "another"}

@@ -6,7 +6,8 @@ import re
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
-from .cloudflare_github_identity_http import _session_user, _redirect, _write_user
+from .cloudflare_github_identity_http import _session_user, _redirect, _write_user, _user
+from .cloudflare_creem_gateway import CreemRequestRejected
 from .cloudflare_principal import _header
 
 PAID = {"pro": 1, "max": 2}
@@ -60,6 +61,9 @@ async def handle_billing_mutation(*, binding: Any, gateway: Any, now: int,
         return 403, {"error": {"code": "UNTRUSTED_ORIGIN"}}
     if not isinstance(body, dict) or not isinstance(products, dict):
         return 422, {"error": {"code": "INVALID_REQUEST"}}
+    if any(name in body and not isinstance(body[name], str)
+           for name in ("plan", "interval", "mode")):
+        return 422, {"error": {"code": "INVALID_REQUEST"}}
     billing = user.get("billing") if isinstance(user.get("billing"), dict) else {}
     plan = billing.get("plan") or "free"
     interval = billing.get("interval") or "month"
@@ -104,6 +108,15 @@ async def handle_billing_mutation(*, binding: Any, gateway: Any, now: int,
             not re.fullmatch(r"[A-Za-z0-9_-]{3,128}", subscription_id) or plan not in PAID):
         return 409, {"error": {"code": "NO_PAID_SUBSCRIPTION"}}
     status = billing.get("status")
+    change = user.get("billingChange") if isinstance(user.get("billingChange"), dict) else {}
+    if change and change.get("subscriptionId") == subscription_id:
+        if (path == "/billing/change-interval" and
+                (body.get("plan") or plan) == change.get("plan") and
+                (body.get("interval") or "year") == change.get("interval")):
+            return 200, {"provider": "creem", "plan": change["plan"],
+                         "interval": change["interval"], "pending": True,
+                         "subscriptionId": subscription_id}
+        return 409, {"error": {"code": "SUBSCRIPTION_CHANGE_PENDING"}}
     if path == "/billing/cancel-subscription":
         if body.get("mode", "scheduled") != "scheduled":
             return 422, {"error": {"code": "INVALID_CANCEL_MODE"}}
@@ -133,9 +146,24 @@ async def handle_billing_mutation(*, binding: Any, gateway: Any, now: int,
         product_id = _product(products, target_plan, target_interval)
         if not product_id:
             return 503, {"error": {"code": "BILLING_NOT_CONFIGURED"}}
-        result = await gateway.post(f"v1/subscriptions/{subscription_id}/upgrade",
-            {"product_id": product_id, "update_behavior": "proration-charge-immediately"})
-        plan, interval = target_plan, target_interval
+        # Claim the change before sending a potentially chargeable provider request.
+        # A lost response remains pending; retrying it must not charge a second time.
+        claimed_user = {**user, "billingChange": {"plan": target_plan,
+            "interval": target_interval, "subscriptionId": subscription_id,
+            "requestedAt": now}}
+        await _write_user(binding, claimed_user, now, expected_user=user)
+        try:
+            result = await gateway.post(f"v1/subscriptions/{subscription_id}/upgrade",
+                {"product_id": product_id, "update_behavior": "proration-charge-immediately"})
+        except CreemRequestRejected:
+            # Clear only our rejected claim, preserving any concurrent identity/webhook update.
+            latest = await _user(binding, user["id"])
+            if latest and latest.get("billingChange") == claimed_user["billingChange"]:
+                restored = {key: value for key, value in latest.items() if key != "billingChange"}
+                await _write_user(binding, restored, now, expected_user=latest)
+            raise
+        _, public = _subscription_result(result, billing, plan=target_plan, interval=target_interval)
+        return 200, {**public, "pending": True}
     next_billing, public = _subscription_result(result, billing, plan=plan, interval=interval)
     await _write_user(binding, {**user, "billing": next_billing}, now, expected_user=user)
     return 200, public

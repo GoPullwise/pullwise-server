@@ -2,6 +2,40 @@
 
 Updated 2026-10-02. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
 
+## Product audit and automatic Max assistance (2026-10-02)
+
+The current audit covers platform checkout/subscription facts, REST authorization,
+expense integrity and idempotency, exact reports, Web workflows, pricing and
+public documentation. Every behavioral repair has a failing regression followed
+by the same passing check; copy/documentation alignment follows the verified
+behavior. No schema or database migration is required.
+
+| Area | Verified repair |
+| --- | --- |
+| Max / REST | Ordinary expense POST/PATCH includes assistance for Max and expense-write keys; create can omit category. Confidence-gated existing categories only; explicit money, category and target stay authoritative. |
+| Inference failures | Manual-category writes remain usable on provider failure, daily/monthly Jev exhaustion or absent configuration. Auxiliary model bookkeeping no longer consumes business-write slots; monthly provider reservation remains conservative. |
+| Replay and authority | Caller intent is hashed before inference. Exact replay returns the saved result without provider/quota work, including after archival. Expired Max, restricted/revoked keys and concurrent category archival remain fenced. |
+| Money | Split SQL integer aggregates reconstruct exact Python totals; totals exceeding JavaScript's safe integer use decimal strings. Project PATCH preserves totals. |
+| Payment | Claim upgrades before chargeable dispatch, retain unknown outcomes, wait for signed payment facts before granting Max. Verified product/subscription IDs and owner association are required; historical events cannot overwrite the current subscription. Missing terminal cadence preserves annual history. |
+| Security | Trusted Origin is required for Cookie writes in all SameSite modes, including malformed Authorization. Jev rejects redirects and bounds timeout/body size. Provider exception text is excluded from preview diagnostics. |
+
+The full Python 3.10.12 suite passed **356 tests**, with cached PyYAML 6.0.3
+available and one finite loopback fixture allowed by the execution sandbox.
+Two subsequently added expiry/concurrent-archival cases passed in the same
+16-case automatic-assistance suite. Default/preview/production static checks,
+source mirror/import closure and shell syntax passed. Pinned Python 3.14.2 /
+workers-py 1.17.4 / Wrangler 4.136.3 preview packaging passed; it includes the
+new exact-money module.
+
+Four bounded Cloudflare management GETs confirmed original databases, the fixed
+preview budget namespace, preview product access 1, production access 0 and both
+Jev flags 0. Both Workers lacked TYPESAFE_API_KEY at that inspection. The user
+will configure the preview Secret. Its value must never be read back or logged.
+Real Jev quality/runtime and real payment/login acceptance remain separate from
+synthetic local tests. Do not claim the model is live or change production D1
+pause based on this implementation evidence. Publication and CI evidence follow
+after the authorized commit, push and deployment.
+
 ## Preview repository identity failure (2026-10-02)
 
 The user's existing browser record confirms GET

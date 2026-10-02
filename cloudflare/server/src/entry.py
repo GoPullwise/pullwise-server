@@ -119,10 +119,8 @@ class _Application:
         if path.startswith(("/api/v1/projects", "/api/v1/categories",
                             "/api/v1/expenses", "/api/v1/reports/",
                             "/api/v1/expense-suggestions")):
-            if request.method in {"POST", "PATCH", "DELETE"} and (
-                    getattr(self.env, "PULLWISE_COOKIE_SAME_SITE", "Lax").casefold() == "none"
-                    and headers["Cookie"] and not headers["Authorization"]
-                    and not headers["X-Pullwise-Api-Key"]):
+            from pullwise_server.cloudflare_principal import _cookie_sessions
+            if request.method in {"POST", "PATCH", "DELETE"} and _cookie_sessions(headers):
                 from urllib.parse import urlsplit as split_origin
                 origin = split_origin(headers["Origin"] or headers["Referer"])
                 if f"{origin.scheme}://{origin.netloc}" not in trusted_origins:
@@ -186,19 +184,8 @@ class _Application:
                     if frames:
                         frame = frames[-1]
                         payload["error"]["diagnosticSite"] = f"{type(error).__name__}:{frame.name}:{frame.lineno}"
-                    reason = str(error)
-                    if type(error).__name__ == "JsException":
-                        safe = reason
-                        for name in ("PULLWISE_CREEM_API_KEY", "PULLWISE_CREEM_WEBHOOK_SECRET",
-                                     "PULLWISE_GITHUB_CLIENT_SECRET", "PULLWISE_GITHUB_TOKEN_KEY"):
-                            secret = str(getattr(self.env, name, ""))
-                            if secret:
-                                safe = safe.replace(secret, "[redacted]")
-                        payload["error"]["transportDiagnostic"] = safe.splitlines()[0][:180]
-                    allowed = {"unverified Creem product", "invalid Creem price period or currency",
-                               "conflicting Creem currencies", "Creem request is not configured or path is invalid"}
-                    if reason in allowed or reason.startswith("Creem HTTP ") and reason[11:].isdigit():
-                        payload["error"]["diagnostic"] = reason
+                    # Provider exception text can contain arbitrary credentials
+                    # and body fragments; only the fixed code/type/site is safe.
             return Response.json(payload, status=status, headers={"Cache-Control": "no-store"})
         if path in {"/billing/checkout-sessions", "/billing/change-interval",
                     "/billing/cancel-subscription", "/billing/resume-subscription"}:

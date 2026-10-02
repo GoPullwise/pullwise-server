@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 
 from .cloudflare_ledger_api import _error, _write_guard
 from .cloudflare_ledger_auth import ledger_principal
@@ -24,7 +24,7 @@ def _draft(body):
         return None
     purpose, note, target = body.get("purpose"), body.get("note", ""), body.get("target")
     if (not isinstance(purpose, str) or not 1 <= len(purpose.strip()) <= 500
-            or not isinstance(note, str) or len(note) > 1000 or not isinstance(target, dict)):
+            or not isinstance(note, str) or len(note) > 4000 or not isinstance(target, dict)):
         return None
     kind = target.get("kind")
     project_id = target.get("projectId")
@@ -65,19 +65,21 @@ def suggestion_questions(categories):
     return questions
 
 
-async def handle_suggestion_request(*, binding, method, headers, body, now, gateway):
+async def handle_suggestion_request(*, binding, method, headers, body, now, gateway,
+                                    scope="suggestions:use", exclude_expense_id=None):
     if method != "POST":
         return _error(405, "METHOD_NOT_ALLOWED")
     draft = _draft(body)
     if draft is None:
         return _error(422, "INVALID_INPUT")
     purpose, note, target_kind, project_id, occurred, minor, currency = draft
-    start = (date.fromisoformat(occurred) - timedelta(days=7)).isoformat() if occurred else None
-    end = (date.fromisoformat(occurred) + timedelta(days=7)).isoformat() if occurred else None
+    day_date = date.fromisoformat(occurred) if occurred else None
+    start = date.fromordinal(max(date.min.toordinal(), day_date.toordinal() - 7)).isoformat() if day_date else None
+    end = date.fromordinal(min(date.max.toordinal(), day_date.toordinal() + 7)).isoformat() if day_date else None
     proof = {}
     try:
         user, _, auth, validate = await ledger_principal(binding=binding, headers=headers,
-            scope="suggestions:use", now=now, target_kind=target_kind, project_id=project_id,
+            scope=scope, now=now, target_kind=target_kind, project_id=project_id,
             proof=proof)
         if gateway is not None and gateway.enabled and effective_user_plan(user, timestamp=now) != "max":
             return _error(403, "MAX_REQUIRED")
@@ -85,9 +87,10 @@ async def handle_suggestion_request(*, binding, method, headers, body, now, gate
             WHERE owner_id=? AND archived_at IS NULL ORDER BY name,id LIMIT 30""").bind(user["id"]),
             binding.prepare("""SELECT id,purpose FROM expenses WHERE owner_id=? AND deleted_at IS NULL
             AND target_kind=? AND (project_id=? OR (project_id IS NULL AND ? IS NULL))
-            AND occurred_on BETWEEN ? AND ? AND amount_minor=? AND currency=?
+            AND occurred_on BETWEEN ? AND ? AND amount_minor=? AND currency=? AND id!=?
             ORDER BY occurred_on DESC,id DESC LIMIT 30""").bind(
-                user["id"], target_kind, project_id, project_id, start, end, minor, currency)]
+                user["id"], target_kind, project_id, project_id, start, end, minor, currency,
+                exclude_expense_id or "")]
         if project_id:
             commands.append(binding.prepare("""SELECT id FROM ledger_projects
                 WHERE owner_id=? AND id=?""").bind(user["id"], project_id))
@@ -102,8 +105,14 @@ async def handle_suggestion_request(*, binding, method, headers, body, now, gate
         return 200, {"status": "unavailable", "reason": "disabled", "suggestions": {}}
     if not categories:
         return 200, {"status": "unavailable", "reason": "no_categories", "suggestions": {}}
+    questions = suggestion_questions(categories)
+    try:
+        request = build_request(state={"purpose": purpose, "note": note},
+            questions=questions, model=DEFAULT_JEV_MODEL)
+    except (ValueError, UnicodeError):
+        return 200, {"status": "unavailable", "reason": "invalid_context", "suggestions": {}}
     day = datetime.fromtimestamp(now, timezone.utc).date().isoformat()
-    limit = max(1, min(20, int(getattr(gateway, "daily_limit", 10))))
+    limit = max(1, min(100, int(getattr(gateway, "daily_limit", 100))))
     try:
         attempt = await binding.batch([_write_guard(binding, proof, user["id"], now),
             binding.prepare("""INSERT INTO expense_suggestion_budget(owner_id,day,attempts)
@@ -116,9 +125,6 @@ async def handle_suggestion_request(*, binding, method, headers, body, now, gate
         return _error(409, "AUTHORIZATION_CHANGED")
     if not attempt[-2].results:
         return 429, {"error": {"code": "SUGGESTION_LIMIT"}}
-    questions = suggestion_questions(categories)
-    request = build_request(state={"purpose": purpose, "note": note},
-        questions=questions, model=DEFAULT_JEV_MODEL)
     outcome = "unavailable"
     suggestions = {}
     category_probs = target_probs = None

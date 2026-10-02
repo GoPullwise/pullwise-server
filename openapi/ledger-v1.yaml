@@ -117,6 +117,15 @@ paths:
     post:
       operationId: createExpense
       x-pullwise-scope: expenses:write
+      description: |
+        Max automatically receives Jev assistance within this ordinary write, for
+        Cookie sessions and expenses:write API keys alike. categoryId may be omitted
+        on create: a confident existing account category is then selected. Explicit
+        categories, targets, money and dates are never changed by inference. If a
+        category cannot be selected, 422 CATEGORY_REQUIRED preserves the draft and
+        returns assistance for manual completion. Provider failure or exhausted Jev
+        budget does not block a write with an explicit category. Idempotent replay
+        returns the stored result without another model call or budget reservation.
       parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ExpenseInput'}}}}
       responses:
@@ -144,9 +153,9 @@ paths:
     patch:
       operationId: updateExpense
       x-pullwise-scope: expenses:write
-      description: Moving an expense checks write authority on both old and new targets.
+      description: Moving an expense checks write authority on both old and new targets. Max gets automatic advisory assistance; categoryId remains required and existing values are never changed by inference.
       parameters: [{$ref: '#/components/parameters/IfMatch'}]
-      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ExpenseInput'}}}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ExpensePatchInput'}}}}
       responses:
         '429': {$ref: '#/components/responses/RateLimited'}
         '200': {description: Updated expense, content: {application/json: {schema: {$ref: '#/components/schemas/Expense'}}}}
@@ -188,8 +197,8 @@ paths:
     post:
       operationId: suggestExpense
       x-pullwise-scope: suggestions:use
-      description: Optional advice only; never writes an expense. Disabled unless explicitly evaluated and enabled. At most ten calls per account per UTC day by default.
-      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [purpose, target], properties: {purpose: {type: string, maxLength: 500}, note: {type: string, maxLength: 1000}, occurredOn: {type: string, format: date}, amount: {type: string, description: Decimal amount in selected currency}, currency: {type: string, pattern: "^[A-Z]{3}$"}, target: {$ref: '#/components/schemas/Target'}}}}}}
+      description: Advanced draft advice only; ordinary expense writes already include Max assistance without this endpoint or its scope. Never writes an expense. Disabled unless evaluated and enabled. Shares the account limit of 100 attempts per UTC day and monthly Jev reservation with automatic assistance.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [purpose, target], properties: {purpose: {type: string, maxLength: 500}, note: {type: string, maxLength: 4000}, occurredOn: {type: string, format: date}, amount: {type: string, description: Decimal amount in selected currency}, currency: {type: string, pattern: "^[A-Z]{3}$"}, target: {$ref: '#/components/schemas/Target'}}}}}}
       responses:
         '200': {description: Status, optional suggestionId, candidates and probabilities; never an expense write, content: {application/json: {schema: {type: object, properties: {status: {type: string, enum: [available, uncertain, unavailable]}, suggestionId: {type: string}, questionVersion: {type: string}, modelVersion: {type: [string, 'null']}, suggestions: {type: object, properties: {categoryId: {type: string}, targetKind: {type: string}, duplicateExpenseId: {type: string}}}, probabilities: {type: object}}}}}}
         '403': {$ref: '#/components/responses/Forbidden'}
@@ -227,7 +236,7 @@ components:
     NotFound: {description: Resource absent or belongs to another account}
     Conflict: {description: Idempotency conflict or a quota window changed; reload before retrying}
     PreconditionFailed: {description: Revision does not match If-Match}
-    InvalidInput: {description: Invalid or missing field}
+    InvalidInput: {description: Invalid or missing field. CATEGORY_REQUIRED on create may include top-level assistance when Max inference cannot confidently select an existing category. No expense is saved in that case.}
     RateLimited: {description: Account write rate, monthly write allowance or Jev budget exhausted}
   schemas:
     Me:
@@ -325,21 +334,42 @@ components:
         archivedAt: {type: [string, 'null'], format: date-time}
     ExpenseInput:
       type: object
-      required: [target, occurredOn, amount, currency, categoryId, purpose]
+      required: [target, occurredOn, amount, currency, purpose]
       properties:
         target: {$ref: '#/components/schemas/Target'}
         occurredOn: {type: string, format: date}
         amount: {type: string, pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$', description: Currency exponent and safe integer bound enforced by server}
         currency: {type: string, pattern: '^[A-Z]{3}$'}
-        categoryId: {type: string}
+        categoryId: {type: [string, 'null'], description: Required for Free/Pro. Omit on Max create to select a confident existing category automatically; unavailable or uncertain inference returns CATEGORY_REQUIRED. An explicit nonempty value is always preserved.}
         purpose: {type: string, minLength: 1, maxLength: 500}
         note: {type: [string, 'null'], maxLength: 4000}
         quantity: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$'}
         unit: {type: [string, 'null'], maxLength: 40}
+    ExpensePatchInput:
+      allOf:
+        - {$ref: '#/components/schemas/ExpenseInput'}
+        - {type: object, required: [categoryId], properties: {categoryId: {type: string, minLength: 1}}}
+    ExpenseAssistance:
+      type: object
+      required: [status, suggestions, categorySource]
+      properties:
+        status: {type: string, enum: [available, uncertain, unavailable]}
+        reason: {type: string, description: Provider configuration or daily/monthly budget fallback code; advisory only}
+        categorySource: {type: [string, 'null'], enum: [user, jev, null]}
+        suggestionId: {type: string}
+        questionVersion: {type: string}
+        modelVersion: {type: [string, 'null']}
+        suggestions:
+          type: object
+          properties:
+            categoryId: {type: string, description: Confident existing category; only assigned on create when caller omits categoryId}
+            targetKind: {type: string, enum: [project, shared], description: Advice only; never moves an expense}
+            duplicateExpenseId: {type: string, description: Matching active expense on the same authorized target, currency and amount within seven days; advisory only}
+        probabilities: {type: object}
     Expense:
       allOf:
         - {$ref: '#/components/schemas/ExpenseInput'}
-        - {type: object, required: [id, amountMinor, revision, createdAt, updatedAt], properties: {id: {type: string}, amountMinor: {type: integer, minimum: 0, maximum: 9007199254740991}, revision: {type: integer, minimum: 1}, createdAt: {type: string, format: date-time}, updatedAt: {type: string, format: date-time}}}
+        - {type: object, required: [id, categoryId, amountMinor, revision, createdAt, updatedAt], properties: {id: {type: string}, categoryId: {type: string, minLength: 1}, amountMinor: {type: integer, minimum: 0, maximum: 9007199254740991}, revision: {type: integer, minimum: 1}, createdAt: {type: string, format: date-time}, updatedAt: {type: string, format: date-time}, assistance: {$ref: '#/components/schemas/ExpenseAssistance'}}}
     ExpensePage:
       type: object
       required: [items, nextCursor]
@@ -351,7 +381,12 @@ components:
       required: [currency, amountMinor]
       properties:
         currency: {type: string, pattern: '^[A-Z]{3}$'}
-        amountMinor: {type: integer, minimum: 0}
+        amountMinor: {$ref: '#/components/schemas/AggregateMinor'}
+    AggregateMinor:
+      description: Exact total in minor currency units. Totals above the JSON safe integer bound use a decimal integer string; clients must not convert those strings to floating point.
+      oneOf:
+        - {type: integer, minimum: 0, maximum: 9007199254740991}
+        - {type: string, pattern: '^[0-9]+$'}
     Report:
       type: object
       required: [groups]
@@ -367,4 +402,4 @@ components:
               categoryId: {type: [string, 'null']}
               bucket: {type: [string, 'null']}
               currency: {type: string}
-              amountMinor: {type: integer, minimum: 0}
+              amountMinor: {$ref: '#/components/schemas/AggregateMinor'}

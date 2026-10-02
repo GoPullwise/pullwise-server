@@ -41,6 +41,7 @@ class CsvExport:
 from .cloudflare_ledger_api import _error, _param
 from .cloudflare_ledger_auth import ledger_principal, target_allowed
 from .cloudflare_principal import PrincipalAuthError
+from .ledger_money_totals import AGGREGATE_SQL, aggregate_minor, public_minor
 
 
 def expense_filter(params: Mapping[str, object], *, paged: bool = False):
@@ -143,7 +144,7 @@ async def handle_report_request(*, binding, method, path, headers, params, now):
             else:
                 dimensions = "target_kind,project_id,category_id,currency"
                 projection = "target_kind,project_id,category_id,NULL AS bucket,currency"
-            sql = (f"SELECT {projection},SUM(amount_minor) AS amount_minor FROM expenses "
+            sql = (f"SELECT {projection},{AGGREGATE_SQL} FROM expenses "
                    "WHERE owner_id=? AND deleted_at IS NULL " + where + " " + restricted +
                    f" GROUP BY {dimensions}")
         parts = await binding.batch([*auth, binding.prepare(sql).bind(user["id"], *values, *restricted_values)])
@@ -176,8 +177,8 @@ async def handle_report_request(*, binding, method, path, headers, params, now):
         else:
             keys = [(target, project_id, row["category_id"], None, row["currency"])]
         for key in keys:
-            groups[key] = groups.get(key, 0) + row["amount_minor"]
+            groups[key] = groups.get(key, 0) + aggregate_minor(row)
     return 200, {"groups": [{"target": target, "projectId": project_id,
         "categoryId": category_id, "bucket": time_bucket, "currency": currency,
-        "amountMinor": amount} for (target, project_id, category_id, time_bucket, currency), amount
+        "amountMinor": public_minor(amount)} for (target, project_id, category_id, time_bucket, currency), amount
         in sorted(groups.items(), key=lambda item: tuple(part or "" for part in item[0]))]}

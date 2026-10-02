@@ -92,7 +92,7 @@ def creem_event_customer_payload(*values: object) -> dict:
 
 def creem_product_configured_for_plan(product: dict | None, plan: str, configured_ids_by_plan: dict) -> bool:
     product_id = object_id(product)
-    return bool(product_id and product_id in configured_ids_by_plan.get(plan, ()))
+    return bool(product_id and product_id in configured_ids_by_plan.get(plan, {}).values())
 
 
 
@@ -101,7 +101,7 @@ def creem_plan_from_product(product: dict | None, configured_ids_by_plan: dict) 
     if not product_id:
         return None
     for plan in PAID_PLAN_IDS:
-        if product_id in configured_ids_by_plan.get(plan, ()):
+        if product_id in configured_ids_by_plan.get(plan, {}).values():
             return plan
     return None
 
@@ -169,7 +169,7 @@ def billing_update_from_creem_event(event: dict, configured_ids_by_plan: dict) -
     subscription_id = creem_event_subscription_id(event_type, obj, subscription, transaction, checkout)
     if event_type in {"refund.created", "dispute.created"} and not subscription_id:
         return None
-    if not user_id and not customer_id and not request_id:
+    if not user_id and not customer_id and not subscription_id and not request_id:
         return None
 
     subscription_item = first_subscription_item(subscription, order) if isinstance(subscription, dict) else {}
@@ -187,15 +187,21 @@ def billing_update_from_creem_event(event: dict, configured_ids_by_plan: dict) -
     )
     if event_type == "refund.created" and status != "canceled":
         return None
-    if status in PAID_PLAN_ENTITLEMENT_STATUSES and object_id(product) and not product_plan:
+    if status in PAID_PLAN_ENTITLEMENT_STATUSES and (not product_plan or not subscription_id):
         return None
     if plan in PAID_PLAN_IDS and status in PAID_PLAN_ENTITLEMENT_STATUSES and not creem_product_configured_for_plan(product, plan, configured_ids_by_plan):
         return None
-    interval = normalize_interval(
-        interval_from_creem_product(product, configured_ids_by_plan)
-        or metadata_value("interval", metadata, checkout_metadata, order_metadata, subscription_metadata)
-        or "month"
-    )
+    interval = interval_from_creem_product(product, configured_ids_by_plan)
+    if interval is None:
+        metadata_interval = text_payload(metadata_value("interval", metadata,
+            checkout_metadata, order_metadata, subscription_metadata), "").strip().lower()
+        # Missing cadence is an absent payment fact, never an implied monthly plan.
+        interval = metadata_interval if metadata_interval in {"month", "year"} else None
+    cancel_at_period_end = subscription.get("cancel_at_period_end")
+    if status == "canceling":
+        cancel_at_period_end = True
+    elif status in {"active", "trialing"}:
+        cancel_at_period_end = cancel_at_period_end if isinstance(cancel_at_period_end, bool) else False
     return {
         "userId": user_id,
         "requestId": request_id or None,
@@ -209,8 +215,8 @@ def billing_update_from_creem_event(event: dict, configured_ids_by_plan: dict) -
         "interval": interval,
         "currentPeriodStart": subscription.get("current_period_start_date") if isinstance(subscription, dict) else None,
         "currentPeriodEnd": subscription.get("current_period_end_date") if isinstance(subscription, dict) else None,
-        "cancelAtPeriodEnd": subscription.get("cancel_at_period_end") if isinstance(subscription, dict) else None,
-        "canceledAt": subscription.get("canceled_at") if isinstance(subscription, dict) else None,
+        "cancelAtPeriodEnd": cancel_at_period_end,
+        "canceledAt": None if status in {"active", "trialing"} else subscription.get("canceled_at"),
         "eventType": event_type,
         "eventId": event.get("id") or event.get("eventId"),
         "eventCreated": event_created(event),
@@ -293,11 +299,9 @@ def interval_from_configured_creem_product_id(product_id: object, configured_ids
         return None
     normalized_product_id = product_id.strip()
     for plan in PAID_PLAN_IDS:
-        configured_ids = list(configured_ids_by_plan.get(plan, ()))
-        if configured_ids[:1] == [normalized_product_id]:
-            return "month"
-        if len(configured_ids) > 1 and configured_ids[1] == normalized_product_id:
-            return "year"
+        for interval, configured_id in configured_ids_by_plan.get(plan, {}).items():
+            if configured_id == normalized_product_id and interval in {"month", "year"}:
+                return interval
     return None
 
 

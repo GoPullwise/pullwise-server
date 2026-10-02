@@ -127,8 +127,9 @@ def test_session_delete_revokes_api_key_without_usage_or_model_write(tmp_path):
 
     status, payload = asyncio.run(handle_http_request(method="DELETE",
         path="/api-keys/key-local",
-        headers={"Cookie": "pw_session=session-local"}, read_body=no_body,
-        binding=binding, creem_secret="", configured_products={}, now=fixture.now))
+        headers={"Cookie": "pw_session=session-local", "Origin": "https://app.example"}, read_body=no_body,
+        binding=binding, creem_secret="", configured_products={}, now=fixture.now,
+        trusted_origins={"https://app.example"}))
     assert status == 200 and payload == {"ok": True, "id": "key-local", "revoked": True}
     assert get(binding, {"Cookie": "pw_session=session-local"}, fixture.now)[1]["items"] == []
     with fixture.store._immediate() as db:
@@ -155,8 +156,9 @@ def test_api_key_delete_rolls_back_if_session_changes_before_write(tmp_path):
 
     status, payload = asyncio.run(handle_http_request(method="DELETE",
         path="/api-keys/key-local",
-        headers={"Cookie": "pw_session=session-local"}, read_body=no_body,
-        binding=binding, creem_secret="", configured_products={}, now=fixture.now))
+        headers={"Cookie": "pw_session=session-local", "Origin": "https://app.example"}, read_body=no_body,
+        binding=binding, creem_secret="", configured_products={}, now=fixture.now,
+        trusted_origins={"https://app.example"}))
     assert status == 409 and payload["error"]["code"] == "AUTHORIZATION_CHANGED"
     with fixture.store._immediate() as db:
         assert db.execute("SELECT revoked_at FROM api_keys WHERE id='key-local'").fetchone()[0] is None
@@ -192,8 +194,9 @@ def test_session_create_returns_one_time_key_and_persists_only_hash(tmp_path):
 
     status, created = asyncio.run(handle_http_request(method="POST",
         path="/api-keys", headers={"Cookie": "pw_session=session-local",
-            "Content-Length": str(len(body))}, read_body=read_body,
-        binding=binding, creem_secret="", configured_products={}, now=fixture.now))
+            "Origin": "https://app.example", "Content-Length": str(len(body))}, read_body=read_body,
+        binding=binding, creem_secret="", configured_products={}, now=fixture.now,
+        trusted_origins={"https://app.example"}))
     assert status == 201 and created["key"].startswith("pwk_")
     assert created["scopes"] == ["expenses:read"]
     assert created["restrictions"] == {"shared": False}
@@ -226,8 +229,9 @@ def test_key_creation_rolls_back_if_session_changes_before_write(tmp_path):
 
     status, payload = asyncio.run(handle_http_request(method="POST",
         path="/api-keys", headers={"Cookie": "pw_session=session-local",
-            "Content-Length": str(len(body))}, read_body=read_body,
-        binding=binding, creem_secret="", configured_products={}, now=fixture.now))
+            "Origin": "https://app.example", "Content-Length": str(len(body))}, read_body=read_body,
+        binding=binding, creem_secret="", configured_products={}, now=fixture.now,
+        trusted_origins={"https://app.example"}))
     assert status == 503 and payload["error"]["code"] == "SERVER_UNAVAILABLE"
     with fixture.store._immediate() as db:
         assert db.execute("SELECT COUNT(*) FROM api_keys").fetchone()[0] == 1
@@ -247,5 +251,27 @@ def test_same_site_none_key_create_rejects_untrusted_origin_before_body(tmp_path
         read_body=no_body, binding=binding, creem_secret="",
         configured_products={}, now=fixture.now,
         cookie_same_site="None", trusted_origins={"https://app.example"}))
+    assert status == 403 and payload["error"]["code"] == "UNTRUSTED_ORIGIN"
+    assert binding.batch_count == 0
+
+
+@pytest.mark.parametrize("method,path", [("POST", "/api-keys"), ("DELETE", "/api-keys/key-local")])
+@pytest.mark.parametrize("same_site", ["Lax", "Strict", "None"])
+@pytest.mark.parametrize("origin", [None, "https://hostile.app.example"])
+def test_every_cookie_key_write_checks_origin_before_body_or_d1(tmp_path, method, path, same_site, origin):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture)
+    binding = D1ShapedSQLite(fixture.store)
+    headers = {"Cookie": "pw_session=session-local", "Content-Length": "2"}
+    if origin:
+        headers["Origin"] = origin
+
+    async def no_body():
+        raise AssertionError("untrusted cookie request must not read body")
+
+    status, payload = asyncio.run(handle_http_request(method=method, path=path,
+        headers=headers, read_body=no_body, binding=binding, creem_secret="",
+        configured_products={}, now=fixture.now, cookie_same_site=same_site,
+        trusted_origins={"https://app.example"}))
     assert status == 403 and payload["error"]["code"] == "UNTRUSTED_ORIGIN"
     assert binding.batch_count == 0

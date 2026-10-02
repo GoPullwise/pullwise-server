@@ -62,7 +62,7 @@ def test_catalog_stage_from_injected_verified_products_keeps_product_id(tmp_path
         "status": "active"}
     adapter = D1BillingCatalogTransactions(D1ShapedSQLite(fixture.store))
     assert asyncio.run(adapter.stage_from_products(
-        configured_ids={"pro": ["prod-pro-month"], "max": []},
+        configured_ids={"pro": {"month": "prod-pro-month"}, "max": {}},
         fetched_products={"prod-pro-month": product}, source_revision=1,
         now=fixture.now, expires_at=fixture.now + 3600))
     with closing(fixture.store.connect()) as db:

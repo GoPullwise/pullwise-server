@@ -12,7 +12,7 @@ def product(product_id, price, period, currency="USD"):
 
 
 def test_verified_catalog_binds_configured_ids_intervals_and_product_capacity():
-    configured = {"pro": ["prod-month", "prod-year"], "max": []}
+    configured = {"pro": {"month": "prod-month", "year": "prod-year"}, "max": {}}
     fetched = {"prod-month": product("prod-month", 2900, "every-month"),
         "prod-year": product("prod-year", 29000, "every-year")}
     result = verified_public_catalog(configured, fetched)
@@ -40,4 +40,4 @@ def test_verified_catalog_binds_configured_ids_intervals_and_product_capacity():
 ])
 def test_verified_catalog_rejects_uncertain_or_conflicting_price_facts(fetched):
     with pytest.raises(ValueError):
-        verified_public_catalog({"pro": ["prod-month", "prod-year"], "max": []}, fetched)
+        verified_public_catalog({"pro": {"month": "prod-month", "year": "prod-year"}, "max": {}}, fetched)
