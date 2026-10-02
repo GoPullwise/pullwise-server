@@ -43,16 +43,17 @@ obtained or tested against GitHub in this investigation.
 Test-first evidence: 23 gateway/identity cases and the new history/target case
 failed before implementation (24 failures / 8 existing passes); the first Web
 batch failed five cases, and the unavailable-history UI regression also failed
-before its notice was implemented. The completed Server suite passed **271 tests**;
-CI/publication status follows after review. Local synthetic SQLite
+before its notice was implemented. The completed Server suite passed **271 tests**.
+Local synthetic SQLite
 fixtures include setup/explicit-callback/write simulations; these are not
 Cloudflare D1 operations or preview acceptance. Source mirror sync/`--check`,
 default/preview/production static checks and shell syntax passed. Python 3.10.12
 uses cached PyYAML 6.0.3 via PYTHONPATH; no dependency download was needed. The
 full test run needs loopback socket permission for one finite HTTP fixture.
 
-Preview backend publication needs separate authorization. Its proposed content
-is these source modules and the safe Worker error handler; it must use the same
+The user separately authorized publishing source `04c8797` to the preview Server
+on 2026-10-02, then explicitly requested commit, push and deployment. Publication
+uses these source modules and the safe Worker error handler, with the same
 preview config/DB/journal and unchanged limits, without migrations or business
 validation. Main pushes trigger the already authorized paused production Build;
 `PULLWISE_D1_ACCESS_ENABLED=0` remains mandatory. A deployment or local mock pass
@@ -62,9 +63,22 @@ Source commit `04c87978c4e9bf17caa4cf4012fde83487200b7d` was pushed to main.
 GitHub push CI [36961634876](https://github.com/GoPullwise/pullwise-server/actions/runs/36961634876)
 completed successfully. The production settings read-back still has the original
 DB ID and `PULLWISE_D1_ACCESS_ENABLED=0`. Cloudflare Builds status lookup returned
-HTTP 403, so the automatic production Build outcome is unverified. No preview
-Server deployment was performed; its known running version remains
-`722344d9-077c-4dfa-81af-4ac706ac2bc3` from the supplied prior evidence.
+HTTP 403, so the automatic production Build outcome is unverified.
+
+Locked Python 3.14.2 / uv 0.12.3 / workers-py 1.17.4 / Wrangler 4.136.3 preview
+packaging passed. Missing local release tools and executable links were restored
+without changing lockfiles or dependency versions. Preview publication succeeded
+with version `ca964508-e9b5-45d6-8c5c-a373d3be8bdd`, tag `identity-04c8797`.
+Management read-back confirms that version at **100%**, the same complete binding
+set and environment variables, original DB
+`e9dc3b89-f81f-4fce-87ef-d8797d879fb4`, budget namespace
+`0e0ce4946c5e4d5f81c606273ba94b5d` and existing `validation-budget-v1` migration
+tag. All four Secret names remain present; their values were not read.
+Production management read-back again confirms its original DB and D1 access 0.
+No runtime or budget endpoint was invoked after publication; current journal
+counts were not sampled. Real preview identity/provider acceptance remains
+pending, and the original upstream trigger remains unproven.
+
 The companion Web source `28dfea0` was published to both environments and passed
 eight finite static GETs. This does not establish the real identity trigger or
 acceptance. This task performed zero Cloudflare D1 queries, writes or migrations,
