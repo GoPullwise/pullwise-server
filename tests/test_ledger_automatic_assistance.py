@@ -1,6 +1,7 @@
 """Max assistance is part of ordinary expense writes for sessions and keys."""
 import asyncio
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -225,3 +226,22 @@ def test_category_archived_during_inference_is_not_saved(ledger):
     assert status == 409 and failure["error"]["code"] == "EXPENSE_CONFLICT"
     with ledger.store.connect() as db:
         assert db.execute("SELECT count(*) FROM expenses").fetchone()[0] == 0
+
+
+def test_daily_limit_respects_canonical_schema_and_keeps_manual_save_available(ledger):
+    chosen = category(ledger)
+    day = datetime.fromtimestamp(ledger.now + 3, timezone.utc).date().isoformat()
+    with ledger.store.connect() as db:
+        owner = db.execute("SELECT owner_id FROM expense_categories WHERE id=?", (chosen,)).fetchone()[0]
+        db.execute("INSERT INTO expense_suggestion_budget(owner_id,day,attempts) VALUES(?,?,19)",
+                   (owner, day))
+    provider = Provider()  # Intentionally requests 100; the schema permits 20.
+    status, first = call(ledger, expense(chosen), provider, key="daily-twentieth")
+    assert status == 201 and first["assistance"]["status"] == "available"
+    status, second = call(ledger, expense(chosen, purpose="Another hosting bill"), provider, key="daily-limit")
+    assert status == 201 and second["assistance"]["status"] == "unavailable"
+    assert second["assistance"]["reason"] == "SUGGESTION_LIMIT"
+    assert second["categoryId"] == chosen and len(provider.calls) == 1
+    with ledger.store.connect() as db:
+        assert db.execute("SELECT attempts FROM expense_suggestion_budget WHERE owner_id=? AND day=?",
+                          (owner, day)).fetchone()[0] == 20

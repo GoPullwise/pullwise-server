@@ -24,7 +24,7 @@ async def _bounded_response(reader, limit=MAX_RESPONSE_BYTES) -> bytes:
 class WorkerJevGateway:
     def __init__(self, env):
         self.api_key = str(getattr(env, "TYPESAFE_API_KEY", ""))
-        self.daily_limit = 100
+        self.daily_limit = 20
         self.enabled = (str(getattr(env, "PULLWISE_JEV_SUGGESTIONS_ENABLED", "")) == "1"
             and str(getattr(env, "PULLWISE_JEV_SUGGESTIONS_EVALUATED", "")) == "1"
             and bool(self.api_key))

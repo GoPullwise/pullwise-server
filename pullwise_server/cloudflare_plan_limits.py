@@ -110,9 +110,17 @@ class PlanLimitedD1:
                               for _, table in mutations))
         if jev_delta and plan != "max":
             raise PlanLimitError(403, "MAX_REQUIRED")
-        if jev_delta and not usd_micros(limits["jevMonthlyBudgetUsd"]):
-            raise PlanLimitError(429, "JEV_BUDGET_LIMIT")
         period = datetime.fromtimestamp(self.now, timezone.utc).strftime("%Y-%m")
+        if jev_delta:
+            cap = usd_micros(limits["jevMonthlyBudgetUsd"])
+            if jev_delta > cap:
+                raise PlanLimitError(429, "JEV_BUDGET_LIMIT")
+            usage = await self.binding.prepare("""SELECT month,jev_reserved_microusd
+                FROM ledger_plan_usage WHERE owner_id=?""").bind(owner).first()
+            if usage and usage["month"] == period and usage["jev_reserved_microusd"] + jev_delta > cap:
+                # Deterministic optional exhaustion must not dispatch a failing
+                # D1 batch. The atomic UPSERT still fences concurrent admission.
+                raise PlanLimitError(429, "JEV_BUDGET_LIMIT")
         counter = self.binding.prepare(_USAGE_SQL).bind(owner, owner, owner, project_delta,
             owner, owner, record_delta, period, write_delta, self.now // 60, write_delta, jev_delta,
             limits["projects"], limits["records"], limits["writesPerMinute"], limits["writesPerMonth"],

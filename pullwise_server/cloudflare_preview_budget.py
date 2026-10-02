@@ -128,13 +128,52 @@ def _json_size(value):
     return 0
 
 
-def _input_bound(params):
+def _expense_json_parameters(sql):
+    """Locate only reviewed JSON columns in simple scalar expense INSERTs."""
+    tokens = _tokens(sql) if sql else []
+    columns_by_table = {"EXPENSE_EVENTS": {"BEFORE_JSON", "AFTER_JSON"},
+                        "EXPENSE_CREATE_IDEMPOTENCY": {"RESPONSE_JSON"}}
+    if (len(tokens) < 8 or tokens[:2] != ["INSERT", "INTO"]
+            or tokens[2] not in columns_by_table or tokens[3] != "("):
+        return set()
+    close = tokens.index(")", 4)
+    columns = tokens[4:close]
+    if tokens[close + 1:close + 3] != ["VALUES", "("] or tokens[-1] != ")":
+        return set()
+    values = tokens[close + 3:-1]
+    if (not columns or len(columns) != len(values)
+            or columns[1::2] != [","] * (len(columns) // 2)
+            or values[1::2] != [","] * (len(values) // 2)
+            or any(value not in {"?", "NULL", "<VALUE>"} for value in values[::2])):
+        return set()
+    index, expanded = 0, set()
+    for column, value in zip(columns[::2], values[::2]):
+        if value == "?":
+            if column in columns_by_table[tokens[2]]:
+                expanded.add(index)
+            index += 1
+    return expanded
+
+
+def _input_bound(params, *, sql=""):
+    # An 8 KiB ingress can gain <1 KiB DTO metadata and <4 KiB assistance
+    # (30 categories + uncertain, safe generated IDs, finite float probabilities).
+    # Only stored expense JSON gets this 16 KiB envelope; plain text/app_state
+    # and every other SQL parameter retain the original 8 KiB ceiling.
+    expanded = _expense_json_parameters(sql)
     size = 0
-    for value in params:
+    for index, value in enumerate(params):
         if value is None or type(value) is int and -(2**53 - 1) <= value <= 2**53 - 1:
             continue
-        if type(value) is not str or len(value.encode("utf-8")) > 8192:
+        if type(value) is not str or len(value.encode("utf-8")) > (16384 if index in expanded else 8192):
             raise ValueError("preview parameter exceeds input bound")
+        if index in expanded:
+            decoded = json.loads(value)
+            if not isinstance(decoded, dict):
+                raise ValueError("expense snapshot must be a JSON object")
+            json.dumps(decoded, allow_nan=False, ensure_ascii=False).encode("utf-8")
+            size = max(size, _json_size(decoded))
+            continue
         if value.lstrip().startswith(("{", "[")):
             try:
                 decoded = json.loads(value)
@@ -272,7 +311,7 @@ class ProductMeteredD1(MeteredD1):
         upper = dict(self.data["rows"])
         try:
             for s in statements:
-                array_size = _input_bound(s.params)
+                array_size = _input_bound(s.params, sql=s.sql)
                 tokens = _tokens(s.sql)
                 cost = sql_write_bound(s.sql, guards)
                 references = re.findall(r"\b(?:FROM|JOIN)\s+([a-zA-Z_][\w]*)", s.sql, re.I)

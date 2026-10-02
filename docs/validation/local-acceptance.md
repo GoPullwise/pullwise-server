@@ -18,11 +18,12 @@ behavior. No schema or database migration is required.
 | Money | Split SQL integer aggregates reconstruct exact Python totals; totals exceeding JavaScript's safe integer use decimal strings. Project PATCH preserves totals. Native D1 converts safe Python integers only at the final JS bind, preserving exact MAX_SAFE_INTEGER and logical budget envelopes. |
 | Payment | Claim upgrades before chargeable dispatch, retain unknown outcomes, wait for signed payment facts before granting Max. Verified product/subscription IDs and owner association are required; historical events cannot overwrite the current subscription. Missing terminal cadence preserves annual history. |
 | Security | Trusted Origin is required for Cookie writes in all SameSite modes, including malformed Authorization. Jev rejects redirects and bounds timeout/body size. Provider exception text is excluded from preview diagnostics. |
+| Preview admission | Daily 20-attempt and monthly USD exhaustion exit before optional D1 mutations. Long UTF-8 notes retain ordinary writes, compact audit snapshots and exact replay within narrowly reviewed 16 KiB expense-JSON bounds. |
 
-The full Python 3.10.12 suite passed **369 tests**, with cached PyYAML 6.0.3
+The full Python 3.10.12 suite passed **395 tests**, with cached PyYAML 6.0.3
 available and one finite loopback fixture allowed by the execution sandbox.
 The expiry/concurrent-archival cases are included in the same
-16-case automatic-assistance suite. Default/preview/production static checks,
+17-case automatic-assistance suite. Default/preview/production static checks,
 source mirror/import closure and shell syntax passed. Pinned Python 3.14.2 /
 workers-py 1.17.4 / Wrangler 4.136.3 preview packaging passed; it includes the
 new exact-money module.
@@ -50,6 +51,41 @@ Real Jev quality/runtime and real payment/login acceptance remain separate from
 synthetic local tests. Do not claim the model is live or change production D1
 pause based on this implementation evidence. Publication and CI evidence follow
 after the authorized commit, push and deployment.
+
+The enablement review added **12 actual-adapter-chain admission cases** and
+**13 payload cases** using canonical SQLite schema under ProductMeteredD1 and
+PlanLimitedD1. Monthly exhaustion and valid long notes initially caused a
+persistent preview stop; daily-cap saves also incorrectly reserved more USD.
+The same cases now pass without provider dispatch or USD consumption on known
+exhaustion, while manual-category saves remain available. Timeout/uncertain
+attempts retain their conservative reservation. Maximum 8 KiB ingress with
+30 categories, long CJK/ASCII POST/PATCH snapshots and exact idempotency replay
+pass; unrelated text/app_state retains 8 KiB limits, and invalid/oversized JSON
+is rejected. These fixtures prove adapter composition and SQL admission, not
+native billed row counts. No schema, migration or global stop policy changed.
+
+### Product audit publication (2026-10-02)
+
+Server source `630752fece96be1a5c0d5b8febddcf4734cdb689` was committed, pushed
+and published after exact native-money acceptance. GitHub CI
+[36973091088](https://github.com/GoPullwise/pullwise-server/actions/runs/36973091088)
+completed successfully. Its preceding automatic-assistance commit `5f77941`
+also passed CI
+[36971220721](https://github.com/GoPullwise/pullwise-server/actions/runs/36971220721).
+
+| Environment | Worker | Published version |
+| --- | --- | --- |
+| Preview | `pullwise-server-preview` | `5753a2c1-8798-4e70-876a-594c1b6c87cc` |
+| Production, D1 paused | `pullwise-server-production` | `52f24bf6-ac8b-40f9-b7ec-86cf28243020` |
+
+Management read-back confirmed each version at 100%, original database IDs,
+the fixed preview namespace/migration tag and unchanged binding/configuration
+baselines. The only additional production binding was the user's
+TYPESAFE_API_KEY Secret; its name was verified, never its value. Production
+D1 remained 0 and both environments' Jev flags remained 0. Publication involved
+no D1 query/migration, business request or provider call. The companion Web
+source `1bc0b57` was published to both environments and passed eight bounded
+static GETs; its acceptance document records the versions and CI limitation.
 
 ## Preview repository identity failure (2026-10-02)
 

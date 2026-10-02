@@ -281,10 +281,11 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
             binding.prepare("""INSERT INTO expense_events(id,expense_id,owner_id,actor_kind,actor_id,
               action,before_json,after_json,created_at) VALUES(?,?,?,?,?,'create',NULL,?,?)""").bind(
                 event_id, expense_id, user["id"], actor_kind, actor_id,
-                json.dumps(payload, separators=(",", ":")), stamp),
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":")), stamp),
             binding.prepare("""INSERT INTO expense_create_idempotency(owner_id,idempotency_key,
               request_sha256,expense_id,response_json,created_at) VALUES(?,?,?,?,?,?)""").bind(
-                user["id"], key, digest, expense_id, json.dumps(payload, separators=(",", ":")), stamp),
+                user["id"], key, digest, expense_id,
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":")), stamp),
             binding.prepare("DELETE FROM d1_command_guard")]
         try:
             await binding.batch(commands)
@@ -333,8 +334,8 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
           action,before_json,after_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)""").bind(
             event_id, item_id, user["id"], actor_kind, actor_id,
             "update" if method == "PATCH" else "delete",
-            json.dumps(before, separators=(",", ":")),
-            json.dumps(after, separators=(",", ":")) if after else None, stamp),
+            json.dumps(before, ensure_ascii=False, separators=(",", ":")),
+            json.dumps(after, ensure_ascii=False, separators=(",", ":")) if after else None, stamp),
         binding.prepare("DELETE FROM d1_command_guard")]
     try:
         await binding.batch(commands)

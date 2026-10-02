@@ -52,6 +52,11 @@ historical product plans to gate work.
   validates native meta. Cardinality snapshots/journal evidence must never
   contain raw users, tokens, SQL parameters or provider payloads. Complete
   CSV pulls inside the active ticket; serialize concurrent product requests.
+- Store expense audit/idempotency JSON as compact UTF-8. Only scalar INSERT
+  expense_events.before_json/after_json and expense_create_idempotency.response_json
+  accept a 16 KiB JSON-object envelope: 8 KiB ingress plus bounded DTO metadata
+  and at most 30 categories' assistance. Other text/app_state bounds stay 8 KiB;
+  reject malformed/non-finite/non-object JSON and retain row/index/global caps.
 - Active preview config is allowed only with its original DB/hosts, existing
   ValidationBudget class and test Creem origin. This supersedes the old blanket
   preview-pause notes below; it does not permit production activation or Jev.
@@ -141,6 +146,10 @@ historical product plans to gate work.
   write/minute allowances; the expense operation counts once. Reserve Jev USD
   atomically with its budget mutation; event-only batches retain the original
   credential fence and global D1 accounting without an extra usage UPSERT.
+  Check the owner/day attempt count and current UTC-month USD remainder before
+  optional reservation. Deterministic exhaustion must return the manual fallback
+  before a failing native batch or another USD reservation; retain atomic
+  reservation fences and all unknown-outcome accounting.
   Key revocation is exempt from commercial quotas so a compromised key can
   always be revoked; the normal credential fence and global validation cap stay.
 - Migration 0004 and quota initialization/index effects need new S18 bounds.
@@ -172,7 +181,9 @@ historical product plans to gate work.
   archived-target/category validation, without another provider/budget attempt.
   GETs never call Jev. Provider failures or exhausted Jev budget do not block
   ordinary writes with an explicit category. The advanced draft endpoint
-  shares the 100-attempt UTC daily cap and Max monthly reservation.
+  shares the 20-attempt UTC daily cap and Max monthly reservation. Keep the
+  runtime bound within the canonical attempts<=20 schema; raising only code
+  would reject the next batch and stop the preview journal.
   Keep enable/evaluated flags off until real provider/Worker validation and
   labeled en/zh quality gates pass. The user authorized agent-authored synthetic
   samples for preview evaluation on 2026-10-02; record that provenance and actual

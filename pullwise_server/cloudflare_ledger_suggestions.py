@@ -91,12 +91,21 @@ async def handle_suggestion_request(*, binding, method, headers, body, now, gate
             ORDER BY occurred_on DESC,id DESC LIMIT 30""").bind(
                 user["id"], target_kind, project_id, project_id, start, end, minor, currency,
                 exclude_expense_id or "")]
+        daily = []
+        if gateway is not None and gateway.enabled:
+            day = datetime.fromtimestamp(now, timezone.utc).date().isoformat()
+            # Keep the daily bound within the canonical attempts<=20 constraint.
+            limit = max(1, min(20, int(getattr(gateway, "daily_limit", 20))))
+            commands.append(binding.prepare("""SELECT attempts FROM expense_suggestion_budget
+                WHERE owner_id=? AND day=?""").bind(user["id"], day))
         if project_id:
             commands.append(binding.prepare("""SELECT id FROM ledger_projects
                 WHERE owner_id=? AND id=?""").bind(user["id"], project_id))
         rows = await binding.batch([*auth, *commands])
         validate([part.results for part in rows[:len(auth)]])
         categories, recent = rows[len(auth)].results, rows[len(auth) + 1].results
+        if gateway is not None and gateway.enabled:
+            daily = rows[len(auth) + 2].results
         if project_id and not rows[-1].results:
             return _error(404, "NOT_FOUND")
     except PrincipalAuthError as exc:
@@ -105,14 +114,14 @@ async def handle_suggestion_request(*, binding, method, headers, body, now, gate
         return 200, {"status": "unavailable", "reason": "disabled", "suggestions": {}}
     if not categories:
         return 200, {"status": "unavailable", "reason": "no_categories", "suggestions": {}}
+    if daily and daily[0]["attempts"] >= limit:
+        return 429, {"error": {"code": "SUGGESTION_LIMIT"}}
     questions = suggestion_questions(categories)
     try:
         request = build_request(state={"purpose": purpose, "note": note},
             questions=questions, model=DEFAULT_JEV_MODEL)
     except (ValueError, UnicodeError):
         return 200, {"status": "unavailable", "reason": "invalid_context", "suggestions": {}}
-    day = datetime.fromtimestamp(now, timezone.utc).date().isoformat()
-    limit = max(1, min(100, int(getattr(gateway, "daily_limit", 100))))
     try:
         attempt = await binding.batch([_write_guard(binding, proof, user["id"], now),
             binding.prepare("""INSERT INTO expense_suggestion_budget(owner_id,day,attempts)

@@ -30,11 +30,14 @@ Preview and production have separate `cloudflare/server/wrangler.<environment>.j
 configs and D1 databases. `cloudflare/server/.dev.vars.example` lists local
 Worker variable names; credentials belong in Secrets and must not be committed.
 `scripts/deploy-cloudflare.sh` defaults to dry-run and rejects placeholder
-domains/database IDs. Jev stays disabled until real quality/runtime gates pass.
+domains/database IDs. Jev stays disabled until real-provider quality/runtime
+gates pass. The user authorized self-authored synthetic en/zh evaluation samples;
+their results must be recorded as synthetic-data validation.
 
 All Wrangler/workerd and D1 commands, including local probes, remain paused
 until the user explicitly resumes them. Do not add cron triggers. Before any
 remote validation, review the request row/operation budget, request frequency,
 pagination/cache policy, cost guard, migration and rollback. S17 runtime
-verification and S18 remote acceptance remain open; this repository is not a
-claim that the Server has been deployed.
+verification and S18 remote acceptance are recorded separately from publication.
+Both Workers have been published; production D1 access remains paused. See the
+current acceptance record for deployed versions and remaining provider gates.

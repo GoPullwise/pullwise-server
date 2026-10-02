@@ -197,7 +197,7 @@ paths:
     post:
       operationId: suggestExpense
       x-pullwise-scope: suggestions:use
-      description: Advanced draft advice only; ordinary expense writes already include Max assistance without this endpoint or its scope. Never writes an expense. Disabled unless evaluated and enabled. Shares the account limit of 100 attempts per UTC day and monthly Jev reservation with automatic assistance.
+      description: Advanced draft advice only; ordinary expense writes already include Max assistance without this endpoint or its scope. Never writes an expense. Disabled unless evaluated and enabled. Shares the account limit of 20 attempts per UTC day and monthly Jev reservation with automatic assistance.
       requestBody: {required: true, content: {application/json: {schema: {type: object, required: [purpose, target], properties: {purpose: {type: string, maxLength: 500}, note: {type: string, maxLength: 4000}, occurredOn: {type: string, format: date}, amount: {type: string, description: Decimal amount in selected currency}, currency: {type: string, pattern: "^[A-Z]{3}$"}, target: {$ref: '#/components/schemas/Target'}}}}}}
       responses:
         '200': {description: Status, optional suggestionId, candidates and probabilities; never an expense write, content: {application/json: {schema: {type: object, properties: {status: {type: string, enum: [available, uncertain, unavailable]}, suggestionId: {type: string}, questionVersion: {type: string}, modelVersion: {type: [string, 'null']}, suggestions: {type: object, properties: {categoryId: {type: string}, targetKind: {type: string}, duplicateExpenseId: {type: string}}}, probabilities: {type: object}}}}}}

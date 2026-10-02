@@ -85,7 +85,7 @@ a new month replaces the period counters; it does not add unused old credit.
 Annual subscriptions use the same monthly periods. A named constraint rejects
 late requests that would move counters back to an older month/minute.
 
-The shared daily assistance guard (100/day) and
+The shared daily assistance guard (20/day) and
 request/response bounds remain additional safety controls. Free/Pro cannot
 invoke Jev even with suggestions scope. Max eligibility does not imply that
 Jev is active: public DTOs distinguish `eligible` and `available`. Preserve
