@@ -2,10 +2,10 @@
 
 `src/entry.py` is the Cloudflare Python Worker for the project expense ledger. It routes GitHub sign-in and App authorization, workspace membership and invitations, account API keys, Creem subscription and webhook requests, multi-repository `/api/v1` ledger resources, per-currency reports, paginated CSV export, and optional Jev suggestions.
 
-The new workspace/Organization/multi-repository version is implemented locally
-as of 2026-10-06. Final verification, native schema-upgrade proof and preview
-publication are pending. Original-version preview evidence does not validate
-this release.
+The new workspace/Organization/multi-repository version is implemented and
+released to preview as of 2026-10-06. Its dedicated native role/browser checks,
+canonical remote v4-to-v5 upgrade and 100% deployment are recorded in
+[latest acceptance](../../docs/validation/local-acceptance.md).
 
 ## Source and database
 
@@ -14,7 +14,7 @@ this release.
 Migrations apply in order: `0001_ledger.sql`, `0002_identity_billing_keys.sql`,
 `0003_ledger_suggestions.sql`, `0004_ledger_plan_usage.sql`,
 `0005_workspaces_repositories.sql`. Production remains unmigrated and paused;
-the existing preview uses the original four-migration schema. The new canonical
+the existing preview completed the controlled 0005 upgrade to v5. The new canonical
 schema has 18 tables and 33 SQLite indexes. Health requires all 18 tables.
 The deploy script never applies remote migrations.
 
@@ -36,7 +36,7 @@ Partial, unknown or stopped outcomes retain reservations and cannot be retried
 or reset. Local native SQL/budget measurement has passed with 324 reads/25 writes;
 its Miniflare metadata has absent attempts and uses pinned no-retry source
 provenance without inventing values. Deployed read phases still require native
-attempts=1; the finite preview upgrade is the final runtime gate. Current bounds
+attempts=1; the finite preview upgrade passed that runtime gate. Current bounds
 are in [D1 validation](../../docs/validation/d1-validation-budget.md).
 
 ## Configuration

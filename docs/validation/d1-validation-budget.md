@@ -6,7 +6,8 @@ record of completed runtime acceptance or authorization to release production.
 
 ## Current workspace/repository schema plan (2026-10-06)
 
-The new version is implemented locally and awaits final release verification.
+The new version is implemented and released to preview with its dedicated
+local native/browser evidence and actual compiled v4-to-v5 runtime proof.
 Its canonical schema freezes five migrations, 18 tables and 33 SQLite indexes.
 0005 appends four member/invitation/event/repository-binding tables and two
 project columns, then backfills the original single-repository associations to
@@ -36,7 +37,9 @@ stopped and unchanged. Remote read phases require native integer `1`; only the
 exact pinned CREATE/ALTER/INSERT write group may use D1's documented nonretryable
 write contract when attempts are absent. Provided non-1 attempts still reject.
 No attempt value is invented and no deployed local bypass exists. The finite
-preview upgrade remains the final runtime gate. Production access stays 0.
+preview upgrade passed the final runtime gate: schemaVersion=5, stopped=null,
+retained additional write reserve 170 and native write delta 25. Final snapshot
+is reserved 33,358/719 and observed 21,716/359. Production access stays 0.
 Workspace mutations normally consume the ledger Owner's commercial allowance.
 Emergency member removal, invitation revocation and own-key revocation are
 commercial-quota exempt; current authorization/atomic guards and global D1

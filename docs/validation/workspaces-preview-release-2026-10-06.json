@@ -1,0 +1,138 @@
+{
+  "date": "2026-10-06",
+  "scope": "New shared-ledger/multiple-repository/Organization release; preview-only remote acceptance",
+  "originalGoalsCompletedBeforeNewVersion": true,
+  "newVersionImplemented": true,
+  "sourceCommits": {
+    "server": "a799232f435d9254007aa820bdb25cee42adb0fa",
+    "web": "775fabdc441abb8c79868497017fb8497872e0c3"
+  },
+  "deployedVersions": {
+    "server": "6a69026a-993e-4afd-849b-671804288211",
+    "web": "926cf9ce-9beb-4cec-80eb-02d233e16a6e"
+  },
+  "trafficPercent": 100,
+  "serverCI": {
+    "runId": 37439922368,
+    "conclusion": "success",
+    "url": "https://github.com/GoPullwise/pullwise-server/actions/runs/37439922368"
+  },
+  "checks": {
+    "serverFullTests": 658,
+    "webFullTests": 418,
+    "webAfterLayoutRepairRelevantTests": 159,
+    "nativeLocalApplicationHttp": 35,
+    "localChromiumInitialFunctionalCases": 12,
+    "localChromiumInitialMobileLayoutFailures": 2,
+    "localChromiumFinalCases": 7
+  },
+  "schemaUpgrade": {
+    "from": 4,
+    "to": 5,
+    "canonicalRemoteGatePassed": true,
+    "originalDatabase": "e9dc3b89-f81f-4fce-87ef-d8797d879fb4",
+    "originalBudgetNamespace": "0e0ce4946c5e4d5f81c606273ba94b5d",
+    "upgradeFlag": "1",
+    "globalRowsWrittenReservationAdded": 170,
+    "observedRowsWrittenAdded": 25,
+    "expenseOrFinancialHistoryRewrite": false,
+    "counterResets": 0,
+    "remoteSqlManagementQueries": 0,
+    "automaticApplicationRetries": 0,
+    "newRemoteNamespaceOrDatabase": false,
+    "healthHttpStatus": 200,
+    "health": {
+      "ok": true,
+      "service": "pullwise-server",
+      "database": {
+        "type": "d1",
+        "configured": true
+      }
+    }
+  },
+  "finalBudget": {
+    "limits": {
+      "rowsRead": 100000,
+      "rowsWritten": 1000
+    },
+    "reserved": {
+      "rowsRead": 33358,
+      "rowsWritten": 719
+    },
+    "observed": {
+      "rowsRead": 21716,
+      "rowsWritten": 359
+    },
+    "schemaReady": true,
+    "schemaVersion": 5,
+    "stopped": null
+  },
+  "actualRemoteGuestMembers": {
+    "date": "2026-10-06",
+    "scope": "Actual deployed preview, anonymous mobile Members-to-login; continued remaining case after first desktop check stopped only on known blocked analytics; no replay, OAuth click or authenticated-team claim",
+    "cases": [
+      {
+        "path": "/members",
+        "viewport": 390,
+        "requests": 18,
+        "sessionGets": 2,
+        "blockedFonts": 1,
+        "blockedAnalytics": 1,
+        "unexpectedRequests": [],
+        "pageErrors": [],
+        "indexAssets": [
+          "/assets/index-D2iP-fc1.js"
+        ],
+        "passed": true,
+        "httpStatus": 200,
+        "finalPath": "/login",
+        "dimensions": {
+          "client": 390,
+          "document": 390,
+          "visual": 390,
+          "coarse": true,
+          "touch": 1
+        }
+      }
+    ],
+    "passed": 1,
+    "providerCalls": 0,
+    "businessWrites": 0,
+    "browserClosed": true
+  },
+  "actualRemoteDesktopHome": {
+    "path": "/",
+    "viewport": 1440,
+    "httpStatus": 200,
+    "newIndexAsset": "/assets/index-D2iP-fc1.js",
+    "headingVisible": true,
+    "layoutAssertionsPassed": true,
+    "sessionGets": 1,
+    "requests": 17,
+    "pageErrors": 0,
+    "blockedFonts": 1,
+    "blockedAnalytics": 1,
+    "businessWrites": 0,
+    "providers": 0,
+    "browserClosed": true,
+    "stoppedOnHarnessAllowlist": "Known static.cloudflareinsights.com blocked before any forwarding; no product error",
+    "replayed": false
+  },
+  "previewJevFlags": {
+    "enabled": "1",
+    "evaluated": "1"
+  },
+  "additionalJevCalls": 0,
+  "additionalGithubOrPaymentProviderCalls": 0,
+  "agentRemoteFinancialOrMemberWrites": 0,
+  "newVersionTwoRealAccountAcceptance": false,
+  "roleAcceptanceProvenance": "Four roles verified through native local Python Worker/D1 plus fully intercepted built Chromium; original real-consented authenticated preview acceptance retained separately",
+  "production": {
+    "databaseAccessFlag": "0",
+    "jevEnabledFlag": "0",
+    "jevEvaluatedFlag": "0",
+    "remoteProductionBusinessRequests": 0,
+    "remoteProductionSchemaMigration": false,
+    "mainBuildsMayPublishPausedCode": true
+  }
+}

@@ -2,7 +2,7 @@
 
 状态：当前产品设计，更新于 2026-10-06。本文描述产品契约和实施边界，运行验收状态见两端验证记录。本文中的“项目”是有稳定 project ID、显式关联 1–30 个 GitHub repositories 的记账项目；Organization 是可选关联，不是 GitHub Projects 看板。前端 `pullwise-web` 与后端 `pullwise-server` 仍为独立部署单元。
 
-当前实施状态（2026-10-06）：多人账本、角色邀请、多仓库和 Organization 的 Server/Web 代码已本地实现，最终验证、原生升级证明及 Preview 发布验收待完成；新版本尚未远程部署或迁移。完整规则见[本版需求与迁移状态](../../planning/project-repositories.md)。原版本的验收已另行记录，不能作为本版权限或升级验收。
+当前实施状态（2026-10-06）：多人账本、角色邀请、多仓库和 Organization 的 Server/Web 已实现、验证并发布 Preview，原数据库已在同一累计预算下升级到 v5。新角色通过真实本地 Worker 与模拟账号浏览器验证；本次线上访客验收不冒充双真实账号邀请测试。完整规则见[本版需求与迁移状态](../../planning/project-repositories.md)。原版本的验收已另行记录，不能作为本版权限或升级验收。
 
 历史实施状态（2026-09-28）：当时原 S01–S16 已本地实现，S17 Worker/CSV 和 S18 Preview/提供商验收尚未完成。这是当时的阶段记录，当前证据以两端 `docs/validation/local-acceptance.md` 为准。
 

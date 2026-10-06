@@ -2,6 +2,57 @@
 
 Updated 2026-10-06. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
 
+## Shared ledger and multi-repository release (2026-10-06, final)
+
+The original audit, real consented preview lifecycle and 36 actual Jev cases
+were completed before this new version. Server/Web now implement stable Owner
+workspaces, Admin/Editor/Viewer invitations and revisions, actual-actor GitHub
+access, up to 30 repository bindings and optional Organization metadata. Owner
+plans/limits/model budgets serve each ledger; account billing remains personal.
+Old ownership, finance history, project IDs and unscoped personal keys remain.
+
+Full Server tests passed **658**; Web passed **418**, lint and build. The last
+layout repairs passed **159** relevant UI tests and a final build. Native local
+Python Worker/D1 passed **35** finite HTTP requests across four roles, invitation
+accept/replay, revision-bound keys, distinct actor idempotency, exact reports,
+251-row CSV and workspace isolation. These role scenarios use synthetic local
+accounts, not two real remote users. Native schema/budget measurement used four
+real batches, **324 read / 25 written**, below its retained **4,852 / 170** plan;
+Miniflare's missing attempts stay null with pinned no-retry-source provenance.
+The first stopped local claim remains unchanged, with no deployed bypass.
+
+Source commits `a799232f` (Server) and `775fabdc` (Web) were pushed to main.
+[Server CI 37439922368](https://github.com/GoPullwise/pullwise-server/actions/runs/37439922368)
+passed. Explicit preview deployments serve Server
+`6a69026a-993e-4afd-849b-671804288211` and Web
+`926cf9ce-9beb-4cec-80eb-02d233e16a6e`, both at **100%**. Management read-back
+confirmed original D1/fixed DO, inherited Secret names, service binding/assets,
+Preview mode and Jev 1/1. The first proxied health request returned **200**.
+Its exact compiled v4→v5 upgrade passed the deployed strict read-attempt gate,
+completed 0005 and the 18-table health check under the same cumulative journal.
+It retained **170** additional write reservation and observed **25** new writes;
+no expense/history rewrite, namespace replacement, counter reset or retry occurred.
+
+The final DO-only snapshot is schemaVersion **5**, schemaReady=true, stopped=null:
+reserved **33,358 read / 719 written**, observed **21,716 / 359**, limits
+**100,000 / 1,000**. Subsequent manual traffic continues those same counters.
+Final built Chromium cases and actual deployed anonymous home/Members→Login
+checks loaded `index-D2iP-fc1.js`; the mobile entry is 390px with no page errors.
+The home harness stopped only on a known blocked Cloudflare analytics script;
+its verified home/layout/source result was retained and not replayed. The
+remaining Members case then passed with that external resource intentionally
+blocked. No OAuth button, additional model/payment/GitHub provider or remote
+finance/member write was executed. Original real authenticated acceptance
+remains in its separate dated record.
+
+Production D1 and Jev remain 0. Main Builds may publish paused code; no remote
+production activation, schema migration or business acceptance was performed.
+Current release details are in [release JSON](workspaces-preview-release-2026-10-06.json),
+[native application](workspaces-native-local-2026-10-06.json),
+[native upgrade measurement](workspaces-upgrade-native-local-2026-10-06.json) and
+[minimum GitHub App permissions](../design/github-project-ledger/github-app-permissions.md).
+
+
 ## Resumed product audit (2026-10-06)
 
 The user's current request explicitly supersedes the historical stop-testing

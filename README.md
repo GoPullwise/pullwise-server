@@ -14,9 +14,10 @@ business contract.
 ## Current version (2026-10-06)
 
 The multi-repository, Organization and shared-ledger version is implemented
-locally and awaits final release verification. It has not yet been deployed or
-migrated remotely. The earlier preview acceptance records describe the original
-version; they do not establish acceptance of this version.
+and released to preview with the v5 schema upgrade. Separate local role/browser
+evidence and actual remote publication checks are in
+[latest acceptance](docs/validation/local-acceptance.md). Original-version
+acceptance remains historical rather than new-role evidence.
 
 A workspace ID is the existing ledger owner ID. Personal ledgers retain an
 implicit Owner; inviting members shares that ledger's current and future finance

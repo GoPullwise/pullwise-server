@@ -3,14 +3,22 @@
 ## Current task authority (2026-10-06)
 
 Latest scope: the original release goals have their own dated evidence; the
-multi-repository/Organization/shared-ledger version is now implemented locally
-and awaits final verification and preview release. Treat
+multi-repository/Organization/shared-ledger version is now implemented and
+released to preview with its own native/browser/publication evidence. Treat
 `docs/planning/project-repositories.md` as its current product specification.
 Existing `owner_id` is the immutable workspace ID; never rewrite expense history
 or share GitHub credentials between members. Migration 0005 and the one-shot
-legacy-v4 preview upgrade use the same cumulative journal; native upgrade proof
-and remote publication are pending. Keep production D1 paused and remote work
+legacy-v4 preview upgrade used the same cumulative journal; deployed schemaVersion
+5 and healthy accounting were verified. See
+`docs/validation/workspaces-preview-release-2026-10-06.json`.
+Keep production D1 paused and remote work
 preview-only. Historical original-version evidence is not new-version acceptance.
+
+The user separately authorized editing the production GoPullwise GitHub App's
+registered permissions. This does not authorize production D1 activation or
+business testing. The existing connector cannot edit App registration settings;
+the verified target and actual unchanged snapshot are recorded in
+`docs/design/github-project-ledger/github-app-permissions.md`.
 
 The user explicitly authorized the resumed Server/Web audit, repairs, local
 verification, main pushes, Cloudflare publication and finite preview user/model

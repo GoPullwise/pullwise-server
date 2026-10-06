@@ -1,9 +1,10 @@
 # 当前版本：多人账本、项目多仓库与 Organization
 
-状态（2026-10-06）：Server/Web 已完成本地实现，正在进行最终发布验证。
-新版本尚未远程部署或迁移；本地完整检查、原生 D1 升级证明及 Preview
-发布验收仍待记录。原版本验收见两端 `docs/validation/local-acceptance.md`，
-不能用原版本的单人 Preview 证据代替本版团队权限和迁移验收。
+状态（2026-10-06）：Server/Web 已实现、验证、推送 main 并发布 Preview。
+原数据库在同一累计 journal 下完成 v4→v5 升级，schemaReady=true、stopped=null。
+本版角色通过 35 次真实本地 Worker HTTP 与模拟账号浏览器验证；线上访客
+入口与实际升级/发布另有独立证据，不宣称双真实账号邀请验收。
+见 `docs/validation/workspaces-preview-release-2026-10-06.json`。
 
 历史（2026-10-06 初始需求）：本文件最初在当前 Preview 修复和原版本
 验收结束前记录下一版本计划，当时多仓库、Organization 与多人账本尚未
@@ -124,7 +125,11 @@ ValidationBudget namespace/name、数据库和累计 journal 中预留，继续�
 Miniflare 缺少 attempts 字段，其固定源证明无重试；测量保留 null，未伪造
 次数。已部署代码的读取阶段仍要求 native attempts=1，精确固定的写入
 batch 按官方不可自动重试规则处理缺失次数；首个失败本地 claim 保留不动。
-远程 Preview 升级尚待最终原生运行门槛，不能宣称迁移或发布成功。Server
-全套 658 项及 Web 全套 418 项检查通过；最后手机布局复验和
-Preview 升级/验收证据由两端验证记录补充；生产保持
+远程 Preview 升级已通过严格读取 attempts 门槛，schemaVersion=5。Server
+全套 658 项及 Web 全套 418 项检查通过，最后布局修复的 159 项相关测试、
+六个手机/一个桌面构建浏览器场景及实际线上访客入口通过。Preview 升级
+和 100% 发布证据见两端验证记录；生产保持
 `PULLWISE_D1_ACCESS_ENABLED=0`，本轮远程操作仅限 Preview。
+
+GitHub App 当前最小配置及官方依据见
+[权限说明](../design/github-project-ledger/github-app-permissions.md)。
