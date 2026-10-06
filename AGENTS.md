@@ -1,5 +1,20 @@
 # Pullwise Server
 
+## Current task authority (2026-10-06)
+
+The user explicitly authorized the resumed Server/Web audit, repairs, local
+verification, main pushes, Cloudflare publication and finite preview user/model
+acceptance. This supersedes historical blanket test/Wrangler pauses in this
+file. Continue within that scope without repeating deployment approval.
+Preserve the existing preview journal and cumulative ceilings of 100,000 read /
+1,000 written rows, no reset/retry/cron policy and environment isolation.
+Production D1 activation and real payment acceptance remain separate gates;
+publishing code does not prove those gates. Jev enablement requires actual
+provider/runtime and labeled en/zh quality evidence, not synthetic gold labels.
+Use `docs/validation/local-acceptance.md` for the latest release evidence.
+The user's later 2026-10-06 scope is preview-only testing/verification. Do not
+continue production repair, activation, deployment or validation for this task.
+
 ## Product and authority
 
 Use `main` for all work unless the user explicitly requests another branch.

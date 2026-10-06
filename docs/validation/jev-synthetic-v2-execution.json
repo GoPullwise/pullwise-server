@@ -1,0 +1,435 @@
+{
+  "dateUTC": "2026-10-06",
+  "scope": "preview-only",
+  "provenance": "agent-authored-synthetic",
+  "fixtureSha256": "a8154f94fe24b1388dddca60febef7e864b70dfb42be68cc4fbab7001b242add",
+  "resultsSha256": "f122227a0822366b9f37afd238a6b70f8f2f62548fc27f4c605aa404a6715673",
+  "canonicalRevision": "2ed7271",
+  "canonicalSourceSha256": {
+    "account_cycle_rules": "cb5a090e81863b16fd35dc50ad907673711b79b7be0fbfb686500bdb3ce9647b",
+    "api_key_dto_rules": "540112e47f7264214ee53dde85853cf59baf87717f876d57b5029820389b5e10",
+    "billing_account_rules": "b067d8edcaf76a27f16ef5331c66e77c2a81125404a1f41b1d31380b4843b1a7",
+    "cloudflare_account_adapter": "f783af5b404c5d8e5722df7a44162b88b3ac6b382db5a3d3e7139273a9b77d1d",
+    "cloudflare_d1_batch": "f3e3e4df4f9d8892683b061cbac8a90c6ba33b5903216e8dc600a5dd3008ca9c",
+    "cloudflare_d1_mapping": "47a7685079dd33b763e4da7238750af6cab3b03a237617cd925740dd0c44f2a5",
+    "cloudflare_github_gateway": "712840eebaedc82bfa1bf111b8facd57d33e8090f041b150b5c20b4ee6e522c9",
+    "cloudflare_github_identity_http": "d2bd062c3dfc6197e0e2817d8267f00526b0448dfa24fa1ebd9f84e44ef845b6",
+    "cloudflare_jev_gateway": "5233cff0ab7bdfff2e2ca941c0ddb4c3c54a68b3ae6de202c7482243903ceffc",
+    "cloudflare_ledger_api": "9a2febd8648553c8b60c5f272516802784f08d5e88b92c02390ef9fba5dfbdd2",
+    "cloudflare_ledger_auth": "615b63b9475d939626f952b527a4f106c0c62fd76c5b6cef7065d17ee40aaccf",
+    "cloudflare_ledger_expenses": "481da0afb6360eb5a73c8bc25e5fa979dde4f2054e193bde1bca72f8204d29b9",
+    "cloudflare_ledger_reports": "8f10f17c864e4012f167f4f2f782f2e9b171104b41c9adf4b49e06e4562bf05c",
+    "cloudflare_ledger_suggestions": "eeb208d99665df7125164e236c239ade26f9b555a334a886692830299510db84",
+    "cloudflare_oauth_state_adapter": "451118cfdef6508295f52a543396efcc5767d9723e03251b291c168aff2bc696",
+    "cloudflare_plan_limits": "f8b023f9fc78ca1001c43712fef0275a79d0d5d7401c19ebf99bf409e37ceafb",
+    "cloudflare_principal": "6219ef1c6929cbce3b97e0476d543d4bda3418f6ff0ad8106b38f297c5366e9c",
+    "cloudflare_session_adapter": "efea7e9aa5818c5e358dc7a8d8ba9701b1c4f4d6990eae14504b14fdde277750",
+    "creem_event_rules": "4afb2ec977cbab2b4ae5ad6fdd6bbb66ebc4ecb32cf1b19e7126bd8722b80646",
+    "json_input": "3f5699b1eef9ef6a6119edaf735eadb3cee40fbc863982262c5dede1fbc704b8",
+    "ledger_money_totals": "552c26b9c14343336f9e858488552e05ce1bd90345e3d2f10422c14634124de1",
+    "ledger_plan_policy": "c1d2c6520c42782c14bf2e4e93a5df5653865c681c324b3c7c445fe5bcc86dc6",
+    "typesafe_client": "7a18ee3bd21267e6e18b751902ea55561e6074c7c6d9968fff7d173015e7d903"
+  },
+  "canonicalProductEntrySha256": "751c036f5312a6af97e05f0f432b1b1a6fec0ac1a11e64542fade15056cc70ba",
+  "successfulTemporaryWrapperEntrySha256": "7ff414524dc3ae5bce7e018f4996fa13aa00d2a2f539f4be819106b5f36e656a",
+  "runtimeSDK": "1.9.0",
+  "wrangler": "4.136.3",
+  "compatibilityDate": "2026-09-23",
+  "compatibilityFlags": [
+    "python_workers"
+  ],
+  "provider": "TypeSafe",
+  "model": "jev-1.13.0",
+  "questionVersion": "ledger-suggest-v2",
+  "maxProviderAttempts": 36,
+  "actualProviderAttempts": 36,
+  "validResponses": 36,
+  "unknownOutcomes": 0,
+  "providerErrors": 0,
+  "automaticProviderRetries": 0,
+  "retainedReservationMicrousd": 99108,
+  "usage": {
+    "inputTokens": 23850,
+    "outputTokens": 4144
+  },
+  "priceDerivedInputUsd": "0.0010017",
+  "usageEstimateIsInvoice": false,
+  "latencyMs": {
+    "min": 65,
+    "median": 100.0,
+    "p95NearestRank": 184,
+    "max": 1244
+  },
+  "originalJournal": {
+    "maxAttempts": 36,
+    "reservedMicrousd": 99108,
+    "attempts": [
+      {
+        "id": "en01",
+        "state": "observed",
+        "providerOutcome": "config_unavailable"
+      },
+      {
+        "id": "en02",
+        "state": "observed",
+        "providerOutcome": "config_unavailable"
+      }
+    ],
+    "stopped": "RUNTIME_OR_PROVIDER_NOT_READY",
+    "completed": false,
+    "providerPhase": {
+      "maxProviderAttempts": 36,
+      "attempts": [
+        {
+          "id": "en01",
+          "number": 1,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "en02",
+          "number": 2,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "en03",
+          "number": 3,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "en04",
+          "number": 4,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "en05",
+          "number": 5,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "en06",
+          "number": 6,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "en07",
+          "number": 7,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "en08",
+          "number": 8,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "en09",
+          "number": 9,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "en10",
+          "number": 10,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "en11",
+          "number": 11,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "en12",
+          "number": 12,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "en13",
+          "number": 13,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "en14",
+          "number": 14,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "en15",
+          "number": 15,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "zh01",
+          "number": 16,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "zh02",
+          "number": 17,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "zh03",
+          "number": 18,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "zh04",
+          "number": 19,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "zh05",
+          "number": 20,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "zh06",
+          "number": 21,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "zh07",
+          "number": 22,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "zh08",
+          "number": 23,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "zh09",
+          "number": 24,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "zh10",
+          "number": 25,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "zh11",
+          "number": 26,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "zh12",
+          "number": 27,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "zh13",
+          "number": 28,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "zh14",
+          "number": 29,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "zh15",
+          "number": 30,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "en01-reversed",
+          "number": 31,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "en03-reversed",
+          "number": 32,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "en09-reversed",
+          "number": 33,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "zh01-reversed",
+          "number": 34,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "zh03-reversed",
+          "number": 35,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        },
+        {
+          "id": "zh09-reversed",
+          "number": 36,
+          "state": "observed",
+          "providerOutcome": "valid_response"
+        }
+      ],
+      "stopped": null,
+      "completed": true,
+      "bootstrapHttpFailures": 2,
+      "bootstrapProviderAttempts": 0,
+      "reservationMicrousd": 99108
+    }
+  },
+  "bootstrapStages": [
+    {
+      "stage": "initial_remote_port_collision",
+      "modelCalls": 0,
+      "diagnostic": "address_in_use"
+    },
+    {
+      "stage": "initial_client_local_config",
+      "httpFailures": 2,
+      "modelCalls": 0,
+      "diagnostic": "config_unavailable_before_provider"
+    },
+    {
+      "stage": "workerd_remote_proxy_egress",
+      "modelCalls": 0,
+      "diagnostic": "direct_network_unreachable"
+    },
+    {
+      "stage": "node_proxy_private_python_preview",
+      "modelCalls": 0,
+      "httpStatus": 503,
+      "diagnosticBodyPersisted": false,
+      "responseType": "non_json"
+    },
+    {
+      "stage": "node_proxy_private_python_preview_minimal",
+      "modelCalls": 0,
+      "httpStatus": 503,
+      "errorCode": 1105
+    },
+    {
+      "stage": "single_private_js_control",
+      "modelCalls": 0,
+      "httpStatus": 200,
+      "marker": "private-edge-js-bootstrap"
+    },
+    {
+      "stage": "local_native_wrapper_config_directory",
+      "modelCalls": 0,
+      "diagnostic": "sdk_config_directory_unavailable_before_runtime",
+      "recovered": "session_xdg_config_home"
+    },
+    {
+      "stage": "regular_preview_wrapper_metadata_1",
+      "modelCalls": 0,
+      "httpStatus": 404,
+      "diagnosticBodyPersisted": false
+    },
+    {
+      "stage": "regular_preview_wrapper_metadata_2",
+      "modelCalls": 0,
+      "httpStatus": 404,
+      "errorCode": "NOT_FOUND"
+    },
+    {
+      "stage": "regular_preview_wrapper_metadata_3",
+      "modelCalls": 0,
+      "httpStatus": 200,
+      "marker": "pullwise-jev-fixed36-v2-20261006",
+      "modelVersion": "jev-1.13.0",
+      "questionVersion": "ledger-suggest-v2",
+      "mode": "preview",
+      "secretPresent": true,
+      "enabled": true,
+      "productEnabled": false,
+      "productEvaluated": false,
+      "providerCalls": 0,
+      "expiresAt": 1791270835,
+      "exportNames": {
+        "workerEntrypoints": [
+          "Default"
+        ],
+        "durableObjects": [
+          "ValidationBudget"
+        ]
+      }
+    }
+  ],
+  "cleanup": {
+    "scope": "preview-only",
+    "providerReservationMicrousd": 99108,
+    "maxProviderAttempts": 36,
+    "productJevFlags": [
+      0,
+      0
+    ],
+    "remoteD1EvalCalls": 0,
+    "remoteBudgetEvalCalls": 0,
+    "newMigrations": 0,
+    "productionOperations": 0,
+    "wrapperVersion": "70aa061b-676f-40cc-b77b-f280c86a1923",
+    "readiness": {
+      "httpStatus": 200,
+      "passed": true,
+      "providerCalls": 0
+    },
+    "evaluationExitCode": 0,
+    "evaluationEvidenceComplete": true,
+    "execution": {
+      "providerAttempts": 36,
+      "completed": true,
+      "stopped": null,
+      "reservedMicrousd": 99108,
+      "bootstrapHttpFailures": 2,
+      "bootstrapProviderAttempts": 0
+    },
+    "eligibleForReview": true,
+    "canonicalRestored": true,
+    "restoreVersion": "a38a11a5-676d-414e-80cc-51208b72ada2",
+    "temporaryAuthDeleted": true,
+    "providerSecretPreserved": true
+  },
+  "previewDatabaseBinding": {
+    "name": "pullwise-ledger-preview",
+    "id": "e9dc3b89-f81f-4fce-87ef-d8797d879fb4"
+  },
+  "previewCoordinatorBinding": {
+    "worker": "pullwise-server-preview",
+    "binding": "VALIDATION_BUDGET",
+    "class": "ValidationBudget",
+    "scope": "pullwise-s17-s18-2026-09-28"
+  },
+  "modelGate": {
+    "providerEvidenceComplete": true,
+    "eligibleForReview": true
+  },
+  "productFlagsAutomaticallyEnabled": false,
+  "crossIsolateCapAuthority": "single authenticated controlled client with exclusive fsynced persistent journal; isolate-local replay set is supplemental"
+}

@@ -22,7 +22,8 @@ publication and real-provider/browser results are recorded separately.
   questions state the task and uncertainty boundaries more precisely.
 - [TypeSafe review](typesafe-jev-review.md) documents official API/model sources,
   suitable classification tasks and 36 agent-authored en/zh evaluation inputs.
-  Gold labels are not model predictions; no live quality result is claimed.
+  All 36 actual pinned-model responses passed the independent quality gate;
+  the review contains normalized provider evidence and reproducible metrics.
 - The deployment script uses locked pywrangler/Python packaging, source mirror
   generation and the pinned local Wrangler. Unused TypeSafe SDK/httpx2 runtime
   dependencies were removed; the native gateway remains the Worker transport.
@@ -40,8 +41,12 @@ One preview read-only journal GET before publication returned: reserved
 schema ready, no stop, ceilings **100,000 read / 1,000 written**. It did not use
 D1 or reset accounting. The old cumulative request gate was already removed;
 Shared Pool owner isolation and explicit key permission remain product security.
-Production D1 stays paused, and both Jev flags stay off pending real quality/runtime
-acceptance. Current Cloudflare CLI authorization is being completed through OAuth.
+Production D1 stays paused. Preview Jev flags were initially off pending actual
+quality/runtime evidence; the later preview-only activation is recorded below.
+Cloudflare CLI browser/device OAuth completed without requiring the
+user to configure an API token. The user's later scope is preview-only testing
+and verification; no further production repair, publication or acceptance is
+part of this continuation.
 
 Four migrations passed against a fresh local D1 directory only. The first local
 Python Worker startup failed fetching its runtime bundle because direct network
@@ -57,7 +62,116 @@ three report endpoints, repeated soft deletion/404 and recalculated totals.
 The fixture, its credentials and migrations stayed local; remote D1/provider
 calls were zero. Preview and production locked packaging both passed, with
 **430.59 KiB upload / 99.84 KiB gzip** after removing unused dependencies.
-Publication evidence follows when completed.
+Source `2ed7271ca058e6778aee372e93acb8d8f4fe7b89` was pushed to Server main.
+Its GitHub CI run [37422418979](https://github.com/GoPullwise/pullwise-server/actions/runs/37422418979)
+completed successfully. Preview was published with version
+`b385df9f-f7f9-40e9-90da-26e27b1bcb57`; the management deployment read-back
+confirmed 100% traffic. A finite direct preview health GET returned HTTP 200,
+`ok=true` and D1 configured. The unchanged fixed journal subsequently reported
+reserved **24,663 read / 416 written**, observed **17,621 read / 251 written**,
+schema ready and no stop. These are cumulative all-traffic snapshots.
+
+Web main source `0ff502cdea177f4d17cf08aaf35e818dd4ecf27d` was published to
+preview version `ef9edfbe-f881-4f7a-982a-8fc1d75ace71`. Its homepage and three
+current hashed assets returned 200; asset SHA-256 matched the local build and
+the preview HTML retained noindex. The Web companion records actual public
+browser evidence and distinguishes it from the synthetic local ledger journey.
+Authenticated browser and real model evidence are recorded separately below.
+
+## Current preview release (2026-10-06)
+
+Web code `ceb4424977193f6783a70e3e3cc5251100957e55` corrected the mobile
+homepage cascade; the actual 390px preview browser showed readable 288px purpose
+cells, a 386px ledger card and no horizontal overflow. Preview Web version
+`d3b560ec-ba80-4bea-a428-3ad137cad571` serves that build. Its four finite
+homepage/asset GETs passed content hashes; the follow-up phone batch had 13
+requests, all HTTP 200. The companion records the screenshot tool's touch-reset
+limitation and the restored native touch measurements separately.
+
+The [real Jev evaluation](typesafe-jev-review.md) completed 36 actual requests,
+all valid, with zero retries or false actionable hints. Each language/task
+correctly suggested 16/16 clear cases and withheld 2/2 uncertain cases; all six
+option-order pairs agreed. These small synthetic results support preview
+advisory use and do not establish customer-data accuracy.
+
+After independent offline recomputation, the unchanged canonical Server source
+`2ed7271ca058e6778aee372e93acb8d8f4fe7b89` was published to preview with the two
+Jev flags overridden to `1` using locked Pywrangler. Server version
+`a7470c2d-55f7-4f23-a3e0-2f920b6ef4b6` received 100% traffic; management
+read-back confirmed mode `preview`, both flags `1`, the original D1 database and
+fixed validation namespace, and the TypeSafe Secret name. No migration, journal
+reset, production deployment or provider call was part of this activation.
+
+The checked-in config still defaults both flags to `0`; this release is an
+explicit preview runtime overlay. A subsequent ordinary config-only deploy
+disables suggestions unless the reviewed overlay is deliberately retained.
+At this deployment stage, authenticated end-user acceptance was pending. That
+gate was subsequently completed in the finite user-consented run below.
+
+## Authenticated preview acceptance (2026-10-06)
+
+The user explicitly shared their existing Preview login through a temporary
+first-party consent page. A private one-shot WebSocket receiver placed only the
+canonical session Cookie in an in-memory Chromium context. It did not persist
+the Cookie, copy GitHub credentials, create a remote user or alter entitlements.
+The actual account was Free, so no additional model requests were made.
+
+The actual published Shared page loaded authenticated, showed no desktop
+overflow or page errors, switched Reports/Expenses with selected-tab and visible
+panel assertions, and opened, filled and cancelled an unsaved expense form.
+The cropped screenshot retained only the agent-authored draft; project/category
+choices were masked. The five writes were separate real same-browser Cookie
+REST requests, rather than UI Save clicks:
+
+1. Create an isolated QA category and confirm its filtered ledger is empty.
+2. Create one explicit Shared expense for USD 0.01; verify `amountMinor=1`.
+3. Edit only that new expense with `If-Match: "1"`; verify revision 2.
+4. Verify filtered Shared/account totals and exactly one CSV row, then delete
+   with `If-Match: "2"`; verify detail 404, empty filtered list/totals/CSV.
+5. Archive only the new QA category with its original revision.
+
+The receiver admitted **36 network / 21 business requests, five writes**, below
+the prewritten **95 network / 44 receiver-business / five-write** ceilings. The
+helper made one additional read-only authenticated-session check, within the
+combined 45-business ceiling. All 13 required REST results were asserted; the
+response observer retained 20 business responses, so the count of admitted
+requests is not presented as 21 completed HTTP responses. One admitted read had
+no retained response and its completion status is unknown. Source shows the
+draft form issues an abortable profile read cancelled on unmount, but the log
+does not prove that caused the missing observation. Two third-party
+font/analytics requests were deliberately blocked by the harness. There were
+zero application page errors, retries, provider calls, payment operations,
+GitHub mutations or changes to existing records.
+
+The test expense is soft-deleted and the QA category archived. Normal audit and
+idempotency records remain, one cumulative record slot and five commercial
+write operations were consumed, and no counters were refunded or reset. The
+test Cookie was cleared and the browser closed before the 15-minute deadline.
+[Credential-free results and the original admission manifest](preview-authenticated-2026-10-06.json)
+record the exact boundaries and results.
+
+The first consent-page attempt was rejected before session validation/sharing:
+the page's `no-referrer` policy made a native form send `Origin: null`. Actual
+Chromium/native Workerd evidence reproduced that rejection and proved the
+`strict-origin` repair; the exact Preview Origin check was retained. Sixteen
+local helper cases and two built-UI receiver fixtures passed without outgoing
+Preview/model traffic. A fresh consent capability and private runner were used
+only after proving the first attempt made zero session checks or business writes.
+
+After the successful run, the temporary path route, helper Worker and its
+independent `SessionRelay` namespace were removed. Management read-back found
+zero helper scripts/routes/namespaces and retained the original fixed budget
+namespace. Generated private helper files were deleted. Canonical Server version
+`a7470c2d-55f7-4f23-a3e0-2f920b6ef4b6` and both Jev flags `1` were read back;
+the helper did not change either product Worker.
+
+Final finite journal GET: reserved **28,042 read / 549 written**, observed
+**21,000 read / 334 written**, schema ready and no stop. Before consent it was
+reserved **26,865 / 469**, observed **19,823 / 284**. These are cumulative
+all-traffic snapshots under the unchanged **100,000 / 1,000** ceilings, not
+exclusive per-test D1 attribution. Authenticated Free Shared behavior and the
+separate 36-case real Jev suite passed; paid checkout, fresh OAuth callback
+assertions and production acceptance are outside this completed preview run.
 
 The historical evidence below describes earlier sources and authorization.
 

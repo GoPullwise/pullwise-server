@@ -1,0 +1,257 @@
+{
+  "date": "2026-10-06",
+  "scope": "Preview only; user clicked explicit one-time consent in their own logged-in browser",
+  "result": {
+    "kind": "real-consented-preview",
+    "authenticated": true,
+    "uiReadPassed": true,
+    "lifecyclePassed": true,
+    "qaCategoryCreated": true,
+    "qaExpenseCreated": true,
+    "qaExpenseRemoved": true,
+    "qaCategoryArchived": true,
+    "error": null,
+    "cookiePersisted": false,
+    "productionRequests": 0,
+    "retries": 0,
+    "paymentOrGithubMutationRequests": 0,
+    "desktopGeometry": {
+      "width": 1440,
+      "documentWidth": 1440
+    },
+    "runId": "4f0477c671",
+    "planTier": "free",
+    "profileVerified": true,
+    "qaEditVerified": true,
+    "sharedAndAccountMinorTotal": 1,
+    "csvRowsBeforeDelete": 1,
+    "csvRowsAfterDelete": 0,
+    "networkRequests": 36,
+    "businessRequests": 21,
+    "writeRequests": 5,
+    "sessionGETs": 1,
+    "pageErrors": 0,
+    "stopCode": null,
+    "responses": [
+      {
+        "method": "GET",
+        "path": "/api/auth/session",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/api/v1/reports/categories",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/api/v1/reports/summary",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/api/v1/expenses",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/api/v1/reports/timeseries",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/api/v1/categories",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/api/v1/projects",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/api/v1/me",
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/api/api/v1/categories",
+        "status": 201
+      },
+      {
+        "method": "GET",
+        "path": "/api/api/v1/expenses",
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/api/api/v1/expenses",
+        "status": 201
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/api/v1/expenses/exp_<qa>",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/api/v1/reports/summary",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/api/v1/expenses/export",
+        "status": 200
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/api/v1/expenses/exp_<qa>",
+        "status": 204
+      },
+      {
+        "method": "GET",
+        "path": "/api/api/v1/expenses/exp_<qa>",
+        "status": 404
+      },
+      {
+        "method": "GET",
+        "path": "/api/api/v1/expenses",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/api/v1/reports/summary",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/api/api/v1/expenses/export",
+        "status": 200
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/api/v1/categories/cat_<qa>",
+        "status": 204
+      }
+    ],
+    "blocked": [
+      {
+        "path": "/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495",
+        "reason": "EXTERNAL_HOST_BLOCKED"
+      },
+      {
+        "path": "/css2",
+        "reason": "EXTERNAL_HOST_BLOCKED"
+      }
+    ],
+    "tls": "Configured HTTP proxy; configured CA SPKI only; global ignore_https_errors disabled",
+    "retainedEffects": {
+      "qaCategory": "archived",
+      "qaExpenseUSD001": "soft-deleted",
+      "commercialWriteDispatches": 5,
+      "auditOrIdempotencyHistory": "Normal history for confirmed mutations remains; unknown outcomes retain reservations. No refund/reset."
+    }
+  },
+  "manifest": {
+    "scope": "preview only, ONE user-consented session, one no-reconnect runner",
+    "createdBeforeRequests": 1791271715507,
+    "deadline": 1791272569937,
+    "bounds": {
+      "receiverBusinessHTTP": 44,
+      "helperAuthSessionHTTP": 1,
+      "combinedBusinessHTTP": 45,
+      "receiverNetworkIncludingAssets": 95,
+      "writeHTTP": 5,
+      "receiverSessionGETs": 2,
+      "retries": 0,
+      "expenseRowsCreated": 1,
+      "currencies": [
+        "USD"
+      ],
+      "amountMinor": 1
+    },
+    "journal": {
+      "namespace": "0e0ce4946c5e4d5f81c606273ba94b5d",
+      "objectName": "pullwise-s17-s18-2026-09-28",
+      "rowsReadCeiling": 100000,
+      "rowsWrittenCeiling": 1000,
+      "resets": 0
+    },
+    "conservativePhaseAdmission": {
+      "writeReservationRows": 80,
+      "notes": "The existing Worker journal separately reserves every SQL/read/write group before dispatch. Runtime row ceilings remain authoritative; no new validation namespace or budget reset."
+    },
+    "steps": [
+      "Authenticated Shared UI + Reports tab + unsaved draft cancellation; empty accounts may do profile/category REST first and ONE UI reload (six reads)",
+      "13 same-browser-cookie REST requests: profile; create isolated QA category; empty filtered list; create USD .01 shared QA expense; If-Match edit; filtered shared/account totals; one-row CSV; If-Match soft-delete; 404 detail; empty list; empty totals; header-only CSV; archive only the new QA category"
+    ],
+    "consent": "Helper sends pw_session only after user clicks explicit Share button; ordinary GET never reads/forwards it.",
+    "credentialPersistence": false,
+    "knownEffects": "Normal audit/soft-delete and archived category remain; record slot and five commercial write operations are consumed.",
+    "maxModelGate": "Max account pauses before ANY writes for fresh root-provided Cloudflare readback of preview Jev flags0; no additional provider evaluation budget.",
+    "failurePolicy": "Unknown result, quota, unexpected API status, deadline or guard denial stops. No retries and no speculative cleanup after unknown writes.",
+    "productionAccess": false,
+    "payments": false,
+    "existingRecordMutation": false
+  },
+  "helper": {
+    "successfulVersion": "9c07bc51-6f9e-42bf-92ed-3c32a54ce7d6",
+    "nativeLocalProofCases": 16,
+    "beforeConsentOriginRejection": {
+      "credentialsShared": false,
+      "authSessionChecks": 0,
+      "businessWrites": 0,
+      "cause": "no-referrer produced native form Origin:null; changed to strict-origin, exact Origin check retained"
+    },
+    "successfulAuthSessionChecks": 1,
+    "cleanupVersion": "53ed3efb-2b97-484f-b6e7-a5c8d3aa10e9",
+    "scriptRemoved": true,
+    "pathRouteRemoved": true,
+    "temporaryNamespaceRemoved": true,
+    "fixedValidationNamespacePreserved": true,
+    "privateGeneratedFilesRemoved": true
+  },
+  "journal": {
+    "before": {
+      "limits": {
+        "rowsRead": 100000,
+        "rowsWritten": 1000
+      },
+      "reserved": {
+        "rowsRead": 26865,
+        "rowsWritten": 469
+      },
+      "observed": {
+        "rowsRead": 19823,
+        "rowsWritten": 284
+      },
+      "schemaReady": true,
+      "stopped": null
+    },
+    "after": {
+      "limits": {
+        "rowsRead": 100000,
+        "rowsWritten": 1000
+      },
+      "reserved": {
+        "rowsRead": 28042,
+        "rowsWritten": 549
+      },
+      "observed": {
+        "rowsRead": 21000,
+        "rowsWritten": 334
+      },
+      "schemaReady": true,
+      "stopped": null
+    },
+    "deltasAreAllTraffic": true,
+    "reset": false
+  },
+  "limitations": [
+    "Authenticated live account was Free; no additional model calls or payment transaction",
+    "Expense lifecycle used real same-browser Cookie REST requests; actual UI exercised Shared, tabs, and draft cancellation",
+    "Existing account record content was not exported into evidence; CSV assertions were restricted to the new QA category",
+    "Two external nonbusiness font/analytics requests were blocked by the harness; zero application page errors",
+    "21 business requests admitted; 20 responses retained, including all five confirmed writes. Completion of one admitted read was not observed; no speculative HTTP status or cancellation cause is claimed."
+  ]
+}
