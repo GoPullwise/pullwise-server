@@ -3,7 +3,10 @@
 User decisions, 2026-09-28: Free has 3 projects; Pro and Max have 100 each.
 Only Max has Jev, with a $5 budget per account per month, including annual
 subscriptions, without rollover. Core expense history remains separate from
-Creem platform payment facts. Jev activation/quality gates remain off.
+Creem platform payment facts. On 2026-10-06 the actual 36-case en/zh quality and
+Python Worker transport checks passed: Preview enable/evaluated flags are now
+versioned as `1`, while production flags and production D1 access remain `0`.
+Current evidence is in [local acceptance](../../validation/local-acceptance.md).
 
 ## Initial configurable defaults
 
@@ -59,8 +62,8 @@ allowances must match; change both explicitly or the configuration is rejected.
 This is an operator binding, not a public settings endpoint or browser variable.
 Editing an example file alone does not update Cloudflare. Any remote settings
 change must preserve existing bindings/secrets and the D1 pause and follow
-deployment review. A separate paused preview and its test Secrets are configured;
-no remote schema or D1 runtime was activated. Prices and product IDs remain owned by verified Creem catalog
+deployment review. The separate product Preview is active with its test Secrets
+and original bounded validation journal; production remains paused. Prices and product IDs remain owned by verified Creem catalog
 facts, not by this allowance configuration.
 
 ## Jev cost rule
@@ -90,6 +93,7 @@ request/response bounds remain additional safety controls. Free/Pro cannot
 invoke Jev even with suggestions scope. Max eligibility does not imply that
 Jev is active: public DTOs distinguish `eligible` and `available`. Preserve
 enable/evaluated flags at 0 until real quality, metering and provider gates pass.
+Those Preview gates passed on 2026-10-06; production activation remains separate.
 
 Max assistance is part of ordinary `POST /api/v1/expenses` and expense PATCH,
 including `expenses:write` API keys. No extra suggestion action or scope is
@@ -114,14 +118,19 @@ First initialization counts the owner's stored projects/records once; later
 UPSERTs use lazy CASE branches and stored totals. GETs do not initialize or
 update usage. Failed business/credential/audit batches roll back the counter.
 
-Migration `0004_ledger_plan_usage.sql` is unexecuted remotely. It adds a table,
-its implicit primary-key index and DDL cost. Every protected write adds a usage
+Migration `0004_ledger_plan_usage.sql` is included in the initialized Preview
+schema; production migrations remain a separate explicit operation. It adds a
+table, its implicit primary-key index and DDL cost. Every protected write adds a usage
 row write (and index effects on first insert); initialization adds count reads.
-These effects must be included in S18's cumulative 1,000-write/10,000-read budget.
+These effects are included in the original cumulative validation accounting;
+active Preview retains the later-approved 1,000-write/100,000-read ceilings.
 SQL batch/result counts are not billed row bounds. Existing imported data needs
-a reviewed initialization/cardinality bound. The remote allowlist remains empty.
+a reviewed initialization/cardinality bound. The active Preview product uses its
+reviewed per-SQL admission path; historical empty generic probe plans do not
+block ordinary product requests.
 
-The commercial quota is not the global validation hard cap and does not solve
-unbounded unauthenticated OAuth/provider traffic or total multi-account billing.
-The independent validation coordinator, D1 pause, provider gates and cost review
-remain necessary before any remote activation.
+The commercial quota is distinct from the global Preview validation hard cap.
+Production's explicit normal application path retains commercial/authentication
+guards and does not require the temporary Preview coordinator. Its checked-in
+D1 pause and separate provider activation remain; see the
+[migration path](../../validation/production-migration-readiness.md).

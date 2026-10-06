@@ -209,7 +209,23 @@ data reset. [Native local evidence](production-native-local-2026-10-06.json)
 distinguishes that result from remote formal activation, which was not performed.
 
 Locked Preview packaging passed at **430.99 KiB / 99.96 KiB gzip**. Final main
-publication and finite Preview release read-back are recorded after publication.
+publication: Server `bccf80897206ff9e9ae5b9fb83bcf309504f7036`, Web
+`26ed47ed9c375fdfd2c49ba86e906cebe5e9defa`. Server Preview version
+`b9a372f7-fd79-4233-8c46-b97d08c9797e` received 100% traffic. Management
+read-back confirmed the original D1/fixed DO, Preview mode, TypeSafe Secret name
+and both reviewed Jev flags `1`. Web Preview remains
+`d3b560ec-ba80-4bea-a428-3ad137cad571` at 100%; its actual browser/Worker source
+and asset hashes are unchanged by the production-only config repair.
+
+Two finite public Web-proxy GETs after the final Server publication returned
+200: health `ok=true`, D1 configured, and anonymous session authenticated=false.
+One subsequent journal GET returned schema ready/no stop, reserved
+**28,144 read / 549 written**, observed **21,102 read / 334 written**. The fixed
+100,000/1,000 ceilings were preserved. No remote schema migration, new model
+request or repeat user consent was needed for this runtime-compatible release.
+The earlier authenticated 13-step run tested the unchanged Preview application
+path; the new normal-mode branch was additionally exercised by the native local
+22-request fixture. No remote production business acceptance was performed.
 The new multi-repository/Organization/team role requirements remain planning
 only and have not altered this product release.
 

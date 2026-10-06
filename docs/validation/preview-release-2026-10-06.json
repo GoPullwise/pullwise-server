@@ -1,0 +1,60 @@
+{
+  "date": "2026-10-06",
+  "scope": "preview release read-back only",
+  "codeCommits": {
+    "server": "bccf80897206ff9e9ae5b9fb83bcf309504f7036",
+    "web": "26ed47ed9c375fdfd2c49ba86e906cebe5e9defa"
+  },
+  "versions": {
+    "server": "b9a372f7-fd79-4233-8c46-b97d08c9797e",
+    "web": "d3b560ec-ba80-4bea-a428-3ad137cad571"
+  },
+  "trafficPercent": 100,
+  "previewJevFlags": {
+    "enabled": "1",
+    "evaluated": "1"
+  },
+  "originalDatabase": "e9dc3b89-f81f-4fce-87ef-d8797d879fb4",
+  "originalBudgetNamespace": "0e0ce4946c5e4d5f81c606273ba94b5d",
+  "unchangedWebBrowserAssetBuild": true,
+  "health": {
+    "httpStatus": 200,
+    "ok": true,
+    "databaseConfigured": true
+  },
+  "anonymousSession": {
+    "httpStatus": 200,
+    "authenticated": false
+  },
+  "budgetHttpStatus": 200,
+  "budget": {
+    "limits": {
+      "rowsRead": 100000,
+      "rowsWritten": 1000
+    },
+    "reserved": {
+      "rowsRead": 28144,
+      "rowsWritten": 549
+    },
+    "observed": {
+      "rowsRead": 21102,
+      "rowsWritten": 334
+    },
+    "schemaReady": true,
+    "stopped": null
+  },
+  "checks": {
+    "pythonTests": 497,
+    "webTests": 343,
+    "localNativeProductionModeHttp": 22,
+    "realSyntheticJevCases": 36,
+    "previousRealAuthenticatedReceiverBusinessRequests": 21,
+    "previousConfirmedAuthenticatedWrites": 5
+  },
+  "additionalProviderCalls": 0,
+  "additionalBusinessWrites": 0,
+  "validationCounterResets": 0,
+  "remoteProductionBusinessAcceptance": false,
+  "previousAuthenticatedScope": "13 real same-browser-cookie REST lifecycle requests plus Shared/tab/draft-cancel UI; unchanged preview application path",
+  "newVersionImplemented": false
+}
