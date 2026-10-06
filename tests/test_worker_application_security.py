@@ -10,6 +10,7 @@ from urllib.parse import urlsplit, parse_qs, unquote
 import pytest
 
 from pullwise_server.cloudflare_plan_limits import PlanLimitError
+from pullwise_server.cloudflare_creem_gateway import CreemRequestRejected
 from pullwise_server.cloudflare_ledger_reports import CsvExport
 from pullwise_server.json_input import validate_json_unicode
 
@@ -23,7 +24,8 @@ class Response:
         return cls(payload, **options)
 
 
-def application(*, same_site="Lax", catalog_failure=None):
+def application(*, same_site="Lax", catalog_failure=None, billing_failure=None,
+                billing_gateway_failure=None):
     source = Path(__file__).resolve().parents[1] / "cloudflare/server/src/entry.py"
     tree = ast.parse(source.read_text())
     calls = []
@@ -36,14 +38,20 @@ def application(*, same_site="Lax", catalog_failure=None):
         raise catalog_failure
     async def billing(**kwargs):
         calls.append("billing")
+        if billing_failure is not None:
+            raise billing_failure
         return 200, {"accepted": True}
+    def creem_gateway(env):
+        if billing_gateway_failure is not None:
+            raise billing_gateway_failure
+        return None
     namespace = {"Response": Response, "time": time, "urlsplit": urlsplit,
         "parse_qs": parse_qs, "unquote": unquote, "json": json, "PlanLimitError": PlanLimitError,
         "handle_identity_request": identity, "handle_ledger_request": ledger,
         "read_or_refresh_catalog": catalog,
         "handle_billing_mutation": billing, "validate_json_unicode": validate_json_unicode,
         "CsvExport": CsvExport,
-        "WorkerGitHubGateway": lambda _: None, "WorkerCreemGateway": lambda _: None}
+        "WorkerGitHubGateway": lambda _: None, "WorkerCreemGateway": creem_gateway}
     target = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_request_target")
     exec(compile(ast.Module(body=[target], type_ignores=[]), str(source), "exec"), namespace)
     node = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "_Application")
@@ -94,6 +102,36 @@ def test_preview_catalog_diagnostics_never_return_provider_exception_text():
     assert response.status == 503
     assert "unregistered_secret_value" not in json.dumps(response.payload)
     assert "transportDiagnostic" not in response.payload["error"]
+
+
+@pytest.mark.parametrize("error", [
+    CreemRequestRejected("provider rejected secret_provider_payload"),
+    ValueError("unknown provider outcome secret_provider_payload"),
+    TimeoutError("lost provider acknowledgement secret_provider_payload"),
+    UnicodeError("invalid provider response secret_provider_payload"),
+])
+def test_billing_provider_failures_are_service_errors_without_exposing_provider_payloads(error):
+    app, calls = application(billing_failure=error)
+    response = asyncio.run(app.fetch(request("/billing/change-interval", raw=b'{"plan":"max","interval":"year"}')))
+    assert response.status == 503 and response.payload == {"error": {"code": "BILLING_UNAVAILABLE"}}
+    assert response.headers["Cache-Control"] == "no-store"
+    assert "secret_provider_payload" not in json.dumps(response.payload)
+    assert calls == ["billing"]
+
+
+def test_billing_gateway_configuration_failure_is_a_service_error():
+    app, calls = application(billing_gateway_failure=ValueError("provider origin invalid"))
+    response = asyncio.run(app.fetch(request("/billing/checkout-sessions")))
+    assert response.status == 503 and response.payload == {"error": {"code": "BILLING_UNAVAILABLE"}}
+    assert calls == []
+
+
+@pytest.mark.parametrize("raw", [b'{"plan":', b'\xff', b'{"plan":"\\ud800"}'])
+def test_malformed_billing_input_remains_a_request_error_before_provider_dispatch(raw):
+    app, calls = application(billing_failure=AssertionError("provider must not be called"))
+    response = asyncio.run(app.fetch(request("/billing/checkout-sessions", raw=raw)))
+    assert response.status == 422 and response.payload == {"error": {"code": "INVALID_REQUEST"}}
+    assert calls == []
 
 
 @pytest.mark.parametrize("path,status,code", [

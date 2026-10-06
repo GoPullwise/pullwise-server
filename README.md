@@ -64,9 +64,16 @@ gates pass. The user authorized self-authored synthetic en/zh evaluation samples
 their results must be recorded as synthetic-data validation.
 
 The current user request authorizes checks, fixes, main pushes and Cloudflare
-publication. Preview is active behind the existing cumulative 100,000-read /
-1,000-write journal; production D1 access remains paused. Do not reset that
-journal, add cron triggers or copy preview credentials/data into production.
+publication. The latest scope also removes artificial lifetime request/read/write
+test ceilings from enabled preview product traffic. The existing journal retains
+all cumulative reservations, observed usage and prior evidence; each SQL batch
+still needs bounded admission and native metering. Generic finite validation
+keeps its original ceilings. Production D1 access remains paused. Do not reset
+the journal, add cron triggers or copy preview credentials/data into production.
+The user's USD 200/month Cloudflare target is supported by preview abuse limits
+and avoiding repeated full-table cardinality scans, without hard daily/monthly
+row caps. Rate counters use bounded hashed DO subjects and return recoverable
+429 responses; they add no D1 writes. Remote acceptance stays low frequency.
 Keep remote validation finite and record its row reservations and actual results.
 Publication is separate from authenticated runtime/provider acceptance. See the
 [deployment guide](cloudflare/server/README.md) and current acceptance record for

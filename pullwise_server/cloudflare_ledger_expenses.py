@@ -10,7 +10,9 @@ import uuid
 from datetime import date
 from typing import Any, Mapping
 
-from .cloudflare_ledger_api import _error, _live_repos, _param, _revision, _timestamp, _write_guard
+from .cloudflare_ledger_api import (
+    _error, _live_repos, _param, _revision, _timestamp, _valid_resource_id, _write_guard,
+)
 from .cloudflare_ledger_auth import ledger_principal, target_allowed
 from .cloudflare_principal import PrincipalAuthError, _header
 from .account_cycle_rules import effective_user_plan
@@ -57,8 +59,7 @@ def _input(body, *, allow_missing_category=False):
     if (not isinstance(target, dict) or not isinstance(target.get("kind"), str)
             or target["kind"] not in {"project", "shared"}
             or set(target) != ({"kind", "projectId"} if target.get("kind") == "project" else {"kind"})
-            or (target["kind"] == "project" and (not isinstance(target["projectId"], str)
-                or not target["projectId"]))):
+            or (target["kind"] == "project" and not _valid_resource_id(target["projectId"]))):
         raise ValueError("target")
     occurred = body["occurredOn"]
     if not isinstance(occurred, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", occurred):
@@ -73,7 +74,7 @@ def _input(body, *, allow_missing_category=False):
         raise ValueError("currency")
     minor = _amount(body["amount"], currency)
     category_id = body.get("categoryId")
-    if ((category_id not in (None, "") and not isinstance(category_id, str))
+    if ((category_id not in (None, "") and not _valid_resource_id(category_id))
             or (not allow_missing_category and not category_id)
             or not isinstance(body["purpose"], str) or not 1 <= len(body["purpose"].strip()) <= 500):
         raise ValueError("text")
@@ -166,7 +167,7 @@ async def handle_expense_request(*, binding: Any, gateway: Any, method: str, pat
     if not path.startswith("/api/v1/expenses") or path not in {"/api/v1/expenses"} and not path.startswith("/api/v1/expenses/"):
         return None
     item_id = path[len("/api/v1/expenses/"):] if path.startswith("/api/v1/expenses/") else None
-    if item_id and "/" in item_id:
+    if item_id and not _valid_resource_id(item_id):
         return _error(404, "NOT_FOUND")
     if item_id == "export":
         return None

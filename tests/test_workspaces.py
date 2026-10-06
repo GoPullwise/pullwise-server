@@ -184,6 +184,52 @@ def test_invitation_acceptance_ignores_current_personal_workspace_selector(app):
     assert accept(app, issued, headers={"X-Pullwise-Workspace": "usr_github_5"})[0] == 200
 
 
+def test_accepted_invitation_preview_recovers_current_membership_without_writing(app):
+    issued = invite(app)
+    assert accept(app, issued)[0] == 200
+    assert app[3]("PATCH", path("members", RECIPIENT), {"role": "editor"},
+        headers={"If-Match": '"1"'})[0] == 200
+    before = count(app, "workspace_events")
+    # Recovery remains useful after the original invitation's 24-hour expiry.
+    with app[0]._immediate() as db:
+        db.execute("UPDATE workspace_invites SET expires_at=?", (NOW - 1,))
+    status, recovered = accept(app, issued, method="preview")
+    assert status == 200 and recovered["status"] == "accepted"
+    assert recovered["workspace"]["id"] == OWNER
+    assert recovered["workspace"]["role"] == "editor" and recovered["workspace"]["revision"] == 2
+    assert count(app, "workspace_events") == before
+    assert accept(app, issued) == (410, {"error": {"code": "INVITATION_ACCEPTED"}})
+    assert accept(app, issued, actor=6, method="preview")[0] == 403
+
+
+def test_accepted_invitation_preview_cannot_restore_removed_membership(app):
+    issued = invite(app)
+    assert accept(app, issued)[0] == 200
+    assert app[3]("DELETE", path("members", RECIPIENT), headers={"If-Match": '"1"'})[0] == 204
+    before = count(app, "workspace_events")
+    assert accept(app, issued, method="preview") == (410, {"error": {"code": "INVITATION_ACCEPTED"}})
+    assert count(app, "workspace_events") == before
+    assert app[3]("GET", path("members"), actor=5)[0] == 404
+
+
+def test_accepted_membership_recovery_does_not_depend_on_former_inviter_role(app):
+    issued = invite(app, actor=2)
+    assert accept(app, issued)[0] == 200
+    assert app[3]("PATCH", path("members", "usr_github_2"), {"role": "editor"},
+        headers={"If-Match": '"1"'})[0] == 200
+    before = count(app, "workspace_events")
+    status, recovered = accept(app, issued, method="preview")
+    assert status == 200 and recovered["workspace"]["role"] == "viewer"
+    assert count(app, "workspace_events") == before
+
+
+def test_revoked_invitation_is_distinct_from_expiry_and_recipient_bound(app):
+    issued = invite(app)
+    assert app[3]("DELETE", path(identifier=issued["id"]), headers={"If-Match": '"1"'})[0] == 204
+    assert accept(app, issued, method="preview") == (410, {"error": {"code": "INVITATION_REVOKED"}})
+    assert accept(app, issued, actor=6, method="preview")[0] == 403
+
+
 def test_acceptance_charges_ledger_owner_not_recipient(app):
     issued = invite(app, plan=True)
     status, _ = accept(app, issued, plan=True)

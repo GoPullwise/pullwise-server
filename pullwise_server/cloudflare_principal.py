@@ -9,6 +9,18 @@ SESSION_COOKIE = "pw_session"
 API_KEY_PREFIX = "pwk_"
 
 
+def _observe_authenticated_actor(binding, actor_id):
+    """Optional runtime abuse gate after authentication, with no D1 writes."""
+    for _ in range(4):
+        observer = getattr(binding, "observe_authenticated_actor", None)
+        if callable(observer):
+            observer(actor_id)
+            return
+        binding = getattr(binding, "binding", None)
+        if binding is None:
+            return
+
+
 class PrincipalAuthError(Exception):
     def __init__(self, status: int, code: str, message: str) -> None:
         self.status, self.code, self.message = status, code, message
@@ -100,6 +112,7 @@ async def _principal(binding: Any, headers: Mapping[str, object],
         user = await _user(binding, str(record["user_id"]))
         if user is None:
             raise PrincipalAuthError(401, "UNAUTHENTICATED", "A session or API key is required.")
+        _observe_authenticated_actor(binding, user["id"])
         return user, restrictions
     if session_ids:
         row = await binding.prepare("SELECT payload FROM app_state WHERE name='sessions'").first()
@@ -117,6 +130,7 @@ async def _principal(binding: Any, headers: Mapping[str, object],
                 if (user is not None and not (
                         "github" in (user.get("providers") or [])
                         and not user.get("githubAccessToken"))):
+                    _observe_authenticated_actor(binding, user["id"])
                     return user, {}
     raise PrincipalAuthError(401, "UNAUTHENTICATED", "A session or API key is required.")
 

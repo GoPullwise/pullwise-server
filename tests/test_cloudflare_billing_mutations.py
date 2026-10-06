@@ -73,6 +73,31 @@ class BillingMutationTests(unittest.TestCase):
         self.assertEqual(status, 401)
         self.assertEqual(len(self.gateway.calls), 1)
 
+    def test_checkout_defaults_and_untrusted_return_urls_return_to_billing(self):
+        status, payload = self.call("/billing/checkout-sessions", {
+            "plan": "pro", "successUrl": "https://evil.example/success",
+            "cancelUrl": "https://evil.example/cancel"})
+        self.assertEqual(status, 200)
+        self.assertEqual(self.gateway.calls[0][1]["success_url"],
+                         "https://app.example.test/billing?billing=success")
+        self.assertEqual(payload["cancelUrl"], "https://app.example.test/billing?billing=cancel")
+
+    def test_invalid_checkout_redirects_never_persist_provider_acknowledgement(self):
+        for url in ("https://checkout.creem.io.evil.example/ch_1",
+                    "https://user:password@checkout.creem.io/ch_1",
+                    "https://checkout.creem.io:444/ch_1",
+                    "https://checkout.creem.io/ch_1\r\n",
+                    " https://checkout.creem.io/ch_1"):
+            async def invalid_redirect(path, payload):
+                return {"id": "ch_1", "checkout_url": url}
+            self.gateway.post = invalid_redirect
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                self.call("/billing/checkout-sessions", {"plan": "pro"})
+            with self.store.connect() as db:
+                saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])["owner"]
+            self.assertNotIn("billingCheckout", saved)
+            self.assertEqual(saved["billing"]["plan"], "free")
+
     def test_cancel_resume_and_upgrade_keep_subscription_id(self):
         self.user["billing"] = {"provider": "creem", "plan": "pro", "interval": "month",
                                 "status": "active", "subscriptionId": "sub_1"}
@@ -85,6 +110,48 @@ class BillingMutationTests(unittest.TestCase):
         self.assertEqual((status, payload["plan"]), (200, "max"))
         self.assertEqual([call[0] for call in self.gateway.calls],
                          ["v1/subscriptions/sub_1/cancel", "v1/subscriptions/sub_1/resume", "v1/subscriptions/sub_1/upgrade"])
+
+    def test_cancel_and_resume_require_the_provider_to_confirm_the_requested_state(self):
+        for path, initial_status, returned_status in (
+            ("/billing/cancel-subscription", "active", "active"),
+            ("/billing/resume-subscription", "canceling", "scheduled_cancel"),
+        ):
+            self.user["billing"] = {"provider": "creem", "plan": "pro", "interval": "month",
+                "status": initial_status, "subscriptionId": "sub_1"}
+            self._save_user()
+            async def unchanged_subscription(provider_path, payload):
+                return {"id": "sub_1", "status": returned_status}
+            self.gateway.post = unchanged_subscription
+            with self.subTest(path=path), self.assertRaisesRegex(ValueError, "not confirmed"):
+                self.call(path, {})
+            with self.store.connect() as db:
+                saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])["owner"]
+            self.assertEqual(saved["billing"], self.user["billing"])
+
+    def test_repeated_cancel_and_resume_are_idempotent_and_resume_clears_cancellation(self):
+        self.user["billing"] = {"provider": "creem", "plan": "pro", "interval": "year",
+            "status": "active", "subscriptionId": "sub_1", "canceledAt": self.now - 100}
+        self._save_user()
+        self.assertEqual(self.call("/billing/cancel-subscription", {})[0], 200)
+        self.assertTrue(self.call("/billing/cancel-subscription", {})[1]["alreadyScheduled"])
+        self.assertEqual(self.call("/billing/resume-subscription", {})[0], 200)
+        self.assertTrue(self.call("/billing/resume-subscription", {})[1]["alreadyActive"])
+        self.assertEqual(len(self.gateway.calls), 2)
+        with self.store.connect() as db:
+            saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])["owner"]
+        self.assertEqual(saved["billing"]["interval"], "year")
+        self.assertFalse(saved["billing"]["cancelAtPeriodEnd"])
+        self.assertIsNone(saved["billing"]["canceledAt"])
+
+    def test_checkout_timeout_does_not_grant_or_persist_a_subscription(self):
+        async def timeout(path, payload):
+            raise TimeoutError("synthetic provider timeout")
+        self.gateway.post = timeout
+        with self.assertRaises(TimeoutError):
+            self.call("/billing/checkout-sessions", {"plan": "max", "interval": "year"})
+        with self.store.connect() as db:
+            saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])["owner"]
+        self.assertEqual(saved, self.user)
 
     def test_origin_and_invalid_plan_do_not_call_provider(self):
         status, _ = self.call("/billing/checkout-sessions", {"plan": "pro"},
@@ -135,6 +202,38 @@ class BillingMutationTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(repeated["pending"])
         self.assertEqual(len(self.gateway.calls), 1)
+
+    def test_invalid_upgrade_acknowledgement_keeps_claim_without_granting_target_plan(self):
+        self.user["billing"] = {"provider": "creem", "plan": "pro", "interval": "month",
+                                "status": "active", "subscriptionId": "sub_1"}
+        self._save_user()
+        async def mismatched_subscription(path, payload):
+            self.gateway.calls.append((path, payload))
+            return {"id": "different-subscription", "status": "active"}
+        self.gateway.post = mismatched_subscription
+        with self.assertRaisesRegex(ValueError, "identity mismatch"):
+            self.call("/billing/change-interval", {"plan": "max", "interval": "year"})
+        with self.store.connect() as db:
+            saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])["owner"]
+        self.assertEqual(saved["billing"]["plan"], "pro")
+        self.assertEqual(saved["billingChange"]["interval"], "year")
+        self.assertTrue(self.call("/billing/change-interval", {"plan": "max", "interval": "year"})[1]["pending"])
+        self.assertEqual(len(self.gateway.calls), 1)
+
+    def test_unsupported_and_inactive_subscription_changes_never_call_provider(self):
+        for plan, interval, status, target in (
+            ("max", "month", "active", {"plan": "pro", "interval": "year"}),
+            ("pro", "year", "active", {"plan": "max", "interval": "month"}),
+            ("pro", "month", "canceling", {"plan": "max", "interval": "month"}),
+            ("pro", "month", "past_due", {"plan": "max", "interval": "year"}),
+        ):
+            self.user["billing"] = {"provider": "creem", "plan": plan, "interval": interval,
+                "status": status, "subscriptionId": "sub_1"}
+            self._save_user()
+            with self.subTest(plan=plan, interval=interval, status=status, target=target):
+                code, payload = self.call("/billing/change-interval", target)
+                self.assertEqual((code, payload["error"]["code"]), (409, "UPGRADE_NOT_ALLOWED"))
+        self.assertEqual(self.gateway.calls, [])
 
     def test_definitively_rejected_upgrade_releases_pending_claim(self):
         self.user["billing"] = {"provider": "creem", "plan": "pro", "interval": "month",

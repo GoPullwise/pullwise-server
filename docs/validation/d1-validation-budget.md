@@ -4,6 +4,107 @@ Updated 2026-10-06. The user authorized S17/S18 conditional on controlling
 D1 usage, especially Rows Written. This is an execution candidate, not a
 record of completed runtime acceptance or authorization to release production.
 
+## Normal preview operation policy (2026-10-06)
+
+The latest user request explicitly asks to remove unreasonable preview request
+restrictions and deliver a usable product. Enabled preview product traffic now
+uses `BudgetJournal(..., preview_product=True, product_operations=True)`. Its
+ordinary SQL operations do not enforce the historical lifetime 100,000-read /
+1,000-written reservation ceilings. These test ceilings made healthy use stop
+permanently after a small number of edits or logins. Production access remains
+paused, and generic finite validation plans retain their original request,
+case and cumulative row limits.
+
+The same Durable Object namespace/name, D1 database, journal and counters remain.
+An immutable `preview_product_operation_policy` transition marker records the
+old ceilings, request/reservation totals and any recovered pre-dispatch budget
+stop. No reservations are refunded and no counters are reset. Only the exact
+`BUDGET_EXHAUSTED` stop can close its old ticket, with schema readiness and
+complete evidence matching observed totals. Native unknown outcomes, missing or
+invalid metering, actual usage beyond a proven bound, incomplete requests,
+timeouts, manual stops and schema mismatches remain blocked. The one existing
+historical request/read grants retain their earlier rules.
+
+Ordinary SQL continues to reserve its calculated worst-case rows before
+dispatch, capture native actual rows and retain write reservations including
+indexes. Native read attempts greater than one, or missing attempt metadata,
+retain the whole read reservation and allow subsequent healthy traffic;
+they do not imply an unknown SQL outcome. A native single attempt is still
+required to settle unused read margin. Scalar/unique-key mutation fences,
+64 statements per batch, 128 SQL groups per request, input envelopes, known
+tables, schema fingerprints and cardinality checks remain. The shared request
+lock remains necessary while the single active ticket and cardinality evidence
+are authoritative; its bounded queue does not consume a lifetime allowance.
+Current commercial project/record/write quotas, authorization, member roles,
+owner billing and Jev dollar reservations remain independent and enforced.
+
+The user's subsequent cost clarification sets about USD 200/month for the total
+Cloudflare service as an operating target and explicitly rejects hard calendar
+row caps that stop normal use. Abuse protection runs in the same DO SQLite store:
+600 requests/minute per trusted Cloudflare IP, 240/minute per credential,
+10 OAuth/installation authorize-or-callback requests/minute per IP, and after
+existing authentication reads, 120 read attempts or 60 ordinary write attempts
+per minute per actual actor across sessions/API keys. Emergency revocation has
+a separate 120/minute actor bucket. Free's existing commercial 10 writes/minute
+and paid plans' 60 writes/minute still apply. A rate rejection returns 429 with
+`Retry-After`; it adds no D1 quota-counter writes and never stops the journal.
+Only hashed subjects are stored, capped at 20,000 active buckets; their windows
+expire within two minutes. These ephemeral buckets are separate from retained
+accounting/evidence. The cost target is not an invoice ceiling. Remote acceptance
+must stay finite and low frequency; no D1 polling or load testing is authorized.
+
+Persisted `product_data_verified` cardinality avoids a full 18-table COUNT/state
+scan before every read request. Fresh/previously unmarked initialization verifies
+once; a successful schema upgrade already verifies its new counts. Every product
+mutation still refreshes and persists counts before closing its ticket. A restart
+may reuse a completed verified snapshot; an active/incomplete ticket still stops.
+This relies on the existing exclusive preview-write premise: all D1 product
+writes use this same singleton, and remote console/another Worker writes are
+excluded. An operator migration must separately prove its schema/cardinality.
+
+Known provider/business 403/404/409/413/422/429/502/503 responses finish the
+current ticket normally and allow subsequent users to continue. The existing
+30-second application deadline remains. If cancellation has fully awaited all
+native IO, the journal is healthy and mutation cardinality was refreshed, a
+current provider/application timeout or uncaught application error closes only
+that ticket and returns a safe 503. Its numeric request ID/failure kind/time
+append to `preview_request_failures`; no exception text is exposed. A canceled
+native dispatch, incomplete cardinality refresh or any existing stop continues
+to fail closed. Previous timeout/unknown stops are never resumed by this path.
+
+New operation evidence appends to `preview_operation_evidence` in the same DO
+SQLite storage. `preview_read_settlements` appends proven read-margin releases.
+SQLite triggers atomically publish the corresponding cumulative counters.
+Existing JSON evidence is retained unchanged; neither table has an application
+update/delete/reset endpoint. Normal requests query only the latest evidence
+row; the internal audit RPC returns at most 128 new rows and a truncation flag,
+while all earlier history remains stored. This prevents ordinary operation from
+rewriting an indefinitely growing evidence array on every SQL group.
+
+`GET /_preview/budget` remains DO-only and exposes numeric cumulative usage,
+`productOperationMode: true`, unenforced lifetime `limits` as null and the
+historical numeric ceilings separately. It exposes no account data, parameters,
+tokens or provider payloads. Publication checks may compare counters across the
+transition, rather than treating the old ceilings as the current product gate.
+
+Oversized SQL parameters are rejected before that SQL group's dispatch as an
+ordinary invalid-input request, without stopping all users. Preview CSV exports
+still finish their metered D1 work before returning a response. The former
+1 MiB restriction is replaced with a 24 MiB UTF-8 byte spool; this leaves room
+within the [Workers 128 MB memory limit](https://developers.cloudflare.com/workers/platform/limits/).
+Larger exports return 413 `EXPORT_TOO_LARGE` with filtering guidance and keep
+the journal healthy; partial CSV files are never returned. Production/local
+exports retain their existing streaming response path. This bounded spool is
+an explicit compatibility choice while preview accounting requires all D1
+pulls to finish inside the active ticket.
+
+References checked for this change: [Workers best practices](https://developers.cloudflare.com/workers/best-practices/workers-best-practices/),
+[Workers streams](https://developers.cloudflare.com/workers/runtime-apis/streams/),
+[D1 automatic retries](https://developers.cloudflare.com/d1/observability/debug-d1/#automatic-retries).
+The dated sections below describe prior finite validation policies and evidence;
+their lifetime ceilings and 1 MiB product-export cap are historical for enabled
+normal preview product traffic.
+
 ## Current workspace/repository schema plan (2026-10-06)
 
 The new version is implemented and released to preview with its dedicated

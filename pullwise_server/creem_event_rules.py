@@ -185,6 +185,8 @@ def billing_update_from_creem_event(event: dict, configured_ids_by_plan: dict) -
         subscription.get("status") if isinstance(subscription, dict) else None,
         transaction.get("status"),
     )
+    if status not in {"active", "trialing", "canceling", "canceled", "past_due", "unpaid", "paused"}:
+        return None
     if event_type == "refund.created" and status != "canceled":
         return None
     if status in PAID_PLAN_ENTITLEMENT_STATUSES and (not product_plan or not subscription_id):
@@ -244,7 +246,7 @@ def event_created(event: dict) -> int | float | None:
 
 
 def normalize_subscription_status(status: object) -> str:
-    normalized = text_payload(status, "active").strip().lower()
+    normalized = text_payload(status, "").strip().lower()
     if normalized == "trialing":
         return "trialing"
     if normalized in {"active", "paid"}:
@@ -255,7 +257,7 @@ def normalize_subscription_status(status: object) -> str:
         return normalized
     if normalized in {"canceled", "cancelled", "expired", "incomplete_expired"}:
         return "canceled"
-    return normalized or "active"
+    return normalized
 
 
 def normalize_creem_subscription_status(event_type: str | None, status: object, transaction_status: object | None = None) -> str:

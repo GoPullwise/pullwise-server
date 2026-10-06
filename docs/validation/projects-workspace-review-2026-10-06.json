@@ -1,0 +1,36 @@
+{
+  "date": "2026-10-06",
+  "passed": true,
+  "runtime": "CPython 3.10.12, pytest 9.1.1, transactional SQLite D1-shaped fixtures",
+  "command": ".venv/bin/python -m pytest tests/test_ledger_input_bounds.py tests/test_project_repositories.py tests/test_workspaces.py tests/test_workspace_authorization.py -q",
+  "testsPassed": 184,
+  "elapsedSeconds": 6.63,
+  "staticContractCheck": "scripts/check-ledger-s01.py --allow-placeholders passed",
+  "repairs": [
+    "Project pagination rejects Unicode numeric text and excessively long numbers with 422 before D1 or provider work, replacing uncaught integer-conversion errors.",
+    "Project/expense cursors, filter IDs, resource path IDs and expense/suggestion resource IDs are validated before D1 admission; oversized/control inputs cannot stop the preview journal through SQL parameter envelopes.",
+    "Quoted revisions reject excessively long or JavaScript-unsafe integers before mutation.",
+    "Invitation preview distinguishes accepted/revoked/expired tokens and recovers an accepted response from the exact recipient's current active membership without another accept/write; removed membership cannot be restored."
+  ],
+  "verifiedScenarios": [
+    "Owner/Admin/Editor/Viewer scopes, immutable Owner, Admin peer/self-promotion limits",
+    "Recipient-bound, hashed, expiring, single-use invitations, revocation and lost inviter authority",
+    "Acceptance response recovery after role change and original token expiry, after former inviter demotion, and denied recovery for removed or wrong-account recipients",
+    "Workspace isolation, actual member audit identity, Owner entitlement and quota authority, actor-separated expense idempotency",
+    "Workspace-bound API keys, current membership revisions, stale key invalidation after role changes/removal/rejoin",
+    "Actor-specific GitHub grants, cross-organization and up to 30 repository links, repository occupancy and atomic conflicting edits",
+    "Archive disables new project expenses, preserves financial totals/historical edits and repository occupancy, restore requires at least one actor-authorized bound repository",
+    "Multi-repository totals and CSV count every expense once; partial/total GitHub access loss hides protected metadata while preserving financial history",
+    "Malformed ingress denied before D1/provider/model work, credential/revision race fences retain atomic mutation/audit behavior"
+  ],
+  "remoteRequests": 0,
+  "remoteD1RowsRead": 0,
+  "remoteD1RowsWritten": 0,
+  "providerRequests": 0,
+  "fixtureProvenance": "Synthetic account/session/GitHub-provider facts; this file does not claim real-account or Cloudflare-native acceptance.",
+  "realAccountPreconditions": [
+    "Two distinct current preview Cookie sessions authenticated as distinct stable GitHub User IDs",
+    "Invitation issuance resolves the second account's actual GitHub login; invitation acceptance uses that account's own preview session",
+    "Shared project expense creation/target moves require the second actor's own current GitHub App access to at least one bound repository; finance-only historical/shared-pool reads do not borrow Owner credentials"
+  ]
+}

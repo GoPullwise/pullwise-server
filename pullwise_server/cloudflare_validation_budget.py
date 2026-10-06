@@ -29,6 +29,14 @@ def _integer(value, minimum=0):
     return type(value) is int and value >= minimum
 
 
+def _sql_number(value):
+    # Python integers cross the Workers FFI as BigInt. DO SQLite bindings,
+    # like D1, use JavaScript Numbers; preserve exact safe integers explicitly.
+    if not _integer(value) or value > 9007199254740991:
+        raise BudgetError("JOURNAL_INTEGER_BOUND")
+    return float(value)
+
+
 def _field(value, name, default=None):
     return value.get(name, default) if isinstance(value, dict) else getattr(value, name, default)
 
@@ -157,9 +165,12 @@ class BudgetJournal:
     A live ticket excludes overlapping requests. Object restart with a pending
     ticket stops permanently: its outcome is unknown. There is no reset API.
     """
-    def __init__(self, sql, *, preview_product=False):
+    def __init__(self, sql, *, preview_product=False, product_operations=False):
         self.sql = sql
         self.preview_product = preview_product is True
+        # This is an explicit product-runtime policy, never a generic finite
+        # validation bypass. The Worker selects it only for enabled preview.
+        self.product_operations = self.preview_product and product_operations is True
         self.read_ceiling = PREVIEW_PRODUCT_READ_CEILING if preview_product is True else READ_CEILING
         sql.exec("CREATE TABLE IF NOT EXISTS validation_budget (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL)")
         initial = {"scope": BUDGET_SCOPE, "requests": 0, "reserved_read": 0,
@@ -167,6 +178,8 @@ class BudgetJournal:
                    "active": None, "deadline": None, "stopped": None,
                    "cases": {}, "evidence": []}
         sql.exec("INSERT OR IGNORE INTO validation_budget(id,payload) VALUES(1,?)", json.dumps(initial))
+        if self.product_operations:
+            self._create_product_evidence_tables()
         state = self.snapshot()
         if state["scope"] != BUDGET_SCOPE:
             self.stop("BUDGET_SCOPE_MISMATCH")
@@ -174,8 +187,120 @@ class BudgetJournal:
             if self.preview_product:
                 self._apply_preview_read_grant(state)
                 self._remove_preview_request_limit(self.snapshot())
+            if self.product_operations:
+                self._enable_product_operations(self.snapshot())
             if self.snapshot()["active"] is not None:
                 self.stop("INCOMPLETE_REQUEST")
+
+    def _create_product_evidence_tables(self):
+        # The legacy payload is retained. New immutable operation rows avoid
+        # rewriting an ever-growing JSON array as normal product usage grows.
+        # Triggers publish evidence and cumulative accounting atomically in
+        # one SQLite INSERT; these are DO-storage operations, never D1 rows.
+        self.sql.exec("""CREATE TABLE IF NOT EXISTS preview_operation_evidence (
+            id INTEGER PRIMARY KEY, request INTEGER NOT NULL, operation INTEGER NOT NULL,
+            rows_read INTEGER NOT NULL CHECK(rows_read>=0),
+            rows_written INTEGER NOT NULL CHECK(rows_written>=0),
+            complete INTEGER NOT NULL CHECK(complete IN (0,1)))""")
+        self.sql.exec("""CREATE TABLE IF NOT EXISTS preview_read_settlements (
+            evidence_id INTEGER PRIMARY KEY REFERENCES preview_operation_evidence(id),
+            margin INTEGER NOT NULL CHECK(margin>=0))""")
+        self.sql.exec("""CREATE TABLE IF NOT EXISTS preview_request_failures (
+            request INTEGER PRIMARY KEY, kind INTEGER NOT NULL CHECK(kind IN (1,2)),
+            closed_at REAL NOT NULL)""")
+        self.sql.exec("""CREATE TRIGGER IF NOT EXISTS preview_operation_accounting
+            AFTER INSERT ON preview_operation_evidence BEGIN
+            UPDATE validation_budget SET payload=json_set(payload,
+                '$.actual_read',json_extract(payload,'$.actual_read')+NEW.rows_read,
+                '$.actual_written',json_extract(payload,'$.actual_written')+NEW.rows_written,
+                '$.product_evidence_rows',coalesce(json_extract(payload,'$.product_evidence_rows'),0)+1)
+            WHERE id=1; END""")
+        self.sql.exec("""CREATE TRIGGER IF NOT EXISTS preview_read_accounting
+            AFTER INSERT ON preview_read_settlements BEGIN
+            UPDATE validation_budget SET payload=json_set(payload,
+                '$.reserved_read',json_extract(payload,'$.reserved_read')-NEW.margin,
+                '$.read_margin_released',coalesce(json_extract(payload,'$.read_margin_released'),0)+NEW.margin)
+            WHERE id=1; END""")
+        self.sql.exec("""CREATE TRIGGER IF NOT EXISTS preview_request_failure_accounting
+            AFTER INSERT ON preview_request_failures BEGIN
+            UPDATE validation_budget SET payload=json_set(payload,
+                '$.active',NULL,'$.deadline',NULL,
+                '$.product_closed_failures',coalesce(json_extract(payload,'$.product_closed_failures'),0)+1)
+            WHERE id=1; END""")
+
+    def _product_evidence(self, *, limit=1):
+        cursor = self.sql.exec("""SELECT e.id,e.request,e.operation,e.rows_read,e.rows_written,
+            e.complete,s.margin FROM preview_operation_evidence e
+            LEFT JOIN preview_read_settlements s ON s.evidence_id=e.id
+            ORDER BY e.id DESC LIMIT ?""", _sql_number(limit))
+        # Durable Object SQL cursors implement toArray; reference-test cursors
+        # supply the same API. Never scan full product history for a request.
+        rows = list(cursor.toArray())
+        evidence = []
+        for row in reversed(rows):
+            item = {key: _field(row, key) for key in
+                    ("request", "operation", "rows_read", "rows_written")}
+            if not _field(row, "complete"):
+                item["complete"] = False
+            margin = _field(row, "margin")
+            if margin is not None:
+                item["read_margin_released"] = margin
+            evidence.append((_field(row, "id"), item))
+        return evidence
+
+    def evidence_snapshot(self):
+        """Bounded RPC audit view; all prior evidence remains stored intact."""
+        state = self.snapshot()
+        if self.product_operations:
+            recent = self._product_evidence(limit=128)
+            state["product_evidence"] = [item for _, item in recent]
+            state["product_evidence_truncated"] = state.get("product_evidence_rows", 0) > len(recent)
+        return state
+
+    def _enable_product_operations(self, state):
+        """Retire lifetime product test ceilings without forgiving unknown IO.
+
+        Keep the original journal, reservations, observations and every piece
+        of evidence. Only the known pre-dispatch lifetime-budget stop can
+        close an old ticket, and only when all dispatched usage is accounted.
+        SQL/input/batch bounds and commercial owner quotas remain enforced.
+        """
+        if state.get("preview_product_operation_policy"):
+            return
+        if state["stopped"] not in {None, "BUDGET_EXHAUSTED"}:
+            return
+        if (any(not _integer(state.get(key)) for key in
+                ("requests", "reserved_read", "reserved_written", "actual_read", "actual_written"))
+                or state["actual_read"] > state["reserved_read"]
+                or state["actual_written"] > state["reserved_written"]):
+            return
+        previous_stop = state["stopped"]
+        previous_ticket = state["active"]
+        if previous_stop:
+            evidence = state.get("evidence")
+            if (state.get("schema_ready") is not True
+                    or not isinstance(evidence, list)
+                    or any(not isinstance(item, dict) or item.get("complete", True) is not True
+                           or not _integer(item.get("rows_read"))
+                           or not _integer(item.get("rows_written")) for item in evidence)
+                    or sum(item["rows_read"] for item in evidence) != state["actual_read"]
+                    or sum(item["rows_written"] for item in evidence) != state["actual_written"]
+                    or previous_ticket is not None and
+                       (not _integer(previous_ticket, 1) or previous_ticket > state["requests"])):
+                return
+        elif previous_ticket is not None:
+            return
+        state["preview_product_operation_policy"] = {
+            "version": 1, "authorized": "2026-10-06",
+            "previous_read_ceiling": PREVIEW_PRODUCT_READ_CEILING,
+            "previous_write_ceiling": WRITE_CEILING,
+            "requests_at_transition": state["requests"],
+            "reserved_read_at_transition": state["reserved_read"],
+            "reserved_written_at_transition": state["reserved_written"],
+            "previous_stop": previous_stop, "previous_ticket": previous_ticket,
+        }
+        state["stopped"] = state["active"] = state["deadline"] = None
+        self._save(state)
 
     def _remove_preview_request_limit(self, state):
         """Remove the authorized product request gate, preserving all accounting.
@@ -310,23 +435,25 @@ class BudgetJournal:
         state = self.check(ticket, now=now)
         if not _integer(reads) or not _integer(writes):
             self._reject("UNREVIEWED_BOUND")
-        if (state["reserved_read"] + reads > self.read_ceiling
-                or state["reserved_written"] + writes > WRITE_CEILING):
+        if (not self.product_operations and (state["reserved_read"] + reads > self.read_ceiling
+                or state["reserved_written"] + writes > WRITE_CEILING)):
             self._reject("BUDGET_EXHAUSTED")
         state["reserved_read"] += reads
         state["reserved_written"] += writes
         self._save(state)
 
-    def save_product_state(self, ticket, data, *, now, initialized=False):
+    def save_product_state(self, ticket, data, *, now, initialized=False, verified=False):
         state = self.check(ticket, now=now)
         state["product_data"] = data
+        state["product_data_verified"] = verified is True
         if initialized:
             state["schema_ready"] = True
         self._save(state)
 
     def settle_product_reads(self, ticket, operation, reserved, *, now):
         state = self.check(ticket, now=now)
-        evidence = state["evidence"][-1] if state["evidence"] else {}
+        archived = self._product_evidence() if self.product_operations else []
+        evidence = archived[-1][1] if archived else state["evidence"][-1] if state["evidence"] else {}
         if (evidence.get("request") != ticket or evidence.get("operation") != operation
                 or evidence.get("complete", True) is not True
                 or "read_margin_released" in evidence or not _integer(reserved)
@@ -335,6 +462,12 @@ class BudgetJournal:
         margin = reserved - evidence["rows_read"]
         if state["reserved_read"] - margin < state["actual_read"]:
             self._reject("SETTLEMENT_INVALID")
+        if self.product_operations:
+            if not archived:
+                self._reject("SETTLEMENT_INVALID")
+            self.sql.exec("INSERT INTO preview_read_settlements(evidence_id,margin) VALUES(?,?)",
+                          _sql_number(archived[-1][0]), _sql_number(margin))
+            return
         state["reserved_read"] -= margin
         state["read_margin_released"] = state.get("read_margin_released", 0) + margin
         evidence["read_margin_released"] = margin
@@ -346,6 +479,11 @@ class BudgetJournal:
         state = self.snapshot()
         if state["active"] != ticket:
             self._reject("REQUEST_CLOSED")
+        if self.product_operations:
+            self.sql.exec("""INSERT INTO preview_operation_evidence
+                (request,operation,rows_read,rows_written,complete) VALUES(?,?,?,?,?)""",
+                *(_sql_number(value) for value in (ticket, operation, reads, writes, int(complete))))
+            return
         state["actual_read"] += reads
         state["actual_written"] += writes
         evidence = {"request": ticket, "operation": operation,
@@ -359,6 +497,21 @@ class BudgetJournal:
         state = self.check(ticket, now=now)
         state["active"] = state["deadline"] = None
         self._save(state)
+
+    def finish_accounted_product_failure(self, ticket, *, now, timeout=False):
+        """Close a canceled/failed application after its metered IO completed.
+
+        The caller must await application cancellation and verify both native
+        dispatch and cardinality refresh are complete. This never recovers an
+        existing stop, including a native IO timeout. It only isolates the
+        current provider/application error. The additive audit is numeric.
+        """
+        state = self.snapshot()
+        if (not self.product_operations or state["stopped"] is not None
+                or state["active"] != ticket):
+            raise BudgetError(state["stopped"] or "REQUEST_OUTCOME_UNKNOWN")
+        self.sql.exec("INSERT INTO preview_request_failures(request,kind,closed_at) VALUES(?,?,?)",
+                      _sql_number(ticket), _sql_number(1 if timeout else 2), now)
 
 
 class MeteredD1:

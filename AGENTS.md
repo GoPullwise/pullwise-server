@@ -2,6 +2,40 @@
 
 ## Current task authority (2026-10-06)
 
+Latest user follow-up authorizes complete Projects acceptance, two real GitHub
+accounts (DFerryman and SanChai20), payment/subscription success and failure
+verification without real payment, repairs, main pushes and preview publication.
+It explicitly requests removal of unreasonable preview request restrictions.
+The user then clarified that their total Cloudflare target is about USD 200 per
+month and requested reasonable abuse protection, not hard daily/monthly row
+budgets that stop normal use. Do not deploy an unapproved calendar write cap or
+restore lifetime product exhaustion. Keep remote acceptance low frequency and
+finite; no rapid D1 polling, load tests or repeated provider calls. Preview
+abuse admission uses the same DO SQLite storage with hashed IP/credential/actor
+subjects, bounded expiring counters and HTTP 429 plus Retry-After. It adds no
+D1 counter writes. Authenticated actor limits remain compatible with paid plan
+write allowances; emergency revocation has a separate admission bucket. The
+USD 200 value is an operating target, not a guaranteed invoice ceiling.
+Product cardinalities are verified on first unmarked use/schema upgrade and
+after every mutation, then persisted in the same journal. Healthy read requests
+reuse that proof to avoid full-table COUNT scans. This relies on the existing
+exclusive preview-write path: no console/other-Worker writes outside the same
+singleton. Incomplete tickets and unknown native outcomes still stop.
+Enabled preview product traffic now selects product_operations: lifetime
+request/read/write test ceilings do not gate normal operation. The original
+journal, namespace, numeric cumulative accounting and legacy evidence stay;
+new evidence is append-only in the same DO SQLite store. Generic finite test
+plans retain their ceilings. Complete native accounting, bounded SQL/input/CSV,
+workspace authorization and commercial plan/model budgets remain required.
+Do not reset/resume unknown-outcome or incomplete-accounting stops. Known
+fully-accounted request/provider failures are isolated to their request.
+The older lifetime product ceilings stated below are historical authority,
+superseded by this follow-up; they must not reinstate ordinary preview gating.
+Remote testing remains preview-only, production D1 stays paused. Real-account
+acceptance requires the accounts' actual preview sessions, never fabricated
+sessions from GitHub connector profiles. Test payment facts locally with signed
+synthetic webhooks; do not make real charges or change live subscriptions.
+
 Latest scope: the original release goals have their own dated evidence; the
 multi-repository/Organization/shared-ledger version is now implemented and
 released to preview with its own native/browser/publication evidence. Treat

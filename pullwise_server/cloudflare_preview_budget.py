@@ -280,8 +280,9 @@ def begin_product_schema_upgrade(journal, plan, *, now):
     reviewed, _ = _upgrade_plan(state)
     if plan != reviewed:
         raise BudgetError("SCHEMA_UPGRADE_UNREVIEWED")
-    if (state["reserved_read"] + plan.rows_read > journal.read_ceiling
-            or state["reserved_written"] + plan.rows_written > WRITE_CEILING):
+    if (not journal.product_operations and
+            (state["reserved_read"] + plan.rows_read > journal.read_ceiling
+             or state["reserved_written"] + plan.rows_written > WRITE_CEILING)):
         journal._reject("BUDGET_EXHAUSTED")
     ticket = journal.begin_product(now=now)
     journal.reserve_operation(ticket, reads=plan.rows_read, writes=plan.rows_written, now=now)
@@ -363,7 +364,7 @@ async def upgrade_product_schema(binding, journal, *, clock=time.time):
         data = _validated_product_data(verified[1], verified[2], upper, INDEX_COUNTS)
         state = journal.check(ticket, now=clock())
         state.update(product_data=data, schema_version=SCHEMA_VERSION,
-                     schema_fingerprint=SCHEMA_FINGERPRINT)
+                     schema_fingerprint=SCHEMA_FINGERPRINT, product_data_verified=True)
         state["schema_upgrade"]["complete"] = True
         journal._save(state)
         journal.finish(ticket, now=clock())
@@ -438,13 +439,41 @@ async def initialize_product(binding, journal, *, clock=time.time):
 
 
 class ProductMeteredD1(MeteredD1):
-    def __init__(self, binding, journal, ticket, *, clock=time.time):
+    def __init__(self, binding, journal, ticket, *, clock=time.time, rate_limiter=None, rate_channel="read"):
         self._binding, self.journal, self.ticket, self.clock = binding, journal, ticket, clock
         self.data = journal.snapshot()["product_data"]
         if (set(self.data["rows"]) != set(INDEX_COUNTS)
                 or journal.snapshot().get("schema_ready") and not _current_schema(journal.snapshot())):
             raise BudgetError("SCHEMA_UPGRADE_REQUIRED")
         self.calls = 0
+        self.inflight = False
+        self.cardinality_verified = journal.snapshot().get("product_data_verified") is True
+        self.rate_limiter, self.rate_channel = rate_limiter, rate_channel
+        self.rate_rejection = None
+        self._actor_admitted = False
+
+    def observe_authenticated_actor(self, actor_id):
+        if self.rate_limiter is not None and not self._actor_admitted:
+            from .cloudflare_preview_rate import PreviewRateLimit
+            try:
+                self.rate_limiter.actor(actor_id, channel=self.rate_channel, now=self.clock())
+            except PreviewRateLimit as error:
+                self.rate_rejection = error
+                raise
+            self._actor_admitted = True
+
+    def accounted_outcome(self):
+        """Safe only after cancellation has awaited every native dispatch."""
+        return (not self.inflight and self.cardinality_verified
+                and self.journal.snapshot()["stopped"] is None)
+
+    async def ensure_cardinality(self):
+        # The preview database is written only through the existing singleton
+        # journal. A completed, persisted refresh remains authoritative until
+        # the next mutation, which always refreshes before closing its ticket.
+        # Avoid scanning every table for each healthy read-only request.
+        if not self.cardinality_verified:
+            await self.refresh()
 
     async def _operation(self, statements, reads, writes):
         self.journal.check(self.ticket, now=self.clock())
@@ -453,7 +482,11 @@ class ProductMeteredD1(MeteredD1):
         self.calls += 1
         self.journal.reserve_operation(self.ticket, reads=reads, writes=writes, now=self.clock())
         bound = OperationBound(tuple(s.sql for s in statements), reads, writes)
-        results = await self._dispatch(statements, self.calls, bound)
+        self.inflight = True
+        try:
+            results = await self._dispatch(statements, self.calls, bound)
+        finally:
+            self.inflight = False
         # A complete single-attempt result proves this group's unused read
         # margin. Missing attempts or any retry retains the entire reservation.
         # Write reservations always remain charged, including index effects.
@@ -486,7 +519,8 @@ class ProductMeteredD1(MeteredD1):
             sizes[str(_field(row, "name"))] = len(data) if isinstance(data, (dict, list)) else 0
             arrays = max(arrays, _json_size(data))
         self.data = {"rows": counts, "json": sizes, "arrays": arrays}
-        self.journal.save_product_state(self.ticket, self.data, now=self.clock())
+        self.journal.save_product_state(self.ticket, self.data, now=self.clock(), verified=True)
+        self.cardinality_verified = True
 
     async def batch(self, statements):
         statements = list(statements)
@@ -495,9 +529,13 @@ class ProductMeteredD1(MeteredD1):
             self.journal._reject("UNREVIEWED_SQL")
         reads = writes = guards = 0
         upper = dict(self.data["rows"])
+        # Input-envelope rejection happens before this group's dispatch. It
+        # must not poison the shared accounting journal for every other user.
+        # Routes already map ValueError to their ordinary invalid-input DTO.
+        # SQL/cardinality failures below remain accounting integrity stops.
+        arrays = [_input_bound(s.params, sql=s.sql) for s in statements]
         try:
-            for s in statements:
-                array_size = _input_bound(s.params, sql=s.sql)
+            for s, array_size in zip(statements, arrays):
                 tokens = _tokens(s.sql)
                 cost = sql_write_bound(s.sql, guards)
                 references = re.findall(r"\b(?:FROM|JOIN)\s+([a-zA-Z_][\w]*)", s.sql, re.I)
@@ -533,6 +571,8 @@ class ProductMeteredD1(MeteredD1):
         # D1 itself can retry read-only queries twice. Include all attempts.
         if writes == 0:
             reads *= 3
+        if writes:
+            self.cardinality_verified = False
         result = await self._operation(statements, reads, writes)
         if writes:
             await self.refresh(upper)

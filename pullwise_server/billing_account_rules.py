@@ -190,9 +190,6 @@ def reduce_billing_update(user: dict, update: dict, *, processed_at: int) -> dic
         append_billing_subscription_event(next_user, update, historical, processed_at=processed_at)
         return {"user": next_user, "eventRecord": billing_event_record(update,
             processed_at=processed_at, applied=False), "applied": False, "quotaRefresh": False}
-    if subscription_id and current_subscription_id and subscription_id != current_subscription_id:
-        upsert_billing_subscription_record(next_user, current, processed_at=processed_at)
-        current = {}
     incoming_created = billing_event_created(update)
     current_created = billing_event_created({"eventCreated": current.get("lastEventCreated")})
     stale = current_created is not None and (incoming_created is None or incoming_created < current_created)
@@ -202,7 +199,9 @@ def reduce_billing_update(user: dict, update: dict, *, processed_at: int) -> dic
         return {"user": next_user, "eventRecord": billing_event_record(update,
             processed_at=processed_at, applied=False, stale=True),
             "applied": False, "quotaRefresh": False}
-
+    if subscription_id and current_subscription_id and subscription_id != current_subscription_id:
+        upsert_billing_subscription_record(next_user, current, processed_at=processed_at)
+        current = {}
     customer_id = billing_update_text(update.get("customerId"))
     customer_email = billing_update_text(update.get("customerEmail"))
     subscription_item_id = billing_update_text(update.get("subscriptionItemId"))

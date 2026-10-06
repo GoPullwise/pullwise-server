@@ -15,7 +15,7 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 from .cloudflare_oauth_state_adapter import D1OAuthStates
 from .cloudflare_session_adapter import D1SessionTransactions
 from .cloudflare_account_adapter import D1AccountTransactions
-from .cloudflare_principal import _cookie_sessions, _header
+from .cloudflare_principal import _cookie_sessions, _header, _observe_authenticated_actor
 from .cloudflare_ledger_auth import ledger_principal
 from .cloudflare_principal import PrincipalAuthError
 
@@ -92,6 +92,7 @@ async def _session_user(binding: Any, headers: Mapping[str, object], now: int):
                 and session["expiresAt"] > now):
             user = await _user(binding, str(session.get("userId") or ""))
             if user is not None:
+                _observe_authenticated_actor(binding, user["id"])
                 return session, user
     return None, None
 
@@ -273,6 +274,7 @@ async def handle_identity_request(*, binding: Any, gateway: Any, now: int,
         if type(github_id) is not int or github_id <= 0 or not isinstance(login, str) or not login:
             return 502, {"error": {"code": "GITHUB_PROFILE_INVALID"}}, no_store
         owner_id = f"usr_github_{github_id}"
+        _observe_authenticated_actor(binding, owner_id)
         existing = await _user(binding, owner_id) or {}
         user = {**existing, "id": owner_id, "name": str(profile.get("name") or login)[:200],
                 "avatarUrl": str(profile.get("avatar_url") or "")[:500],

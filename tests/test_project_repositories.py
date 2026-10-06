@@ -272,6 +272,40 @@ def test_expense_eligibility_uses_any_actor_authorized_link_and_returns_revision
     assert asyncio.run(project_repository_eligibility(ledger.binding, user, project["id"], ledger.gateway)) is None
 
 
+def test_archive_restore_preserves_finance_and_repository_occupancy(ledger):
+    project = create(ledger, ids=[101, 102], name="Archive QA")
+    _, category = ledger.call("POST", "/api/v1/categories", {"name": "Archive QA"})
+    body = {"target": {"kind": "project", "projectId": project["id"]},
+        "categoryId": category["id"], "occurredOn": "2026-10-06",
+        "amount": "1.23", "currency": "USD", "purpose": "Retained finance"}
+    status, expense = ledger.call("POST", "/api/v1/expenses", body,
+        {**ledger.headers, "Idempotency-Key": "archive-initial"})
+    assert status == 201
+    status, archived = update(ledger, project, {"status": "archived"})
+    assert status == 200 and archived["status"] == "archived" and not archived["canCreateExpense"]
+    assert archived["totals"] == [{"currency": "USD", "amountMinor": 123}]
+    assert ledger.call("POST", "/api/v1/expenses", body,
+        {**ledger.headers, "Idempotency-Key": "archive-new"})[0] == 403
+    assert ledger.call("POST", "/api/v1/projects", {"githubRepoIds": [101]})[0] == 409
+    status, repositories = ledger.call("GET", "/api/v1/repositories")
+    assert status == 200
+    assert {row["githubRepoId"]: row["isBound"] for row in repositories["items"]} == {
+        101: True, 102: True, 103: False}
+    ledger.gateway.visible["synthetic-access-token"] = []
+    status, edited = ledger.call("PATCH", "/api/v1/expenses/" + expense["id"],
+        {**body, "purpose": "Historical edit"}, {**ledger.headers, "If-Match": '"1"'})
+    assert status == 200 and edited["revision"] == 2
+    assert update(ledger, archived, {"status": "active"})[0] == 403
+    ledger.gateway.visible["synthetic-access-token"] = [102]
+    status, restored = update(ledger, archived, {"status": "active"})
+    assert status == 200 and restored["canCreateExpense"] and restored["githubAccess"] == "partial"
+    assert restored["githubRepoIds"] == [101, 102] and restored["revision"] == 3
+    assert restored["totals"] == [{"currency": "USD", "amountMinor": 123}]
+    with ledger.store.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM expenses").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM expense_events").fetchone()[0] == 2
+
+
 @pytest.mark.parametrize("code,state", [("GITHUB_REAUTHORIZATION_REQUIRED", "reauthorization_required"),
     ("GITHUB_PERMISSION_DENIED", "lost"), ("GITHUB_UNAVAILABLE", "unavailable")])
 def test_known_rejection_and_unknown_outages_hide_all_repository_metadata(ledger, code, state):

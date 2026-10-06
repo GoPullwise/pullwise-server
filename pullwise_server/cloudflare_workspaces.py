@@ -300,10 +300,15 @@ async def _accept(binding, headers, body, now, method):
     if len(rows[0]) != 1:
         return _error(404, "INVITATION_NOT_FOUND")
     invite = rows[0][0]
-    if invite["status"] != "pending" or invite["expires_at"] < now:
-        return _error(410, "INVITATION_EXPIRED")
     if _github_id(actor) != invite["github_recipient_id"]:
         return _error(403, "INVITATION_RECIPIENT_MISMATCH")
+    if invite["status"] == "revoked":
+        return _error(410, "INVITATION_REVOKED")
+    accepted_preview = invite["status"] == "accepted" and method == "preview"
+    if invite["status"] == "accepted" and not accepted_preview:
+        return _error(410, "INVITATION_ACCEPTED")
+    if not accepted_preview and (invite["status"] != "pending" or invite["expires_at"] < now):
+        return _error(410, "INVITATION_EXPIRED")
     workspace_id, inviter_id = invite["workspace_id"], invite["created_by_user_id"]
     # Revalidate the actor alongside all preview/accept resource data.
     current_actor, current_proof, auth, validate = await _auth(binding, headers, now)
@@ -327,13 +332,22 @@ async def _accept(binding, headers, body, now, method):
     owner = json.loads(owners[0]["snapshot"])
     if not isinstance(owner, dict) or owner.get("id") != workspace_id or actor["id"] == workspace_id:
         return _error(403, "OWNER_IMMUTABLE")
+    member = members[0] if len(members) == 1 else None
+    if accepted_preview:
+        # A lost acceptance response can be recovered without consuming another
+        # token or writing. Current membership owns authority, never the old
+        # invitation role; removed members cannot be resurrected by rechecking.
+        if (invite["accepted_by_user_id"] != actor["id"] or not member
+                or member["removed_at"] is not None or member["role"] not in ROLES):
+            return _error(410, "INVITATION_ACCEPTED")
+        return 200, {**_invite(invite), "workspace": workspace_payload(
+            owner, member["role"], member["revision"])}
     inviter = inviters[0] if len(inviters) == 1 else None
     if (inviter_id == workspace_id and invite["created_by_revision"] != 1
             or inviter_id != workspace_id and (not inviter or inviter["removed_at"] is not None
             or inviter["role"] != "admin" or inviter["revision"] != invite["created_by_revision"]
             or invite["role"] == "admin")):
         return _error(403, "INVITATION_AUTHORITY_LOST")
-    member = members[0] if len(members) == 1 else None
     if member and member["removed_at"] is None:
         return _error(409, "ALREADY_MEMBER")
     revision = member["revision"] + 1 if member else 1

@@ -1,5 +1,6 @@
 """Candidate Server Worker entry; no probe endpoints or scheduled trigger."""
 import asyncio
+import io
 import json
 import time
 from urllib.parse import urlsplit, parse_qs, unquote
@@ -26,6 +27,7 @@ from pullwise_server.cloudflare_ledger_reports import CsvExport
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1, PlanLimitError
 from pullwise_server.ledger_plan_policy import parse_policy
 from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initialize_product, reconcile_schema_reads, upgrade_product_schema
+from pullwise_server.cloudflare_preview_rate import PreviewRateLimiter, PreviewRateLimit, request_channel
 from pullwise_server.cloudflare_native_d1 import NativeD1
 from pullwise_server.json_input import validate_json_unicode
 
@@ -197,13 +199,20 @@ class _Application:
                 return Response(None, status=status, headers=response_headers)
             if isinstance(payload, CsvExport):
                 if self.bounded_exports:
-                    chunks, size = [], 0
+                    # Finish metered D1 work before closing the product ticket.
+                    # UTF-8 bytes avoid whole-body Unicode expansion/copies;
+                    # 24 MiB leaves room within Workers' 128 MiB memory limit.
+                    # The size guard is a request error, never a global stop.
+                    output, size = io.BytesIO(), 0
                     async for chunk in payload.chunks():
-                        size += len(chunk.encode("utf-8"))
-                        if size > 1024 * 1024:
-                            raise BudgetError("EXPORT_TOO_LARGE")
-                        chunks.append(chunk)
-                    return Response("".join(chunks), status=status,
+                        encoded = chunk.encode("utf-8")
+                        size += len(encoded)
+                        if size > 24 * 1024 * 1024:
+                            return Response.json({"error": {"code": "EXPORT_TOO_LARGE",
+                                "message": "Narrow the date range or project filter and export again."}},
+                                status=413, headers=response_headers)
+                        output.write(encoded)
+                    return Response(output.getvalue(), status=status,
                         headers={**response_headers, "Content-Type": "text/csv; charset=utf-8",
                                  "Content-Disposition": 'attachment; filename="expenses.csv"'})
                 return Response(_csv_stream(payload), status=status,
@@ -240,13 +249,18 @@ class _Application:
                     return Response.json({"error": {"code": "REQUEST_TOO_LARGE"}}, status=413)
                 body = json.loads(raw)
                 validate_json_unicode(body)
+            except (ValueError, UnicodeError):
+                return Response.json({"error": {"code": "INVALID_REQUEST"}}, status=422,
+                    headers={"Cache-Control": "no-store"})
+            except Exception:
+                return Response.json({"error": {"code": "BILLING_UNAVAILABLE"}}, status=503,
+                    headers={"Cache-Control": "no-store"})
+            try:
                 status, payload = await handle_billing_mutation(
                     binding=self.binding, gateway=WorkerCreemGateway(self.env),
                     now=now, method=request.method, path=path, headers=headers, body=body,
                     app_url=getattr(self.env, "PULLWISE_APP_URL", ""),
                     trusted_origins=trusted_origins, products=products)
-            except (ValueError, UnicodeError):
-                status, payload = 422, {"error": {"code": "INVALID_REQUEST"}}
             except Exception:
                 status, payload = 503, {"error": {"code": "BILLING_UNAVAILABLE"}}
             return Response.json(payload, status=status, headers={"Cache-Control": "no-store"})
@@ -330,6 +344,7 @@ class ValidationBudget(DurableObject):
     def __init__(self, ctx, env):
         self.ctx, self.env = ctx, env
         self.journal = None
+        self.rate_limiter = None
         self._product_lock = asyncio.Lock()
         self._waiting = 0
 
@@ -337,7 +352,8 @@ class ValidationBudget(DurableObject):
         if self.journal is None:
             preview_product = (getattr(self.env, "PULLWISE_MODE", "") == "preview"
                 and str(getattr(self.env, "PULLWISE_PREVIEW_PRODUCT_ENABLED", "0")) == "1")
-            self.journal = BudgetJournal(self.ctx.storage.sql, preview_product=preview_product)
+            self.journal = BudgetJournal(self.ctx.storage.sql, preview_product=preview_product,
+                product_operations=preview_product)
         return self.journal
 
     async def stop(self):
@@ -346,7 +362,7 @@ class ValidationBudget(DurableObject):
         return journal.snapshot()
 
     async def evidence(self):
-        return self._journal().snapshot()
+        return self._journal().evidence_snapshot()
 
     async def initialize(self):
         # Only a Worker possessing the coordinator binding can invoke RPC.
@@ -413,9 +429,21 @@ class ValidationBudget(DurableObject):
         if invalid_target is not None:
             return invalid_target
         path, _ = target
+        if self.rate_limiter is None:
+            self.rate_limiter = PreviewRateLimiter(self.ctx.storage.sql)
+        try:
+            self.rate_limiter.ingress(getattr(request, "headers", None), method=request.method,
+                path=path, now=time.time())
+        except PreviewRateLimit as error:
+            return Response.json(error.response(), status=429,
+                headers={"Cache-Control": "no-store", "Retry-After": str(error.retry_after)})
         if path == "/_preview/budget" and request.method == "GET":
-            state = self._journal().snapshot()
-            return Response.json({"limits": {"rowsRead": self._journal().read_ceiling, "rowsWritten": WRITE_CEILING},
+            journal = self._journal()
+            state = journal.snapshot()
+            return Response.json({"productOperationMode": journal.product_operations,
+                "limits": {"rowsRead": None if journal.product_operations else journal.read_ceiling,
+                           "rowsWritten": None if journal.product_operations else WRITE_CEILING},
+                "historicalCeilings": {"rowsRead": journal.read_ceiling, "rowsWritten": WRITE_CEILING},
                 "reserved": {"rowsRead": state["reserved_read"], "rowsWritten": state["reserved_written"]},
                 "observed": {"rowsRead": state["actual_read"], "rowsWritten": state["actual_written"]},
                 "schemaReady": bool(state.get("schema_ready")),
@@ -433,8 +461,10 @@ class ValidationBudget(DurableObject):
         try:
             async with self._product_lock:
                 journal = self._journal()
+                ticket = binding = None
                 try:
                     async def execute():
+                        nonlocal ticket, binding
                         reconcile_schema_reads(journal)
                         native = NativeD1(self.env.DB)
                         if (str(getattr(self.env, "PULLWISE_PREVIEW_SCHEMA_UPGRADE_ENABLED", "0")) == "1"
@@ -442,9 +472,14 @@ class ValidationBudget(DurableObject):
                             await upgrade_product_schema(native, journal)
                         await initialize_product(native, journal)
                         ticket = journal.begin_product(now=time.time())
-                        binding = ProductMeteredD1(native, journal, ticket)
-                        await binding.refresh()
+                        binding = ProductMeteredD1(native, journal, ticket, rate_limiter=self.rate_limiter,
+                            rate_channel=request_channel(request.method, path))
+                        await binding.ensure_cardinality()
                         response = await _Application(self.env, binding).fetch(request)
+                        if binding.rate_rejection is not None:
+                            error = binding.rate_rejection
+                            response = Response.json(error.response(), status=429,
+                                headers={"Cache-Control": "no-store", "Retry-After": str(error.retry_after)})
                         # Product exports are consumed within _Application;
                         # their Response body no longer performs lazy D1 IO.
                         # Native D1 ambiguity already stops the journal. A
@@ -453,11 +488,30 @@ class ValidationBudget(DurableObject):
                         journal.finish(ticket, now=time.time())
                         return response
                     return await asyncio.wait_for(execute(), timeout=REQUEST_SECONDS)
+                except PreviewRateLimit as error:
+                    if ticket is not None and binding is not None and binding.accounted_outcome():
+                        journal.finish_accounted_product_failure(ticket, now=time.time())
+                    else:
+                        journal.stop("REQUEST_OUTCOME_UNKNOWN")
+                    return Response.json(error.response(), status=429,
+                        headers={"Cache-Control": "no-store", "Retry-After": str(error.retry_after)})
                 except BudgetError as error:
                     if journal.snapshot()["active"] is not None:
                         journal.stop(str(error))
                     return _unavailable(str(error))
                 except BaseException as error:
+                    # wait_for awaits canceled application completion. A
+                    # canceled native dispatch already sets its persistent
+                    # unknown-outcome stop, and unfinished mutation refresh
+                    # keeps cardinality_verified false. Isolate only a fully
+                    # accounted provider/application failure in this request.
+                    if (not isinstance(error, asyncio.CancelledError)
+                            and ticket is not None and binding is not None
+                            and binding.accounted_outcome()):
+                        journal.finish_accounted_product_failure(ticket, now=time.time(),
+                            timeout=isinstance(error, asyncio.TimeoutError))
+                        return _unavailable("REQUEST_TIMEOUT" if isinstance(error, asyncio.TimeoutError)
+                                            else "SERVER_UNAVAILABLE")
                     journal.stop("TIMEOUT" if isinstance(error, asyncio.TimeoutError)
                                  else "REQUEST_OUTCOME_UNKNOWN")
                     if isinstance(error, asyncio.CancelledError):

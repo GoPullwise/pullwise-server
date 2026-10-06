@@ -1,0 +1,55 @@
+{
+  "passed": true,
+  "localOnly": true,
+  "nativePythonFFI": true,
+  "syntheticProvenance": true,
+  "syntheticAccounts": 2,
+  "realAccounts": 0,
+  "remoteRequests": 0,
+  "remoteD1RowsRead": 0,
+  "remoteD1RowsWritten": 0,
+  "realProviderRequests": 0,
+  "realPayments": 0,
+  "clientRetries": 0,
+  "canonicalEntrySha256": "d3fb664d30bf46df876de83530c243af4f57ce24496d63cfa1f5f1a2196d209d",
+  "canonicalBoundedCsvBranch": true,
+  "csvRecords": 251,
+  "csvBytes": 1395902,
+  "utf8Exact": true,
+  "spreadsheetFormulaEscaped": true,
+  "localHttpRequests": 2,
+  "localHttpCap": 100,
+  "checks": [
+    "Canonical bounded CSV byte spool exceeds old 1 MiB cap, paginates 251 native records, and preserves exact UTF-8/formula escaping"
+  ],
+  "localNativeStatements": 11,
+  "localNativeRowsRead": 821,
+  "localNativeRowsWritten": 0,
+  "nativeAttemptsValues": [
+    null
+  ],
+  "nativeAttemptsFabricated": false,
+  "fixtureGatewayCalls": {
+    "github_fixture": 0,
+    "creem_fixture": 0
+  },
+  "responses": [
+    {
+      "method": "GET",
+      "path": "/health",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/expenses/export",
+      "status": 200
+    }
+  ],
+  "runtimeStopped": true,
+  "date": "2026-10-06",
+  "portsReleased": true,
+  "failedSetupRetained": "Attempt 1 rejected a synthetic purpose longer than the schema 500-character bound before Worker startup or HTTP. Corrected purpose 304 characters and note 1,350 characters fit the 8,192-byte expense ingress.",
+  "prototypeUsesCanonicalPreviewCsvBranch": true,
+  "localFixtureForcedBoundedExports": true,
+  "strictRemoteAttemptsGateBypassed": false
+}

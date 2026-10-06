@@ -6,7 +6,7 @@ import re
 import uuid
 from datetime import date, datetime, timezone
 
-from .cloudflare_ledger_api import _error, _write_guard
+from .cloudflare_ledger_api import _error, _valid_resource_id, _write_guard
 from .cloudflare_ledger_auth import ledger_principal
 from .cloudflare_principal import PrincipalAuthError
 from .cloudflare_ledger_expenses import _amount
@@ -47,7 +47,7 @@ def _draft(body):
         return purpose.strip(), note, kind, None, occurred, minor, currency
     if (kind == "project" and set(target) == {"kind", "projectId"}
             and isinstance(project_id, str) and project_id.startswith("prj_")
-            and len(project_id) <= 104):
+            and len(project_id) <= 104 and _valid_resource_id(project_id)):
         return purpose.strip(), note, kind, project_id, occurred, minor, currency
     return None
 
@@ -197,9 +197,11 @@ async def handle_suggestion_decision(*, binding, method, path, headers, body, no
         return _error(405, "METHOD_NOT_ALLOWED")
     suggestion_id = path.removeprefix("/api/v1/expense-suggestions/").removesuffix("/decision")
     if (not suggestion_id.startswith("sg_") or len(suggestion_id) != 35
+            or not _valid_resource_id(suggestion_id)
             or not isinstance(body, dict) or set(body) != {"target", "categoryId"}
             or not isinstance(body["categoryId"], str)
             or not body["categoryId"].startswith("cat_")
+            or not _valid_resource_id(body["categoryId"])
             or not isinstance(body["target"], dict)):
         return _error(422, "INVALID_INPUT")
     draft = _draft({"purpose": "decision", "target": body["target"]})

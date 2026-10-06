@@ -1,0 +1,138 @@
+{
+  "date": "2026-10-06",
+  "passed": true,
+  "scope": "Local native Projects and governance with two synthetic accounts; signed synthetic subscription success and failure lifecycle.",
+  "nativePythonFFI": true,
+  "realAccounts": 0,
+  "syntheticAccounts": 2,
+  "remoteD1RowsRead": 0,
+  "remoteD1RowsWritten": 0,
+  "realProviderRequests": 0,
+  "realPayments": 0,
+  "automaticClientRetries": 0,
+  "fixtureStateReset": false,
+  "completedProjectAndMembershipCases": 50,
+  "finalBillingSuffixRequests": 20,
+  "cumulativeLocalHttpAttempts": 87,
+  "cumulativeRetainedHttpResponses": 85,
+  "cumulativeLocalNativeStatements": 782,
+  "cumulativeLocalNativeRowsRead": 1078,
+  "cumulativeLocalNativeRowsWritten": 345,
+  "nativeAttempts": "Miniflare omits the field; native log values remain null. No invented attempt count or deployed bypass.",
+  "nativeMetaCovers": "Application statements only. Local migration and fixture setup, plus offline validation SELECTs, are excluded.",
+  "runtimeBundleSha256": "3c3fd5a4179230e21e018e28b0e735e7c4abd8fe8e4ff39d2fd6bb2ea3a2e260",
+  "workerdSha256": "eb449c84ddd55ea357dc73e6c1b50bd255ccdc5d1875544c162435b7bd6168b6",
+  "latestCanonicalEntrySha256": "d3fb664d30bf46df876de83530c243af4f57ce24496d63cfa1f5f1a2196d209d",
+  "runtimeStopped": true,
+  "portsReleased": true,
+  "projectsCases": [
+    "Repository discovery pagination; create multi-repository project and organization association",
+    "Duplicate/invalid repository rejection; list/detail; missing/stale revision rejection",
+    "Project rename/description; exact totals and reports; UTF-8 formula-safe export",
+    "Archive rejects new expenses; lost access blocks restore; authorized restore",
+    "Rebind preserves stable projectID/history/totals and permits reuse of unbound repository"
+  ],
+  "membershipCases": [
+    "Recipient-specific single-use invitation; preview recovery after acceptance",
+    "Member selects ownerworkspace; personalworkspace stays isolated",
+    "Actual-member GitHub grants redact ungranted names; member ownactor idempotency",
+    "Workspace-scoped APIkey membershiprevision invalidation",
+    "Editor→Viewer stops writes; Admin cannot alter owner; removal hides workspace",
+    "Member finance charges owner commercial usage and retains actual actor audit"
+  ],
+  "billingCases": [
+    "Checkout acknowledgement retains Free; an invalid signature creates no receipt.",
+    "Native account authority initialization and exact pending receipt recovery.",
+    "Signed payment grants Pro; duplicate signed receipt settles exactly once.",
+    "Definitive provider rejection returns 503 and clears the claimed change.",
+    "Provider upgrade acknowledgement remains pending on Pro; repeating the pending request avoids another provider call.",
+    "Signed paid Max/year event grants the target and clears the pending claim.",
+    "Scheduled cancel and resume acknowledgements; repeating either action is a no-op.",
+    "Signed unpaid event downgrades to Free; later signed paid event restores Max.",
+    "Unknown provider outcome returns 503 and preserves the pending claim; repeating it does not call the provider again.",
+    "Subscription operations create no expenses; historical project USD total stays at 2,460 minor units."
+  ],
+  "sqlAssertions": {
+    "expenses": 2,
+    "member_events": 1,
+    "outstanding_guards": 0,
+    "bad_receipts": 0,
+    "paid_receipts": 1,
+    "removed_members": 1,
+    "hashed_invites": 1,
+    "workspace_events": 5,
+    "member_usage": 0
+  },
+  "fixtureCorrections": [
+    "First two Worker startup attempts stopped before application SQL. The official runtime proxy cache and external SDK packaging were corrected.",
+    "The local app return URL uses HTTPS while the trusted request Origin stays on loopback.",
+    "Synthetic users lacked the account authority created during real OAuth. Missing authorities were initialized once; the exact prior pending receipt was retained and recovered.",
+    "Synthetic millisecond period dates correctly yielded Free due to a future period start. A subsequent newer paid fixture uses official ISO dates."
+  ],
+  "productBugExposedAndFixed": "Valid provider and gateway failures incorrectly returned 422 INVALID_REQUEST. The entry now separates invalid input (422) from provider failures (503 BILLING_UNAVAILABLE). The final native suffix confirms definitive and unknown outcomes.",
+  "isolatedRuns": [
+    {
+      "artifact": "projects-native-20261006-attempt1.json",
+      "attempts": 1,
+      "retainedResponses": 0,
+      "nativeStatements": 0,
+      "nativeRowsRead": 0,
+      "nativeRowsWritten": 0,
+      "result": false
+    },
+    {
+      "artifact": "projects-native-20261006-attempt2.json",
+      "attempts": 1,
+      "retainedResponses": 0,
+      "nativeStatements": 0,
+      "nativeRowsRead": 0,
+      "nativeRowsWritten": 0,
+      "result": false
+    },
+    {
+      "artifact": "projects-native-20261006-attempt3.json",
+      "attempts": 51,
+      "retainedResponses": 51,
+      "nativeStatements": 472,
+      "nativeRowsRead": 741,
+      "nativeRowsWritten": 166,
+      "result": false
+    },
+    {
+      "artifact": "projects-native-20261006-billing-resume.json",
+      "attempts": 5,
+      "retainedResponses": 5,
+      "nativeStatements": 23,
+      "nativeRowsRead": 24,
+      "nativeRowsWritten": 7,
+      "result": false
+    },
+    {
+      "artifact": "projects-native-20261006-billing-paid-recovery.json",
+      "attempts": 3,
+      "retainedResponses": 3,
+      "nativeStatements": 47,
+      "nativeRowsRead": 51,
+      "nativeRowsWritten": 34,
+      "result": false
+    },
+    {
+      "artifact": "projects-native-20261006-billing-corrected-period.json",
+      "attempts": 6,
+      "retainedResponses": 6,
+      "nativeStatements": 61,
+      "nativeRowsRead": 63,
+      "nativeRowsWritten": 36,
+      "result": false
+    },
+    {
+      "artifact": "projects-native-20261006-billing-final.json",
+      "attempts": 20,
+      "retainedResponses": 20,
+      "nativeStatements": 179,
+      "nativeRowsRead": 199,
+      "nativeRowsWritten": 102,
+      "result": true
+    }
+  ]
+}

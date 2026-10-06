@@ -17,6 +17,17 @@ def test_missing_or_unknown_product_never_grants_a_paid_subscription():
         assert billing_update_from_creem_event(event(product=product), products) is None
 
 
+@pytest.mark.parametrize("kind", ["subscription.update", "checkout.completed"])
+@pytest.mark.parametrize("status", [None, "", "unknown", "incomplete", "pending"])
+def test_payment_updates_with_missing_or_unknown_subscription_status_never_grant_access(kind, status):
+    payload = {"id": "sub-1", "status": status, "product": "prod-pro",
+        "metadata": {"userId": "owner"}}
+    obj = payload if kind.startswith("subscription.") else {"subscription": payload}
+    update = billing_update_from_creem_event({"id": "evt-unconfirmed", "eventType": kind,
+        "object": obj}, {"pro": {"month": "prod-pro"}, "max": {}})
+    assert update is None
+
+
 def test_configured_recurring_product_without_subscription_identity_cannot_grant_access():
     products = {"pro": {"month": "prod-pro"}, "max": {}}
     checkout = {"id": "evt-checkout", "eventType": "checkout.completed", "object": {

@@ -79,6 +79,19 @@ def test_old_subscription_renewal_does_not_replace_current_subscription():
     assert decision["quotaRefresh"] is False
 
 
+def test_late_unknown_subscription_cannot_replace_a_newer_current_subscription():
+    account = _account()
+    account["billing"].update(plan="max", interval="year", lastEventCreated=300)
+    decision = billing_account_rules.reduce_billing_update(account,
+        {"eventId": "evt-delayed-old-paid", "eventType": "subscription.paid", "eventCreated": 200,
+         "subscriptionId": "unseen-old-sub", "status": "active", "plan": "pro", "interval": "month"},
+        processed_at=400)
+    assert decision["user"]["billing"] == account["billing"]
+    assert decision["applied"] is False and decision["quotaRefresh"] is False
+    assert decision["eventRecord"]["stale"] is True
+    assert decision["user"]["billingSubscriptionEvents"][0]["subscriptionId"] == "unseen-old-sub"
+
+
 def test_new_subscription_does_not_inherit_expired_period_or_item_identity():
     account = _account()
     account["billing"].update(status="canceled", currentPeriodEnd=150, subscriptionItemId="old-item")

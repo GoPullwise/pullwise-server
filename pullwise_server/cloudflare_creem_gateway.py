@@ -5,6 +5,37 @@ import json
 import re
 from urllib.parse import quote
 
+MAX_RESPONSE_BYTES = 1024 * 1024
+
+
+async def _cancel_body(response) -> None:
+    body = getattr(response, "body", None)
+    if body is not None:
+        try:
+            await body.cancel()
+        except Exception:
+            pass
+
+
+async def _bounded_response(reader, limit: int = MAX_RESPONSE_BYTES) -> bytes:
+    body = bytearray()
+    try:
+        while True:
+            part = await reader.read()
+            if part.done:
+                return bytes(body)
+            chunk = part.value
+            size = int(chunk.length) if hasattr(chunk, "length") else len(chunk)
+            if len(body) + size > limit:
+                raise ValueError("Creem response too large")
+            body.extend(int(chunk[index]) for index in range(size))
+    except Exception:
+        try:
+            await reader.cancel()
+        except Exception:
+            pass
+        raise
+
 
 class CreemRequestRejected(ValueError):
     """A request was not dispatched, or the provider definitively rejected it."""
@@ -50,16 +81,21 @@ class WorkerCreemGateway:
             headers["Content-Type"] = "application/json"
             init["body"] = json.dumps(payload, separators=(",", ":"))
         response = await fetch(f"{self.base}/{path}", to_js(init, dict_converter=Object.fromEntries))
-        length = response.headers.get("content-length")
-        if length and int(length) > 1024 * 1024:
-            raise ValueError("Creem response too large")
-        body = await response.text()
         if not response.ok:
+            await _cancel_body(response)
             if 400 <= int(response.status) < 500 and int(response.status) != 408:
                 raise CreemRequestRejected(f"Creem HTTP {int(response.status)}")
             raise ValueError(f"Creem HTTP {int(response.status)}")
-        if len(body) > 1024 * 1024:
-            raise ValueError("Creem request failed")
+        length = response.headers.get("content-length")
+        if length and (not str(length).isascii() or not str(length).isdecimal()):
+            await _cancel_body(response)
+            raise ValueError("Creem response length invalid")
+        if length and int(length) > MAX_RESPONSE_BYTES:
+            await _cancel_body(response)
+            raise ValueError("Creem response too large")
+        if response.body is None:
+            raise ValueError("Creem response empty")
+        body = await _bounded_response(response.body.getReader())
         parsed = json.loads(body)
         if not isinstance(parsed, dict):
             raise ValueError("Creem response malformed")

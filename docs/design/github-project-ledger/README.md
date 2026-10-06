@@ -123,7 +123,7 @@ workspace-scoped Key 绑定 `workspaceId` 与当前 `workspaceMemberRevision`；
 
 两端各维护一份 `docs/validation/local-acceptance.md` 并互相链接，记录当前检查和剩余门槛；已完成阶段的临时交接不作为现行规则保留。
 
-0005 只追加四张成员/邀请/审计/仓库关联表及两列，并回填原单仓库映射；owner ID、project ID 和 expense/history 不重写。新 canonical schema 为五个 migrations、18 表/33 SQLite indexes。已存在 Preview 仅允许精确 legacy-v4 schema 的一次性编译、原子升级，沿用同一 journal/namespace/database 及累计 100,000-read / 1,000-write 上限；不重置、重试或添加 cron。当前原生升级证明尚未通过，本地 metadata 缺少 `total_attempts`，调查与验收仍开放。
+0005 只追加四张成员/邀请/审计/仓库关联表及两列，并回填原单仓库映射；owner ID、project ID 和 expense/history 不重写。新 canonical schema 为五个 migrations、18 表/33 SQLite indexes。已存在 Preview 的精确 legacy-v4 一次性编译、原子升级已通过部署验收，沿用原 journal/namespace/database 并保留全部累计计数和证据；不重置、重试或添加 cron。最新用户要求正常可用的 Preview，因此普通产品流量不再受历史累计 100,000-read / 1,000-write 测试上限限制；有限验证计划保留原上限，每个产品 SQL batch 仍需边界预留和实际原生计量，商业配额和权限维持生效。详见 `docs/validation/d1-validation-budget.md` 当前策略。
 
 当前授权允许本地修复/检查、main 推送及 Preview 发布与有限远程验收；最终结果须补充到验证记录。Server/Web 环境配置及数据库保持隔离，生产 `PULLWISE_D1_ACCESS_ENABLED=0`，本轮远程验证仅限 Preview。部署脚本不执行远程 migration；发布代码、迁移成功和业务验收必须分别记录。
 

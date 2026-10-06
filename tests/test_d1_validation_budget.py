@@ -20,7 +20,7 @@ class LocalSql:
         names = [column[0] for column in cursor.description or []]
         rows = [SimpleNamespace(**dict(zip(names, row))) for row in cursor.fetchall()]
         self.connection.commit()
-        return SimpleNamespace(one=lambda: rows[0])
+        return SimpleNamespace(one=lambda: rows[0], toArray=lambda: rows)
 
 
 @pytest.fixture

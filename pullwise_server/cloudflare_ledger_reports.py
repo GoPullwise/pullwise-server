@@ -38,7 +38,7 @@ class CsvExport:
             last = rows[-1]
             rows = await self.next_page(last["occurred_on"], last["id"])
 
-from .cloudflare_ledger_api import _error, _param
+from .cloudflare_ledger_api import _error, _page_inputs, _param, _valid_resource_id
 from .cloudflare_ledger_auth import ledger_principal, target_allowed
 from .cloudflare_principal import PrincipalAuthError
 from .ledger_money_totals import AGGREGATE_SQL, aggregate_minor, public_minor
@@ -52,6 +52,8 @@ def expense_filter(params: Mapping[str, object], *, paged: bool = False):
     start, end = _param(params, "from"), _param(params, "to")
     if target not in {"all", "project", "shared"} or (project_id and target == "shared"):
         raise ValueError("target")
+    if any(value and not _valid_resource_id(value) for value in (project_id, category_id)):
+        raise ValueError("resource")
     if currency and not re.fullmatch(r"[A-Z]{3}", currency):
         raise ValueError("currency")
     for value in (start, end):
@@ -80,11 +82,8 @@ def expense_filter(params: Mapping[str, object], *, paged: bool = False):
         clauses.append("AND currency=?")
         values.append(currency)
     if paged:
-        raw_limit = _param(params, "limit")
-        limit = int(raw_limit) if raw_limit.isdigit() else 50 if not raw_limit else 0
-        if not 1 <= limit <= 100:
-            raise ValueError("limit")
-        return " ".join(clauses), values, limit, _param(params, "cursor")
+        limit, cursor = _page_inputs(params)
+        return " ".join(clauses), values, limit, cursor
     return " ".join(clauses), values
 
 

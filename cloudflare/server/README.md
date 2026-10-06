@@ -27,8 +27,10 @@ Do not modify migrations 0001–0004 or import preview data into production.
 
 Fresh preview initialization and the exact legacy-v4-to-v5 upgrade are distinct
 compiled plans. The existing preview must use its binding-only, one-shot upgrade
-under the same ValidationBudget journal, database, counters and 100,000-read /
-1,000-write ceilings. It verifies the exact legacy schema and bounded project
+under the same ValidationBudget journal, database and counters. The completed
+upgrade retained its historical 100,000-read / 1,000-write ceilings; the latest
+ordinary product operation policy retires those lifetime test gates while
+preserving all their evidence. The upgrade verifies the exact legacy schema and bounded project
 backfill, then executes 0005 atomically. The versioned preview upgrade flag
 explicitly enables this before the first eligible application request under
 the existing DO lock; ordinary product SQL cannot submit migration DDL.
@@ -53,8 +55,24 @@ The production Worker `pullwise-server-production` uses the exact zone route
 proxies to this origin. An empty database binding is not a completed migration.
 Preview has `PULLWISE_D1_ACCESS_ENABLED=1` and
 `PULLWISE_PREVIEW_PRODUCT_ENABLED=1`. Its fixed ValidationBudget journal
-reserves SQL bounds before dispatch, with cumulative 100,000 reads / 1,000 writes
-and no reset endpoint. The cumulative request-count gate was already removed.
+reserves SQL bounds before dispatch, records native usage and retains all
+cumulative counters. Enabled normal preview product traffic removes the
+historical lifetime request/read/write test gates; generic finite validation
+retains them. Schema, SQL, input, per-batch/request bounds and commercial owner
+quotas remain enforced. New evidence appends within the same DO SQLite journal;
+unknown/incomplete native outcomes remain stopped and there is no reset endpoint.
+The DO-only `/_preview/budget` status distinguishes current product operation
+mode from the retired numeric ceilings. Preview CSV uses a 24 MiB UTF-8 byte
+spool; an oversized export returns 413 with filtering guidance and keeps the
+journal healthy. See [D1 policy](../../docs/validation/d1-validation-budget.md)
+for accounting and failure isolation.
+Preview abuse admission also uses hashed, expiring DO-only IP/credential/actor
+buckets and returns 429 plus `Retry-After`. Authenticated actor rates are 120
+reads/minute and 60 ordinary write attempts/minute across sessions and keys;
+commercial Free/paid allowances still apply. A verified cached cardinality
+snapshot removes repeated table-count scans on healthy reads; all mutations
+continue to verify and persist their new counts. The user's roughly USD 200/month
+total Cloudflare target does not introduce a hard day/month row budget.
 Production retains `PULLWISE_D1_ACCESS_ENABLED=0`: requests receive
 503 `D1_ACCESS_PAUSED` before DB/provider access. Missing/invalid switch values
 also fail closed. This switch is a pause, not a metered quota.

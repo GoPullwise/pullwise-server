@@ -43,6 +43,7 @@ MODULES = (
     "cloudflare_workspaces",
     "cloudflare_validation_budget",
     "cloudflare_preview_budget",
+    "cloudflare_preview_rate",
     "cloudflare_preview_schema",
     "cloudflare_plan_limits",
     "ledger_plan_policy",

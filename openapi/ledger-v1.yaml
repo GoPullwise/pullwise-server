@@ -101,12 +101,13 @@ paths:
       operationId: previewWorkspaceInvitation
       x-pullwise-scope: profile:read
       security: [{cookieSession: []}]
-      description: Recipient-bound read; confirmation does not join or write. Unused token, expiry, stable recipient ID and current inviter authority are checked.
+      description: Recipient-bound read; confirmation does not join or write. Pending tokens check expiry, stable recipient ID and current inviter authority. An accepted token can recover its recipient's current active membership after a lost acceptance response, without reaccepting or restoring removed membership.
       requestBody: {$ref: '#/components/requestBodies/InvitationToken'}
       responses:
-        '200': {description: Invitation and target ledger for explicit confirmation}
+        '200': {description: Pending invitation for explicit confirmation or accepted invitation with the recipient's current active ledger role and revision}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
+        '410': {description: INVITATION_EXPIRED, INVITATION_REVOKED, or INVITATION_ACCEPTED without a current active membership}
   /api/v1/workspace-invitations/accept:
     post:
       operationId: acceptWorkspaceInvitation
@@ -119,6 +120,7 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
+        '410': {description: INVITATION_ACCEPTED, INVITATION_REVOKED, or INVITATION_EXPIRED; acceptance is never replayed as another membership write}
   /api/v1/me:
     get:
       parameters: [{$ref: '#/components/parameters/WorkspaceHeader'}]
@@ -335,16 +337,16 @@ components:
     WorkspacePath: {name: workspaceId, in: path, required: true, schema: {type: string, pattern: '^[A-Za-z0-9_-]{1,120}$'}}
     WorkspaceHeader: {name: X-Pullwise-Workspace, in: header, schema: {type: string}, description: Explicit ledger selection; never grants membership and cannot override a key binding}
     WorkspaceQuery: {name: workspaceId, in: query, schema: {type: string}, description: CSV/native-link selector; must agree with any header}
-    Id: {name: id, in: path, required: true, schema: {type: string}}
-    IfMatch: {name: If-Match, in: header, required: true, schema: {type: string}, description: Quoted revision ETag}
+    Id: {name: id, in: path, required: true, schema: {type: string, pattern: '^[A-Za-z0-9_-]{1,120}$'}}
+    IfMatch: {name: If-Match, in: header, required: true, schema: {type: string, maxLength: 18, pattern: '^"[1-9][0-9]{0,15}"$'}, description: Quoted revision ETag in the exact integer range 1 through 9007199254740991}
     IdempotencyKey: {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 128}}
     Target: {name: target, in: query, schema: {type: string, enum: [all, project, shared], default: all}}
-    ProjectId: {name: projectId, in: query, schema: {type: string}}
-    CategoryId: {name: categoryId, in: query, schema: {type: string}}
+    ProjectId: {name: projectId, in: query, schema: {type: string, pattern: '^[A-Za-z0-9_-]{1,120}$'}}
+    CategoryId: {name: categoryId, in: query, schema: {type: string, pattern: '^[A-Za-z0-9_-]{1,120}$'}}
     From: {name: from, in: query, schema: {type: string, format: date}, description: Inclusive business date}
     To: {name: to, in: query, schema: {type: string, format: date}, description: Exclusive business date}
     Currency: {name: currency, in: query, schema: {type: string, pattern: '^[A-Z]{3}$'}}
-    Cursor: {name: cursor, in: query, schema: {type: string}}
+    Cursor: {name: cursor, in: query, schema: {type: string, pattern: '^[A-Za-z0-9_-]{1,120}$'}}
     Limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
   responses:
     Unauthorized: {description: Authentication required}
@@ -451,7 +453,7 @@ components:
           description: Reauthorization requires an explicit GitHub login; expired/revoked credentials never revoke the Pullwise session or write on a GET. Unavailable/unknown grants return an error rather than a successful empty page.
     Target:
       oneOf:
-        - {type: object, required: [kind, projectId], additionalProperties: false, properties: {kind: {const: project}, projectId: {type: string}}}
+        - {type: object, required: [kind, projectId], additionalProperties: false, properties: {kind: {const: project}, projectId: {type: string, pattern: '^[A-Za-z0-9_-]{1,120}$'}}}
         - {type: object, required: [kind], additionalProperties: false, properties: {kind: {const: shared}}}
     ProjectInput:
       type: object

@@ -22,23 +22,32 @@ def _product(products: dict, plan: str, interval: str) -> str:
 
 
 def _provider_url(value: object) -> str:
-    if not isinstance(value, str):
+    if (not isinstance(value, str) or value != value.strip()
+            or any(ord(char) < 32 or ord(char) == 127 for char in value)):
         raise ValueError("invalid Creem redirect")
     parsed = urlsplit(value)
-    if parsed.scheme != "https" or parsed.hostname not in {"checkout.creem.io", "test-checkout.creem.io"}:
+    if (parsed.scheme != "https"
+            or parsed.hostname not in {"checkout.creem.io", "test-checkout.creem.io"}
+            or parsed.username is not None or parsed.password is not None
+            or parsed.port not in {None, 443}):
         raise ValueError("invalid Creem redirect")
     return value
 
 
-def _subscription_result(result: dict, billing: dict, *, plan: str, interval: str) -> tuple[dict, dict]:
+def _subscription_result(result: dict, billing: dict, *, plan: str, interval: str,
+                         expected_statuses: set[str] | None = None) -> tuple[dict, dict]:
     if not isinstance(result, dict) or result.get("id") != billing.get("subscriptionId"):
         raise ValueError("Creem subscription identity mismatch")
     raw_status = result.get("status")
     status = "canceling" if raw_status == "scheduled_cancel" else raw_status
     if status not in {"active", "trialing", "canceling"}:
         raise ValueError("Creem subscription status invalid")
+    if expected_statuses is not None and status not in expected_statuses:
+        raise ValueError("Creem subscription action was not confirmed")
     next_billing = {**billing, "provider": "creem", "plan": plan, "interval": interval,
                     "status": status, "cancelAtPeriodEnd": status == "canceling"}
+    if status in {"active", "trialing"}:
+        next_billing["canceledAt"] = None
     return next_billing, {"provider": "creem", "plan": plan, "interval": interval,
                           "subscriptionId": billing["subscriptionId"], "status": status,
                           "cancelAtPeriodEnd": status == "canceling"}
@@ -81,8 +90,8 @@ async def handle_billing_mutation(*, binding: Any, gateway: Any, now: int,
         product_id = _product(products, target_plan, target_interval)
         if not product_id:
             return 503, {"error": {"code": "BILLING_NOT_CONFIGURED"}}
-        success_url = _redirect(body.get("successUrl", ""), app_url, "/settings?billing=success")
-        cancel_url = _redirect(body.get("cancelUrl", ""), app_url, "/settings?billing=cancel")
+        success_url = _redirect(body.get("successUrl", ""), app_url, "/billing?billing=success")
+        cancel_url = _redirect(body.get("cancelUrl", ""), app_url, "/billing?billing=cancel")
         source = f"{user['id']}\0{product_id}\0{now // 600}"
         request_id = "pw_checkout_" + hashlib.sha256(source.encode()).hexdigest()[:32]
         payload = {"product_id": product_id, "request_id": request_id, "units": 1,
@@ -164,6 +173,8 @@ async def handle_billing_mutation(*, binding: Any, gateway: Any, now: int,
             raise
         _, public = _subscription_result(result, billing, plan=target_plan, interval=target_interval)
         return 200, {**public, "pending": True}
-    next_billing, public = _subscription_result(result, billing, plan=plan, interval=interval)
+    expected_statuses = {"canceling"} if path == "/billing/cancel-subscription" else {"active", "trialing"}
+    next_billing, public = _subscription_result(result, billing, plan=plan,
+        interval=interval, expected_statuses=expected_statuses)
     await _write_user(binding, {**user, "billing": next_billing}, now, expected_user=user)
     return 200, public

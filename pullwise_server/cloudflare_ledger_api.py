@@ -20,6 +20,10 @@ from .cloudflare_project_repositories import (
 )
 
 
+_RESOURCE_ID = re.compile(r"[A-Za-z0-9_-]{1,120}")
+MAX_REVISION = 9007199254740991
+
+
 def _error(status: int, code: str):
     return status, {"error": {"code": code}}
 
@@ -35,12 +39,28 @@ def _param(params: Mapping[str, object], name: str) -> str:
     return value if isinstance(value, str) else ""
 
 
+def _valid_resource_id(value: object) -> bool:
+    return isinstance(value, str) and _RESOURCE_ID.fullmatch(value) is not None
+
+
+def _page_inputs(params: Mapping[str, object]) -> tuple[int, str]:
+    """Reject malformed pagination before authentication or SQL admission."""
+    raw_limit, cursor = _param(params, "limit"), _param(params, "cursor")
+    if raw_limit and (len(raw_limit) > 3 or not raw_limit.isascii() or not raw_limit.isdigit()):
+        raise ValueError("limit")
+    limit = int(raw_limit) if raw_limit else 50
+    if not 1 <= limit <= 100 or cursor and not _valid_resource_id(cursor):
+        raise ValueError("pagination")
+    return limit, cursor
+
+
 def _revision(headers: Mapping[str, object]):
     value = _header(headers, "If-Match")
     if not value:
         return None
-    match = re.fullmatch(r'"([1-9][0-9]*)"', value)
-    return int(match.group(1)) if match else -1
+    match = re.fullmatch(r'"([1-9][0-9]{0,15})"', value)
+    revision = int(match.group(1)) if match else -1
+    return revision if revision <= MAX_REVISION else -1
 
 
 def _project(row: dict, allowed_repos: dict[int, dict], totals: list[dict], github_access="lost",
@@ -214,6 +234,8 @@ async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path
     if len(parts) > 4 or (len(parts) == 4 and not parts[3]):
         return _error(404, "NOT_FOUND")
     item_id = parts[3] if len(parts) == 4 else None
+    if item_id is not None and not _valid_resource_id(item_id):
+        return _error(404, "NOT_FOUND")
     if method not in {"GET", "POST", "PATCH", "DELETE"}:
         return _error(405, "METHOD_NOT_ALLOWED")
     if kind == "projects" and method == "DELETE":
@@ -255,11 +277,10 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
                 return _error(404, "NOT_FOUND")
             repos, state, organizations = await _project_repos(user, gateway)
             return 200, _project(project_rows[0], repos, totals, state, bindings, organizations)
-        limit_text = _param(params, "limit")
-        limit = int(limit_text) if limit_text.isdigit() else 50 if not limit_text else 0
-        if not 1 <= limit <= 100:
+        try:
+            limit, cursor = _page_inputs(params)
+        except ValueError:
             return _error(422, "INVALID_INPUT")
-        cursor = _param(params, "cursor")
         start, end = _param(params, "from"), _param(params, "to")
         try:
             for value in (start, end):
