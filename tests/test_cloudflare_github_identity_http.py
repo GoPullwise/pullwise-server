@@ -4,6 +4,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+import pytest
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -138,6 +139,40 @@ def test_login_state_cookie_and_callback_replay(tmp_path):
         authority = db.execute("SELECT owner_id FROM account_entitlement_authority").fetchone()
     assert users["usr_github_77"]["githubAccessToken"] == "sealed:synthetic-access-token"
     assert authority["owner_id"] == "usr_github_77"
+
+
+@pytest.mark.parametrize("with_query", [False, True])
+@pytest.mark.parametrize("oauth_error", ["access_denied", None])
+def test_oauth_failure_query_preserves_workspace_invitation_fragment(tmp_path, with_query, oauth_error):
+    from urllib.parse import parse_qs, urlsplit
+    fixture, _, _ = seed(tmp_path / "oauth-fragment.db")
+    binding = D1ShapedSQLite(fixture.store)
+    class NoExchange(GitHubStub):
+        async def exchange(self, *args):
+            raise AssertionError("Denied/missing-code callback must not call GitHub")
+    gateway = NoExchange()
+    fragment = "invite=pwi_" + "Q" * 43
+    destination = "/members" + ("?tab=invites" if with_query else "") + "#" + fragment
+    status, payload, _ = call(binding, gateway, fixture.now, "GET", "/auth/github/authorize",
+                              {"redirectTo": destination})
+    assert status == 200
+    state = parse_qs(urlsplit(payload["url"]).query)["state"][0]
+    params = {"state": state}
+    if oauth_error:
+        params["error"] = oauth_error
+    status, payload, headers = call(binding, gateway, fixture.now + 1, "GET", "/auth/github/callback", params)
+    assert status == 302 and "Set-Cookie" not in headers
+    location = urlsplit(payload["location"])
+    assert location.scheme == "https" and location.netloc == "app.example.test" and location.path == "/members"
+    assert location.fragment == fragment
+    query = parse_qs(location.query)
+    assert query["github_error"] == [oauth_error or "missing_oauth_code"]
+    assert query.get("tab") == (["invites"] if with_query else None)
+    assert headers["Location"] == payload["location"]
+    assert call(binding, gateway, fixture.now + 2, "GET", "/auth/github/callback", params)[0] == 400
+    with fixture.store.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM account_entitlement_authority").fetchone()[0] == 0
+        assert db.execute("SELECT payload FROM app_state WHERE name IN ('users','sessions')").fetchall() == []
 
 
 def test_installation_binding_and_lost_access_hides_repository_metadata(tmp_path):

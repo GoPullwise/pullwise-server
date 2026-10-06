@@ -103,7 +103,7 @@ def test_expired_provider_credentials_leave_local_identity_and_database_untouche
     status, payload, _ = call(ReadOnly(fixture.store), Rejected(), fixture.now + 2,
                              'GET', '/api/v1/repositories', headers=cookie)
     assert status == 200 and payload == {'items': [], 'nextCursor': None,
-                                       'githubAccess': 'reauthorization_required'}
+                                       'githubAccess': 'reauthorization_required', 'organizations': []}
     status, session, _ = call(ReadOnly(fixture.store), Rejected(), fixture.now + 2,
                              'GET', '/auth/session', headers=cookie)
     assert status == 200 and session['authenticated'] is True
@@ -118,7 +118,7 @@ def test_identity_unexpected_failure_has_safe_preview_diagnostic(capsys):
         raise RuntimeError('synthetic-secret-cookie-provider-body')
     request = SimpleNamespace(method='GET', url='https://preview.invalid/api/v1/repositories',
                               headers=SimpleNamespace(get=lambda _: None))
-    with patch.object(entry, 'handle_identity_request', broken):
+    with patch.object(entry, 'handle_ledger_request', broken):
         payload, options = asyncio.run(entry._Application(env, SimpleNamespace()).fetch(request))
     assert options['status'] == 503 and payload['error']['code'] == 'IDENTITY_UNAVAILABLE'
     assert payload['error']['diagnosticSite'].startswith('RuntimeError:broken:')
@@ -170,7 +170,7 @@ def test_worker_distinguishes_typed_identity_failures_without_raw_diagnostics(co
     request = SimpleNamespace(method='GET', url='https://preview.invalid/api/v1/repositories',
                               headers=SimpleNamespace(get=lambda _: 'synthetic-private-cookie'))
     env = SimpleNamespace(PULLWISE_D1_ACCESS_ENABLED='1', PULLWISE_MODE='preview')
-    with patch.object(entry, 'handle_identity_request', broken):
+    with patch.object(entry, 'handle_ledger_request', broken):
         payload, options = asyncio.run(entry._Application(env, SimpleNamespace()).fetch(request))
     assert options['status'] == status and payload['error']['code'] == code
     assert payload['error']['providerStatus'] == 403

@@ -60,6 +60,10 @@ def _restrictions(value: object) -> dict:
     if not isinstance(value, dict):
         return {}
     result = {"shared": value.get("shared") is True}
+    if isinstance(value.get("workspaceId"), str):
+        result["workspaceId"] = value["workspaceId"]
+        if type(value.get("workspaceMemberRevision")) is int:
+            result["workspaceMemberRevision"] = value["workspaceMemberRevision"]
     values = value.get("projectIds")
     if isinstance(values, list):
         result["projectIds"] = list(dict.fromkeys(
@@ -98,9 +102,16 @@ def parse_api_key_restrictions(value: object) -> dict:
         except ValueError:
             raise ValueError("INVALID_RESTRICTION") from None
     if value is not None and (not isinstance(value, dict)
-            or set(value) - {"projectIds", "shared"}):
+            or set(value) - {"projectIds", "shared", "workspaceId", "workspaceMemberRevision"}):
         raise ValueError("INVALID_RESTRICTION")
     if isinstance(value, dict):
+        if "workspaceId" in value and (not isinstance(value["workspaceId"], str)
+                or not re.fullmatch(r"[A-Za-z0-9_-]{1,120}", value["workspaceId"])):
+            raise ValueError("INVALID_RESTRICTION")
+        if "workspaceMemberRevision" in value and ("workspaceId" not in value
+                or type(value["workspaceMemberRevision"]) is not int
+                or not 1 <= value["workspaceMemberRevision"] <= 9007199254740991):
+            raise ValueError("INVALID_RESTRICTION")
         if "shared" in value and type(value["shared"]) is not bool:
             raise ValueError("INVALID_RESTRICTION")
         if "projectIds" in value and (not isinstance(value["projectIds"], list)

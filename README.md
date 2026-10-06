@@ -2,13 +2,41 @@
 
 Cloudflare Python Worker modules for the [GitHub project expense ledger](docs/design/github-project-ledger/README.md).
 The Server owns GitHub identity/repository authorization, Cookie/API-key
-security, project/shared expenses, categories, exact money, reports, paginated
-CSV and optional suggestions. Creem subscriptions remain separate from expenses.
+security, shared ledgers with Owner/Admin/Editor/Viewer roles, multi-repository
+projects, categories, exact money, reports, paginated CSV and optional suggestions.
+Creem subscriptions remain separate from expenses.
 
 `cloudflare/server/src/entry.py` is the Worker entry. `pullwise_server/` owns
 the implementation; `cloudflare/server/sync_server_modules.py` generates the
 ignored Worker mirror. The [ledger OpenAPI](openapi/ledger-v1.yaml) is the shared
 business contract.
+
+## Current version (2026-10-06)
+
+The multi-repository, Organization and shared-ledger version is implemented
+locally and awaits final release verification. It has not yet been deployed or
+migrated remotely. The earlier preview acceptance records describe the original
+version; they do not establish acceptance of this version.
+
+A workspace ID is the existing ledger owner ID. Personal ledgers retain an
+implicit Owner; inviting members shares that ledger's current and future finance
+data without copying or rewriting expense history. Invitations resolve a GitHub
+username to a stable user ID, expire after 24 hours and store only a one-time
+token's hash. GitHub Organization membership grants no ledger role. The Owner's
+plan, write allowances and model budget serve the whole ledger; each member's
+personal subscription remains separate.
+
+Projects explicitly bind 1–30 currently authorized repositories and may have an
+optional name and Organization association. Repository visibility and new-target
+eligibility use the actual actor's GitHub credentials. Existing finance history
+remains usable according to ledger role when repository access is lost.
+
+Select a ledger with `X-Pullwise-Workspace`; native browser CSV links use the
+`workspaceId` query parameter. Workspace-scoped keys retain their membership
+revision and intersect key scopes, current role and target restrictions. Legacy
+unscoped keys remain personal. See the [version requirements and migration
+status](docs/planning/project-repositories.md) for roles, compatibility and release
+gates.
 
 ## Offline verification
 

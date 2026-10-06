@@ -1,8 +1,50 @@
 # S17/S18 bounded D1 validation
 
-Updated 2026-09-29. The user authorized S17/S18 conditional on controlling
+Updated 2026-10-06. The user authorized S17/S18 conditional on controlling
 D1 usage, especially Rows Written. This is an execution candidate, not a
 record of completed runtime acceptance or authorization to release production.
+
+## Current workspace/repository schema plan (2026-10-06)
+
+The new version is implemented locally and awaits final release verification.
+Its canonical schema freezes five migrations, 18 tables and 33 SQLite indexes.
+0005 appends four member/invitation/event/repository-binding tables and two
+project columns, then backfills the original single-repository associations to
+the same project IDs. It does not rewrite expenses or financial history.
+
+Fresh empty-schema initialization reserves 256 written / 4,000 read rows for
+the 32 compiled DDL/seed statements, plus 384 read rows for the empty-schema
+check. The already initialized preview must instead use the exact retained
+legacy-v4 schema/fingerprint and its separate binding-only v4-to-v5 plan.
+The versioned preview upgrade flag explicitly enables this plan before the
+first eligible application request under the existing DO lock; ordinary product
+SQL cannot dispatch migration DDL. The compiled plan reserves
+all operations before dispatch, verifies the exact old schema and cardinalities,
+executes all ten 0005 statements in one atomic batch and verifies the new schema.
+For existing project count `P`, written reservation is `128 + 21P`; compiled
+reads must fit the finite 10,000-read per-case ceiling. The whole plan must also
+fit the same journal's remaining cumulative 100,000-read / 1,000-write allowance.
+There is one upgrade admission and no reset, retry, new namespace/database or
+release of prior write reservations, including after partial/unknown outcomes.
+
+Local native SQL/budget measurement passed: four real D1 batches read 324 rows
+and wrote 25, below the retained 4,852/170 reservation for two existing projects.
+Miniflare omits `total_attempts`; its pinned D1/workerd source shows one native
+transaction/fetch without a retry loop. The measurement preserves those nulls
+and is not the deployed strict remote gate. The first failed local claim stays
+stopped and unchanged. Remote read phases require native integer `1`; only the
+exact pinned CREATE/ALTER/INSERT write group may use D1's documented nonretryable
+write contract when attempts are absent. Provided non-1 attempts still reject.
+No attempt value is invented and no deployed local bypass exists. The finite
+preview upgrade remains the final runtime gate. Production access stays 0.
+Workspace mutations normally consume the ledger Owner's commercial allowance.
+Emergency member removal, invitation revocation and own-key revocation are
+commercial-quota exempt; current authorization/atomic guards and global D1
+admission/accounting still apply.
+
+The dated sections below retain original-version observations and grants.
+Their four-migration/14-table/24-index measurements describe the historical v4
+schema, rather than the current canonical target or native upgrade acceptance.
 
 ## Product-wide preview authorization (2026-09-29)
 
@@ -78,14 +120,16 @@ Publication validation is finite: one unauthenticated session GET, followed by
 one DO-only status GET. Session reads cannot write D1; its read bound uses existing
 cardinality and the three-attempt reserve. No polling/provider call or write test.
 
-- Initialization first reads sqlite_master with LIMIT 65, reserving 384 reads
-  including native read retries. Nonempty application schemas are rejected.
-  Only the frozen four migrations execute, as one atomic D1 batch: 14 tables,
-  24 indexes and four app_state seed rows, with no Wrangler migration table or
-  untracked bookkeeping. Bound: 2 x 14 table/root writes + 2 x 24 index/schema
-  writes + 4 x 2 seed/index writes = 84; reserve **128 written / 2,000 read**.
-  At most 64 initial/final schema objects and 22 finite DDL/seed statements fit
-  the reserved schema scan bound. D1 write queries are not automatically retried.
+- Current fresh initialization first reads sqlite_master with LIMIT 65,
+  reserving 384 reads including native read retries. Nonempty application
+  schemas are rejected. The frozen five migrations execute as one atomic D1
+  batch: 18 tables, 33 indexes, four app_state seed rows and 32 finite SQL
+  statements, with no Wrangler migration table or untracked bookkeeping.
+  Reserve **256 written / 4,000 read** for that batch. Existing v4 preview uses
+  the distinct one-shot upgrade described above, never fresh initialization.
+  D1 write queries are not automatically retried. The original v4 initialization
+  reserved 128 written / 2,000 read; its dated evidence and reconciliation remain
+  preserved and are not recalculated as v5 initialization.
 - Runtime INSERT must be scalar VALUES or scalar SELECT without a top-level
   FROM/compound SELECT. REPLACE and multi-row VALUES are rejected. UPDATE/DELETE
   require a top-level conjunctive primary-key equality fence. Current index
@@ -110,7 +154,7 @@ cardinality and the three-attempt reserve. No polling/provider call or write tes
   D1 pull remains after releasing the response. Queue depth is capped at 16;
   concurrent page reads serialize rather than consuming overlapping tickets.
 
-Native local Python Worker/D1/DO product run: 15 finite checks including login,
+Historical native local Python Worker/D1/DO product run (2026-09-29): 15 finite checks including login,
 installation, profile, category/expense creation, list/report/CSV and edit/delete
 passed; two concurrent session requests also returned 200. Before those two
 reads, observed usage was **464 read / 131 written**, reservations **7,847 /

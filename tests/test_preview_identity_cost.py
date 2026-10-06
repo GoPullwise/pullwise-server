@@ -43,7 +43,7 @@ def test_identity_trace_replays_fresh_schema_and_keeps_providers_synthetic(tmp_p
     assert {"schema", "login_authorize", "login_callback", "callback_replay",
             "session", "install_authorize", "install_callback", "repositories",
             "sign_out", "signed_out_session"} <= cases
-    assert manifest["tables"] == 14 and manifest["indexes"] == 24
+    assert manifest["tables"] == 18 and manifest["indexes"] == 33
     assert manifest["http_cases"] == 9
     assert manifest["remote_admissible"] is False
     assert manifest["final_state"] == {"users": 1, "sessions": 0, "githubStates": 0}

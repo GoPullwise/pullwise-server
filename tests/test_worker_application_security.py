@@ -116,3 +116,23 @@ def test_valid_encoded_emoji_query_reaches_application():
     app, calls = application()
     response = asyncio.run(app.fetch(request("/api/v1/expenses?cursor=%F0%9F%98%80", method="GET")))
     assert response.status == 204 and calls == ["ledger"]
+
+
+@pytest.mark.parametrize("path,headers", [
+    ("/api/v1/expenses/export?workspaceId=owner&workspaceId=other", {}),
+    ("/api/v1/expenses/export?workspaceId=owner", {"x-pullwise-workspace": "other"}),
+    ("/api/v1/me?workspaceId=", {}),
+])
+def test_conflicting_ledger_selectors_fail_before_authentication(path, headers):
+    app, calls = application()
+    response = asyncio.run(app.fetch(request(path, method="GET", headers=headers)))
+    assert response.status == 422 and response.payload["error"]["code"] == "INVALID_INPUT"
+    assert calls == []
+
+
+@pytest.mark.parametrize("path", ["/api/v1/workspaces/owner/invites", "/api/v1/workspaces/owner/members/editor", "/api/v1/workspace-invitations/accept"])
+def test_workspace_cookie_operations_require_trusted_origin_before_body_or_database(path):
+    app, calls = application()
+    response = asyncio.run(app.fetch(request(path, headers={"cookie": "pw_session=synthetic", "origin": "https://hostile.test"})))
+    assert response.status == 403 and response.payload["error"]["code"] == "UNTRUSTED_ORIGIN"
+    assert calls == []

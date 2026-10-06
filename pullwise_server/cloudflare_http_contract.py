@@ -41,8 +41,10 @@ async def handle_http_request(*, method: str, path: str,
                     'expenses','expense_events','expense_create_idempotency',
                     'expense_suggestion_budget','expense_suggestion_events','app_state',
                     'd1_command_guard','api_keys','account_entitlement_authority',
-                    'billing_webhook_receipts','billing_public_catalog','ledger_plan_usage')""").first()
-            if ledger and ledger.get("table_count") == 14:
+                    'billing_webhook_receipts','billing_public_catalog','ledger_plan_usage',
+                    'workspace_members','workspace_invites','workspace_events',
+                    'ledger_project_repositories')""").first()
+            if ledger and ledger.get("table_count") == 18:
                 return 200, {"ok": True, "service": "pullwise-server",
                              "database": {"type": "d1", "configured": True}}
         except Exception:
@@ -50,7 +52,14 @@ async def handle_http_request(*, method: str, path: str,
         return 503, {"ok": False, "service": "pullwise-server"}
     if method == "GET" and path == "/api-keys":
         try:
-            return await list_api_keys(binding=binding, headers=headers, now=now)
+            workspace_values = (params or {}).get("workspaceId")
+            if isinstance(workspace_values, list):
+                if len(workspace_values) != 1:
+                    return 422, {"error": {"code": "INVALID_INPUT"}}
+                workspace_values = workspace_values[0]
+            if workspace_values is not None and (not isinstance(workspace_values, str) or not workspace_values):
+                return 422, {"error": {"code": "INVALID_INPUT"}}
+            return await list_api_keys(binding=binding, headers=headers, now=now, workspace_id=workspace_values)
         except Exception:
             return 503, {"error": {"code": "SERVER_UNAVAILABLE"}}
     if method == "GET" and path == "/billing":

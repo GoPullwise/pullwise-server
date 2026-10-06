@@ -10,11 +10,14 @@ from datetime import date, datetime, timezone
 from typing import Any, Mapping
 
 from .cloudflare_ledger_auth import ledger_principal, target_allowed
-from .cloudflare_github_identity_http import read_repository_access
 from .cloudflare_github_gateway import GitHubFailure
 from .cloudflare_principal import PrincipalAuthError, _header
 from .ledger_money_totals import AGGREGATE_SQL, aggregate_minor, public_minor
 from .json_input import validate_json_unicode
+from .cloudflare_project_repositories import (
+    MAX_REPOSITORIES, bound_repository_dto, live_repository_access, project_input,
+    repository_snapshot_values,
+)
 
 
 def _error(status: int, code: str):
@@ -40,12 +43,27 @@ def _revision(headers: Mapping[str, object]):
     return int(match.group(1)) if match else -1
 
 
-def _project(row: dict, allowed_repos: dict[int, str], totals: list[dict], github_access="lost"):
+def _project(row: dict, allowed_repos: dict[int, dict], totals: list[dict], github_access="lost",
+             bindings: list[dict] | None = None, organizations: list[dict] | None = None):
     repo_id = row["github_repo_id"]
-    name = allowed_repos.get(repo_id)
-    return {"id": row["id"], "githubRepoId": repo_id,
-            "githubFullName": name, "description": row["description"],
-            "status": row["status"], "githubAccess": "authorized" if name else github_access,
+    ids = [item["github_repo_id"] for item in (bindings or [])]
+    ids = [repo_id, *sorted(value for value in ids if value != repo_id)]
+    repositories = [bound_repository_dto(value, allowed_repos, github_access) for value in ids]
+    authorized = sum(item["githubAccess"] == "authorized" for item in repositories)
+    state = "authorized" if authorized == len(ids) else "partial" if authorized else github_access
+    organization_id = row.get("github_organization_id")
+    organization = next((item for item in organizations or [] if item["id"] == organization_id), None)
+    live_anchor = allowed_repos.get(repo_id)
+    return {"id": row["id"], "name": row.get("name", ""), "githubRepoId": repo_id,
+            "githubFullName": live_anchor["fullName"] if live_anchor else None,
+            "githubRepoIds": ids, "repositories": repositories,
+            "githubOrganizationId": organization_id,
+            "githubOrganization": {"id": organization_id, "login": organization["login"] if organization else None,
+                "type": "Organization", "githubAccess": "authorized" if organization else github_access}
+                if organization_id is not None else None,
+            "description": row["description"],
+            "status": row["status"], "githubAccess": state,
+            "canCreateExpense": row["status"] == "active" and authorized > 0,
             "revision": row["revision"], "totals": [{"currency": total["currency"],
                 "amountMinor": total["amountMinor"] if "amountMinor" in total
                 else public_minor(aggregate_minor(total))} for total in totals]}
@@ -58,26 +76,36 @@ def _category(row: dict):
 
 def _write_guard(binding: Any, proof: dict, owner_id: str, now: int):
     """A failed credential/user fence aborts the D1 transaction."""
+    actor_id = proof.get("actor_user_id", owner_id)
+    owner_snapshot = proof.get("owner_user", proof["user"])
     user_check = """EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u
         WHERE a.name='users' AND u.key=? AND u.value=?)"""
+    checks = [user_check]
+    values = [owner_id, owner_snapshot]
+    if actor_id != owner_id:
+        actor_path = '$."' + actor_id.replace('"', '\\"') + '"'
+        checks.append("""EXISTS(SELECT 1 FROM app_state WHERE name='users'
+            AND json_extract(payload,?)=json(?))""")
+        values.extend([actor_path, proof["user"]])
+        checks.append("""EXISTS(SELECT 1 FROM workspace_members
+            WHERE workspace_id=? AND user_id=? AND role=? AND revision=? AND removed_at IS NULL)""")
+        values.extend([owner_id, actor_id, proof["workspace_role"], proof["workspace_revision"]])
     if proof.get("key") is not None:
         key = proof["key"]
-        sql = f"""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN
-            {user_check} AND EXISTS(SELECT 1 FROM api_keys WHERE key_hash=?
+        checks.append("""EXISTS(SELECT 1 FROM api_keys WHERE key_hash=?
               AND user_id=? AND scopes=? AND restrictions=? AND revoked_at IS NULL
-              AND (expires_at IS NULL OR expires_at>=?)) THEN 1 ELSE 0 END)"""
+              AND (expires_at IS NULL OR expires_at>=?))""")
         token_hash = hashlib.sha256(proof["token"].encode()).hexdigest()
-        return binding.prepare(sql).bind(owner_id, proof["user"], token_hash, owner_id,
-            key["scopes"], key["restrictions"], now)
-    sql = f"""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN
-        {user_check} AND EXISTS(SELECT 1 FROM app_state WHERE name='sessions'
+        values.extend([token_hash, actor_id, key["scopes"], key["restrictions"], now])
+    else:
+        checks.append("""EXISTS(SELECT 1 FROM app_state WHERE name='sessions'
           AND payload=? AND json_extract(payload, ?) = ?
-          AND CAST(json_extract(payload, ?) AS INTEGER)>=?)
-        THEN 1 ELSE 0 END)"""
-    session_id = proof["session_id"]
-    path = '$."' + session_id.replace('"', '\\"') + '"'
-    return binding.prepare(sql).bind(owner_id, proof["user"], proof["sessions"],
-        path + ".userId", owner_id, path + ".expiresAt", now)
+          AND CAST(json_extract(payload, ?) AS INTEGER)>=?)""")
+        session_id = proof["session_id"]
+        path = '$."' + session_id.replace('"', '\\"') + '"'
+        values.extend([proof["sessions"], path + ".userId", actor_id, path + ".expiresAt", now])
+    sql = "INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN " + " AND ".join(checks) + " THEN 1 ELSE 0 END)"
+    return binding.prepare(sql).bind(*values)
 
 
 async def _authorized(binding: Any, headers: Mapping[str, object], scope: str,
@@ -92,19 +120,19 @@ async def _authorized(binding: Any, headers: Mapping[str, object], scope: str,
 
 
 async def _live_repos(user: dict, gateway: Any) -> dict[int, str]:
-    access = await read_repository_access(user, gateway)
+    access = await live_repository_access(user, gateway)
     return {item["githubRepoId"]: item["fullName"] for item in access["items"]}
 
 
 async def _project_repos(user: dict, gateway: Any):
     """History reads remain usable without claiming an outage revoked grants."""
     try:
-        access = await read_repository_access(user, gateway)
-        repos = {item["githubRepoId"]: item["fullName"] for item in access["items"]}
+        access = await live_repository_access(user, gateway)
+        repos = {item["githubRepoId"]: item for item in access["items"]}
         state = "reauthorization_required" if access["githubAccess"] == "reauthorization_required" else "lost"
-        return repos, state
+        return repos, state, access.get("organizations", [])
     except Exception:
-        return {}, "unavailable"
+        return {}, "unavailable", []
 
 
 async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path: str,
@@ -115,6 +143,50 @@ async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path
         validate_json_unicode(body)
     except UnicodeError:
         return _error(422, "INVALID_INPUT")
+    if path == "/api/v1/workspaces" or path.startswith(("/api/v1/workspaces/", "/api/v1/workspace-invitations/")):
+        from .cloudflare_workspaces import handle_workspace_request
+        return await handle_workspace_request(binding=binding, gateway=gateway,
+            method=method, path=path, headers=headers, body=body, now=now)
+    if path == "/api/v1/repositories":
+        if method != "GET":
+            return _error(405, "METHOD_NOT_ALLOWED")
+        limit_text, cursor = _param(params, "limit"), _param(params, "cursor")
+        limit = int(limit_text) if (len(limit_text) <= 3 and limit_text.isascii()
+                                   and limit_text.isdigit()) else 50 if not limit_text else 0
+        if (not 1 <= limit <= 100 or (cursor and (not cursor.isascii() or not cursor.isdigit()
+                or len(cursor) > 16 or not 1 <= int(cursor) <= 9007199254740991))):
+            return _error(422, "INVALID_INPUT")
+        try:
+            user, restrictions, auth, validate = await ledger_principal(
+                binding=binding, headers=headers, scope="projects:read", now=now)
+            snapshot = await binding.batch(auth)
+            validate([part.results for part in snapshot])
+            access = await live_repository_access(user, gateway)
+            items = sorted((item for item in access["items"]
+                            if item["githubRepoId"] > (int(cursor) if cursor else 0)),
+                           key=lambda item: item["githubRepoId"])
+            page = items[:limit]
+            if page:
+                project_ids = restrictions.get("projectIds")
+                visibility = "" if project_ids is None else (
+                    " AND project_id IN (" + ",".join("?" for _ in project_ids) + ")"
+                    if project_ids else " AND 0")
+                linked = binding.prepare("""SELECT github_repo_id FROM ledger_project_repositories
+                    WHERE owner_id=? AND github_repo_id IN (""" + ",".join("?" for _ in page) + ")"
+                    + visibility + " LIMIT 100").bind(user["id"], *(item["githubRepoId"] for item in page),
+                                                     *(project_ids or []))
+                linked_snapshot = await binding.batch([*auth, linked])
+                validate([part.results for part in linked_snapshot[:len(auth)]])
+                bound = {item["github_repo_id"] for item in linked_snapshot[-1].results}
+                page = [{**item, "isBound": item["githubRepoId"] in bound} for item in page]
+            return 200, {"items": page,
+                         "nextCursor": str(page[-1]["githubRepoId"]) if len(items) > limit else None,
+                         "githubAccess": access["githubAccess"],
+                         "organizations": access.get("organizations", [])}
+        except PrincipalAuthError as exc:
+            return _error(exc.status, exc.code)
+        except GitHubFailure as exc:
+            return _error(exc.status, exc.code)
     if path.startswith("/api/v1/expense-suggestions/") and path.endswith("/decision"):
         from .cloudflare_ledger_suggestions import handle_suggestion_decision
         return await handle_suggestion_decision(binding=binding, method=method, path=path,
@@ -161,19 +233,11 @@ async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path
 
 
 async def _projects(binding, gateway, method, item_id, headers, params, body, now, scope):
-    if method == "POST":
-        if (not isinstance(body, dict) or set(body) - {"githubRepoId", "description"}
-                or type(body.get("githubRepoId")) is not int or body["githubRepoId"] <= 0
-                or body["githubRepoId"] > 9007199254740991
-                or not isinstance(body.get("description", ""), str)
-                or len(body.get("description", "")) > 2000):
-            return _error(422, "INVALID_INPUT")
-    elif method == "PATCH":
-        if (not isinstance(body, dict) or not body or set(body) - {"description", "status"}
-                or ("description" in body and (not isinstance(body["description"], str)
-                    or len(body["description"]) > 2000))
-                or ("status" in body and (not isinstance(body["status"], str)
-                    or body["status"] not in {"active", "archived"}))):
+    selected = None
+    if method in {"POST", "PATCH"}:
+        try:
+            selected = project_input(body, creating=method == "POST")
+        except ValueError:
             return _error(422, "INVALID_INPUT")
     if method == "GET":
         if item_id:
@@ -181,14 +245,16 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
                 scope=scope, now=now, target_kind="project", project_id=item_id)
             commands = [binding.prepare("SELECT * FROM ledger_projects WHERE owner_id=? AND id=?").bind(user["id"], item_id),
                 binding.prepare(f"""SELECT currency,{AGGREGATE_SQL} FROM expenses
-                    WHERE owner_id=? AND project_id=? AND deleted_at IS NULL GROUP BY currency""").bind(user["id"], item_id)]
+                    WHERE owner_id=? AND project_id=? AND deleted_at IS NULL GROUP BY currency""").bind(user["id"], item_id),
+                binding.prepare("""SELECT * FROM ledger_project_repositories
+                    WHERE owner_id=? AND project_id=? ORDER BY github_repo_id LIMIT 30""").bind(user["id"], item_id)]
             rows = await binding.batch([*auth, *commands])
             validate([part.results for part in rows[:len(auth)]])
-            project_rows, totals = [part.results for part in rows[len(auth):]]
+            project_rows, totals, bindings = [part.results for part in rows[len(auth):]]
             if not project_rows:
                 return _error(404, "NOT_FOUND")
-            repos, state = await _project_repos(user, gateway)
-            return 200, _project(project_rows[0], repos, totals, state)
+            repos, state, organizations = await _project_repos(user, gateway)
+            return 200, _project(project_rows[0], repos, totals, state, bindings, organizations)
         limit_text = _param(params, "limit")
         limit = int(limit_text) if limit_text.isdigit() else 50 if not limit_text else 0
         if not 1 <= limit <= 100:
@@ -216,42 +282,75 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
                 *(project_ids or []), limit + 1),
             binding.prepare(f"""SELECT project_id,currency,{AGGREGATE_SQL} FROM expenses
             WHERE owner_id=? AND deleted_at IS NULL""" + date_where +
-                " GROUP BY project_id,currency").bind(user["id"], *date_values)]
+                " GROUP BY project_id,currency").bind(user["id"], *date_values),
+            binding.prepare("""SELECT * FROM ledger_project_repositories
+                WHERE owner_id=? AND project_id>?""" + visible.replace("id IN", "project_id IN") +
+                " ORDER BY project_id,github_repo_id LIMIT ?").bind(
+                    user["id"], cursor, *(project_ids or []), (limit + 1) * MAX_REPOSITORIES)]
         rows = await binding.batch([*auth, *commands])
         validate([part.results for part in rows[:len(auth)]])
-        projects, totals = [part.results for part in rows[len(auth):]]
+        projects, totals, bindings = [part.results for part in rows[len(auth):]]
         page = projects[:limit]
         by_project = {}
         for total in totals:
             by_project.setdefault(total["project_id"], []).append({
                 "currency": total["currency"], "amountMinor": public_minor(aggregate_minor(total))})
-        repos, state = await _project_repos(user, gateway)
-        return 200, {"items": [_project(row, repos, by_project.get(row["id"], []), state) for row in page],
+        by_binding = {}
+        for row in bindings:
+            by_binding.setdefault(row["project_id"], []).append(row)
+        repos, state, organizations = await _project_repos(user, gateway)
+        return 200, {"items": [_project(row, repos, by_project.get(row["id"], []), state,
+            by_binding.get(row["id"], []), organizations) for row in page],
                      "nextCursor": page[-1]["id"] if len(projects) > limit else None}
     user, restrictions, proof, rows = await _authorized(binding, headers, scope, now,
-        [binding.prepare("SELECT * FROM ledger_projects WHERE id=?").bind(item_id or "")],
+        [binding.prepare("SELECT * FROM ledger_projects WHERE id=?").bind(item_id or ""),
+         binding.prepare("""SELECT * FROM ledger_project_repositories
+             WHERE project_id=? ORDER BY github_repo_id LIMIT 30""").bind(item_id or "")],
         "project" if item_id else None, item_id)
     existing = rows[0][0] if rows[0] and rows[0][0]["owner_id"] == user["id"] else None
     if item_id and existing is None:
         return _error(404, "NOT_FOUND")
-    if method == "POST":
-        duplicate = await binding.prepare("""SELECT id FROM ledger_projects
-            WHERE owner_id=? AND github_repo_id=?""").bind(user["id"], body["githubRepoId"]).first()
-        if duplicate is not None:
-            return _error(409, "PROJECT_CONFLICT")
-        repos = await _live_repos(user, gateway)
-        repo_id = body["githubRepoId"]
-        if repo_id not in repos:
+    current_bindings = rows[1] if existing else []
+    if method == "PATCH":
+        expected = _revision(headers)
+        if expected is None:
+            return _error(428, "PRECONDITION_REQUIRED")
+        if expected < 0:
+            return _error(422, "INVALID_INPUT")
+        if expected != existing["revision"]:
+            return _error(412, "PRECONDITION_FAILED")
+    project_id = "prj_" + uuid.uuid4().hex if method == "POST" else item_id
+    if method == "POST" and not target_allowed(restrictions, "project", project_id):
+        return _error(403, "TARGET_FORBIDDEN")
+    if selected is not None and await _repository_conflict(binding, user["id"], selected, item_id):
+        return _error(409, "PROJECT_CONFLICT")
+    status = body.get("status", existing["status"] if existing else "active")
+    access = None
+    if (selected is not None or "githubOrganizationId" in body
+            or (existing and status == "active" and existing["status"] == "archived")):
+        access = await live_repository_access(user, gateway)
+    repos = {item["githubRepoId"]: item for item in access["items"]} if access else {}
+    organizations = access.get("organizations", []) if access else []
+    organization_id = body.get("githubOrganizationId", existing.get("github_organization_id") if existing else None)
+    if ("githubOrganizationId" in body and organization_id is not None
+            and not any(item["id"] == organization_id for item in organizations)):
+        return _error(403, "GITHUB_ORGANIZATION_ACCESS_REQUIRED")
+    if selected is not None:
+        if any(repo_id not in repos for repo_id in selected):
             return _error(403, "GITHUB_ACCESS_REQUIRED")
-        project_id = "prj_" + uuid.uuid4().hex
-        if not target_allowed(restrictions, "project", project_id):
-            return _error(403, "TARGET_FORBIDDEN")
-        stamp = _timestamp(now)
+    elif existing and status == "active" and existing["status"] == "archived":
+        if not any(row["github_repo_id"] in repos for row in current_bindings):
+            return _error(403, "GITHUB_ACCESS_REQUIRED")
+    stamp = _timestamp(now)
+    if method == "POST":
+        repo_id = selected[0]
         commands = [_write_guard(binding, proof, user["id"], now),
             binding.prepare("""INSERT INTO ledger_projects(id,owner_id,github_repo_id,
-                github_full_name,description,status,revision,created_at,updated_at)
-                VALUES(?,?,?,?,?,'active',1,?,?)""").bind(project_id, user["id"], repo_id,
-                    repos[repo_id], body.get("description", ""), stamp, stamp),
+                github_full_name,description,status,revision,created_at,updated_at,name,github_organization_id)
+                VALUES(?,?,?,?,?,'active',1,?,?,?,?)""").bind(project_id, user["id"], repo_id,
+                    repos[repo_id]["fullName"], body.get("description", ""), stamp, stamp,
+                    body.get("name", ""), organization_id),
+            *_insert_repository_bindings(binding, user["id"], project_id, selected, repos, stamp),
             binding.prepare("DELETE FROM d1_command_guard")]
         try:
             await binding.batch(commands)
@@ -260,39 +359,57 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
         except Exception:
             return _error(409, "PROJECT_CONFLICT")
         return 201, _project({"id": project_id, "github_repo_id": repo_id,
-            "description": body.get("description", ""), "status": "active", "revision": 1}, repos, [])
-    expected = _revision(headers)
-    if expected is None:
-        return _error(428, "PRECONDITION_REQUIRED")
-    if expected < 0:
-        return _error(422, "INVALID_INPUT")
-    if expected != existing["revision"]:
-        return _error(412, "PRECONDITION_FAILED")
-    status = body.get("status", existing["status"])
-    if status == "active" and existing["status"] == "archived":
-        repos = await _live_repos(user, gateway)
-        if existing["github_repo_id"] not in repos:
-            return _error(403, "GITHUB_ACCESS_REQUIRED")
+            "name": body.get("name", ""), "github_organization_id": organization_id,
+            "description": body.get("description", ""), "status": "active", "revision": 1}, repos, [],
+            bindings=[{"github_repo_id": value} for value in selected], organizations=organizations)
+    repo_id = selected[0] if selected is not None else existing["github_repo_id"]
+    full_name = repos[repo_id]["fullName"] if selected is not None else existing["github_full_name"]
     commands = [_write_guard(binding, proof, user["id"], now),
-        binding.prepare("""UPDATE ledger_projects SET description=?,status=?,revision=revision+1,
+        binding.prepare("""UPDATE ledger_projects SET name=?,github_organization_id=?,
+            github_repo_id=?,github_full_name=?,description=?,status=?,revision=revision+1,
             updated_at=? WHERE id=? AND owner_id=? AND revision=?""").bind(
-            body.get("description", existing["description"]), status, _timestamp(now), item_id,
+            body.get("name", existing["name"]), organization_id, repo_id, full_name,
+            body.get("description", existing["description"]), status, stamp, item_id,
             user["id"], expected),
-        binding.prepare("INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN changes()=1 THEN 1 ELSE 0 END)"),
-        binding.prepare("DELETE FROM d1_command_guard"),
+        binding.prepare("INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN changes()=1 THEN 1 ELSE 0 END)")]
+    if selected is not None:
+        commands.extend(binding.prepare("""DELETE FROM ledger_project_repositories
+            WHERE project_id=? AND github_repo_id=? AND owner_id=?""").bind(
+                item_id, row["github_repo_id"], user["id"]) for row in current_bindings)
+        commands.extend(_insert_repository_bindings(binding, user["id"], item_id, selected, repos, stamp))
+    commands.extend([binding.prepare("DELETE FROM d1_command_guard"),
         binding.prepare(f"""SELECT currency,{AGGREGATE_SQL} FROM expenses
             WHERE owner_id=? AND project_id=? AND deleted_at IS NULL GROUP BY currency""").bind(
-                user["id"], item_id)]
+                user["id"], item_id)])
     try:
         result = await binding.batch(commands)
     except PlanLimitError as error:
         return error.response()
     except Exception:
+        if selected is not None and await _repository_conflict(binding, user["id"], selected, item_id):
+            return _error(409, "PROJECT_CONFLICT")
         return _error(412, "PRECONDITION_FAILED")
     updated = {**existing, "description": body.get("description", existing["description"]),
-               "status": status, "revision": expected + 1}
-    repos, state = await _project_repos(user, gateway)
-    return 200, _project(updated, repos, result[-1].results, state)
+        "name": body.get("name", existing["name"]), "github_organization_id": organization_id,
+        "github_repo_id": repo_id, "status": status, "revision": expected + 1}
+    bindings = [{"github_repo_id": value} for value in selected] if selected is not None else current_bindings
+    repos, state, organizations = await _project_repos(user, gateway)
+    return 200, _project(updated, repos, result[-1].results, state, bindings, organizations)
+
+
+async def _repository_conflict(binding, owner_id, selected, project_id):
+    row = await binding.prepare("""SELECT project_id FROM ledger_project_repositories
+        WHERE owner_id=? AND github_repo_id IN (""" + ",".join("?" for _ in selected) +
+        ") AND project_id<>? LIMIT 1").bind(owner_id, *selected, project_id or "").first()
+    return row is not None
+
+
+def _insert_repository_bindings(binding, owner_id, project_id, selected, repos, stamp):
+    return [binding.prepare("""INSERT INTO ledger_project_repositories(owner_id,project_id,
+        github_repo_id,github_full_name,installation_id,github_account_id,github_account_login,
+        github_account_type,created_at) VALUES(?,?,?,?,?,?,?,?,?)""").bind(
+            owner_id, project_id, repo_id, *repository_snapshot_values(repos[repo_id]), stamp)
+        for repo_id in selected]
 
 
 async def _categories(binding, method, item_id, headers, body, now, scope):

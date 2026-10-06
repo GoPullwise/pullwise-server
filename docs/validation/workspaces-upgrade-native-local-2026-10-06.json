@@ -1,0 +1,82 @@
+{
+  "passed": true,
+  "localOnly": true,
+  "httpRequests": 1,
+  "syntheticPriorJournal": true,
+  "fixtureProjects": 2,
+  "schemaObjects": 51,
+  "historyPreserved": true,
+  "migrationSha256": "dccc2c7d4e8bd695158b1748c10c8b527be6d84c4dc2be073e63e4ade6650bc9",
+  "schemaFingerprint": "8aa939b2f065a1fb893f37c8c14fe96fe979d31686c084f1602c5dab7e5acc3f",
+  "compiledReadReservation": 4852,
+  "compiledWriteReservation": 170,
+  "nativePhases": [
+    {
+      "phase": 0,
+      "rowsRead": 77,
+      "rowsWritten": 0,
+      "nativeAttempts": [
+        null
+      ],
+      "localNoRetrySourceVerified": true
+    },
+    {
+      "phase": 1,
+      "rowsRead": 13,
+      "rowsWritten": 0,
+      "nativeAttempts": [
+        null,
+        null
+      ],
+      "localNoRetrySourceVerified": true
+    },
+    {
+      "phase": 2,
+      "rowsRead": 116,
+      "rowsWritten": 25,
+      "nativeAttempts": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "localNoRetrySourceVerified": true
+    },
+    {
+      "phase": 3,
+      "rowsRead": 118,
+      "rowsWritten": 0,
+      "nativeAttempts": [
+        null,
+        null,
+        null
+      ],
+      "localNoRetrySourceVerified": true
+    }
+  ],
+  "runtimeProvenance": {
+    "miniflareVersion": "5.20260921.0-alpha",
+    "miniflareD1SourceSha256": "eb213ff08bfc9f2992253e8ff01fe31229a069728431df54a3f44c9c4c191ee7",
+    "workerdSha256": "eb449c84ddd55ea357dc73e6c1b50bd255ccdc5d1875544c162435b7bd6168b6",
+    "workerdD1ApiSourceSha256": "a7f7b41c26cac8f22cc4414bbd11b88f5c8be6dc2f3ca74698cc3a425e008ee5",
+    "execution": "direct transactionSync queries.map; one wrapped fetch; no retry loop",
+    "totalAttemptsField": "native absent, preserved as null",
+    "deployedBypass": false
+  },
+  "requestsBefore": 89,
+  "requestsAfter": 90,
+  "reservedWrittenBefore": 549,
+  "reservedWrittenAfter": 719,
+  "runtimeStopped": true,
+  "remoteD1Operations": 0,
+  "remoteProviderRequests": 0,
+  "date": "2026-10-06",
+  "canonicalRemoteGateAccepted": false,
+  "failedLocalClaimPreserved": true
+}

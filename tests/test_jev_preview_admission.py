@@ -18,7 +18,9 @@ import test_ledger_suggestions as suggestion_fixture
 from pullwise_server.cloudflare_ledger_api import handle_ledger_request
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1, _USAGE_SQL
 from pullwise_server.cloudflare_preview_budget import ProductMeteredD1
-from pullwise_server.cloudflare_preview_schema import INDEX_COUNTS, SCHEMA_SQL
+from pullwise_server.cloudflare_preview_schema import (
+    INDEX_COUNTS, LEGACY_SCHEMA_SQL, UPGRADE_SQL, SCHEMA_VERSION, SCHEMA_FINGERPRINT,
+)
 from pullwise_server.cloudflare_validation_budget import BudgetJournal
 from pullwise_server.ledger_plan_policy import default_policy, JEV_RESERVATION_MICROUSD
 
@@ -48,9 +50,12 @@ def preview():
     connection = sqlite3.connect(":memory:")
     try:
         with fixture.store.connect() as database:
-            for sql in SCHEMA_SQL:
+            for sql in LEGACY_SCHEMA_SQL:
                 database.execute(re.sub(r"CREATE (TABLE|(?:UNIQUE )?INDEX) (?!IF NOT EXISTS)",
                     r"CREATE \1 IF NOT EXISTS ", sql, count=1))
+            if not database.execute("SELECT 1 FROM sqlite_schema WHERE name='workspace_members'").fetchone():
+                for sql in UPGRADE_SQL:
+                    database.execute(sql)
             database.execute("""INSERT INTO expense_categories(id,owner_id,name,created_at,updated_at)
                 VALUES('cat_host','usr_github_77','Hosting','local','local')""")
         yield SimpleNamespace(fixture=fixture, connection=connection, policy=default_policy(),
@@ -76,7 +81,9 @@ def save(preview, provider, *, category=True):
         counts = {table: database.execute("SELECT COUNT(*) FROM " + table).fetchone()[0]
             for table in INDEX_COUNTS}
     state = journal.snapshot()
-    state.update(schema_ready=True, product_data={"rows": counts, "json": {}, "arrays": 0})
+    state.update(schema_ready=True, schema_version=SCHEMA_VERSION,
+        schema_fingerprint=SCHEMA_FINGERPRINT,
+        product_data={"rows": counts, "json": {}, "arrays": 0})
     journal._save(state)
 
     async def run():

@@ -16,7 +16,7 @@ from test_ledger_automatic_assistance import Provider, expense
 from pullwise_server.cloudflare_ledger_api import handle_ledger_request
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1
 from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, _input_bound
-from pullwise_server.cloudflare_preview_schema import INDEX_COUNTS
+from pullwise_server.cloudflare_preview_schema import INDEX_COUNTS, SCHEMA_VERSION, SCHEMA_FINGERPRINT
 from pullwise_server.cloudflare_validation_budget import BudgetJournal
 from pullwise_server.ledger_plan_policy import JEV_RESERVATION_MICROUSD
 
@@ -31,7 +31,9 @@ def session(preview):
         counts = {table: database.execute("SELECT COUNT(*) FROM " + table).fetchone()[0]
                   for table in INDEX_COUNTS}
     state = journal.snapshot()
-    state.update(schema_ready=True, product_data={"rows": counts, "json": {}, "arrays": 0})
+    state.update(schema_ready=True, schema_version=SCHEMA_VERSION,
+        schema_fingerprint=SCHEMA_FINGERPRINT,
+        product_data={"rows": counts, "json": {}, "arrays": 0})
     journal._save(state)
     return SimpleNamespace(preview=preview, journal=journal, provider=Provider())
 

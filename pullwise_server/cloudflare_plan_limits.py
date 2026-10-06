@@ -30,7 +30,7 @@ _ERRORS = {"plan_project_limit": (403, "PROJECT_LIMIT"),
            "plan_max_required": (403, "MAX_REQUIRED"),
            "plan_jev_budget_limit": (429, "JEV_BUDGET_LIMIT")}
 _MUTATION = re.compile(r"^\s*(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM)\s+"
-    r"(ledger_projects|expense_categories|expenses|api_keys|expense_suggestion_budget|expense_suggestion_events|ledger_plan_usage)\b", re.I)
+    r"(ledger_projects|expense_categories|expenses|api_keys|expense_suggestion_budget|expense_suggestion_events|ledger_plan_usage|workspace_members|workspace_invites|workspace_events|ledger_project_repositories)\b", re.I)
 
 _USAGE_SQL = """INSERT INTO ledger_plan_usage(owner_id,projects,records,month,writes,minute,
     minute_writes,jev_reserved_microusd,project_cap,record_cap,minute_cap,month_cap,jev_cap,
@@ -75,6 +75,19 @@ class PlanLimitedD1:
         # exhausted commercial quota. The original credential fence still runs.
         if mutations and all(table == "api_keys" and re.match(
                 r"^\s*UPDATE\s+api_keys\s+SET\s+revoked_at\s*=", item.sql, re.I)
+                for item, table in mutations):
+            return await self.binding.batch(raw)
+        # Emergency membership/token revocation remains available after a
+        # commercial allowance is exhausted. It still needs the original
+        # current-authority fences and the independent global D1 budget.
+        revocations = {
+            "workspace_members": r"^\s*UPDATE\s+workspace_members\s+SET\s+removed_at\s*=",
+            "workspace_invites": r"^\s*UPDATE\s+workspace_invites\s+SET\s+status\s*=\s*'revoked'",
+        }
+        if mutations and any(table in revocations for _, table in mutations) and all(
+                table in revocations and re.match(revocations[table], item.sql, re.I)
+                or table == "workspace_events" and len(item.params) >= 4
+                   and item.params[3] in {"remove_member", "revoke_invite"}
                 for item, table in mutations):
             return await self.binding.batch(raw)
         # Model events are internal bookkeeping. Their original credential

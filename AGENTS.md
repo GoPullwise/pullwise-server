@@ -2,6 +2,16 @@
 
 ## Current task authority (2026-10-06)
 
+Latest scope: the original release goals have their own dated evidence; the
+multi-repository/Organization/shared-ledger version is now implemented locally
+and awaits final verification and preview release. Treat
+`docs/planning/project-repositories.md` as its current product specification.
+Existing `owner_id` is the immutable workspace ID; never rewrite expense history
+or share GitHub credentials between members. Migration 0005 and the one-shot
+legacy-v4 preview upgrade use the same cumulative journal; native upgrade proof
+and remote publication are pending. Keep production D1 paused and remote work
+preview-only. Historical original-version evidence is not new-version acceptance.
+
 The user explicitly authorized the resumed Server/Web audit, repairs, local
 verification, main pushes, Cloudflare publication and finite preview user/model
 acceptance. This supersedes historical blanket test/Wrangler pauses in this
@@ -61,11 +71,12 @@ historical product plans to gate work.
   list. Keep production access 0, cumulative writes at 1,000 and enabled
   preview-product reads at the later-approved 100,000. Preserve the same
   namespace/name and no-reset/no-retry/no-cron policy.
-- Product preview initializes the frozen canonical schema only on an empty
-  isolated DB, behind the same journal. cloudflare_preview_schema.py embeds
-  the four migrations; its fingerprint regression must match every canonical
-  migration. Recompile/review it when schema changes; never silently rerun
-  initialization against user data. Package both preview modules in the mirror.
+- Product preview initializes the frozen five-migration canonical schema only
+  on an empty isolated DB, behind the same journal. cloudflare_preview_schema.py
+  retains exact legacy-v4 fingerprints and one compiled, atomic 0005 upgrade.
+  Verify every migration fingerprint; never silently rerun initialization or
+  retry a partial/unknown upgrade against user data. Package both preview modules
+  in the mirror. See docs/validation/d1-validation-budget.md for current bounds.
 - ProductMeteredD1 validates scalar INSERT and unique-key UPDATE/DELETE,
   includes all index effects and guard cleanup, reserves before dispatch and
   validates native meta. Cardinality snapshots/journal evidence must never

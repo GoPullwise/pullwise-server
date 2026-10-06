@@ -109,33 +109,55 @@ def _dto(row):
             "updatedAt": row["updated_at"]}
 
 
-async def _snapshot(binding, headers, now, scope, queries):
+async def _snapshot(binding, headers, now, scope, queries, *, actor_queries=False):
     proof = {}
     user, restrictions, auth, validate = await ledger_principal(
         binding=binding, headers=headers, scope=scope, now=now, proof=proof)
-    rows = await binding.batch([*auth, *queries(user["id"])])
+    resource_queries = queries(user["id"], user["_actor"]["id"]) if actor_queries else queries(user["id"])
+    rows = await binding.batch([*auth, *resource_queries])
     validate([part.results for part in rows[:len(auth)]])
     return user, restrictions, proof, [part.results for part in rows[len(auth):]]
 
 
 def _actor(proof):
+    actor_id = proof["actor_user_id"]
     if proof.get("key") is None:
-        return "session", proof["session_id"]
-    return "api_key", "sha256:" + hashlib.sha256(proof["token"].encode()).hexdigest()
+        return "session", actor_id
+    return "api_key", actor_id + ":sha256:" + hashlib.sha256(proof["token"].encode()).hexdigest()
 
 
-async def _valid_target(binding, user, restrictions, data, gateway, writing):
+def _creation_key(owner_id, actor_id, key):
+    # Preserve old personal replays. A space is forbidden in incoming keys,
+    # giving member requests a disjoint namespace without rewriting history.
+    return key if owner_id == actor_id else "member " + hashlib.sha256(
+        (actor_id + "\0" + key).encode("utf-8")).hexdigest()
+
+
+async def _valid_target(binding, user, restrictions, data, gateway, writing, evidence=None):
     kind, project_id = data["target_kind"], data["project_id"]
     if not target_allowed(restrictions, kind, project_id):
         return _error(403, "TARGET_FORBIDDEN")
     if kind == "project":
-        row = await binding.prepare("""SELECT github_repo_id,status FROM ledger_projects
+        row = await binding.prepare("""SELECT status FROM ledger_projects
             WHERE owner_id=? AND id=?""").bind(user["id"], project_id).first()
         if row is None:
             return _error(404, "NOT_FOUND")
-        if writing and (row["status"] != "active" or row["github_repo_id"] not in await _live_repos(user, gateway)):
-            return _error(403, "GITHUB_ACCESS_REQUIRED")
+        if writing:
+            from .cloudflare_project_repositories import project_repository_eligibility
+            current = await project_repository_eligibility(binding, user, project_id, gateway)
+            if current is None:
+                return _error(403, "GITHUB_ACCESS_REQUIRED")
+            if evidence is not None:
+                evidence.update(current, projectId=project_id)
     return None
+
+
+def _target_guard(binding, owner_id, evidence):
+    return binding.prepare("""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN
+        EXISTS(SELECT 1 FROM ledger_projects WHERE owner_id=? AND id=? AND revision=? AND status='active')
+        AND EXISTS(SELECT 1 FROM ledger_project_repositories WHERE owner_id=? AND project_id=? AND github_repo_id=?)
+        THEN 1 ELSE 0 END)""").bind(owner_id, evidence["projectId"], evidence["revision"],
+                                     owner_id, evidence["projectId"], evidence["githubRepoId"])
 
 
 async def handle_expense_request(*, binding: Any, gateway: Any, method: str, path: str,
@@ -210,8 +232,10 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
     if method != "POST" and expected < 0:
         return _error(422, "INVALID_INPUT")
     user, restrictions, proof, rows = await _snapshot(binding, headers, now, "expenses:write",
-        lambda owner: [binding.prepare("SELECT * FROM expenses WHERE id=? AND owner_id=?").bind(item_id or "", owner),
-            binding.prepare("SELECT * FROM expense_create_idempotency WHERE owner_id=? AND idempotency_key=?").bind(owner, key) if key else binding.prepare("SELECT * FROM expense_create_idempotency WHERE 0")])
+        lambda owner, actor: [binding.prepare("SELECT * FROM expenses WHERE id=? AND owner_id=?").bind(item_id or "", owner),
+            binding.prepare("SELECT * FROM expense_create_idempotency WHERE owner_id=? AND idempotency_key=?").bind(owner, _creation_key(owner, actor, key)) if key else binding.prepare("SELECT * FROM expense_create_idempotency WHERE 0")], actor_queries=True)
+    if key:
+        key = _creation_key(user["id"], user["_actor"]["id"], key)
     current = rows[0][0] if rows[0] else None
     if item_id and current is None:
         return _error(404, "NOT_FOUND")
@@ -233,10 +257,11 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
             saved = rows[1][0]
             return (201, json.loads(saved["response_json"])) if saved["request_sha256"] == digest else _error(409, "IDEMPOTENCY_CONFLICT")
     assistance = None
+    target_evidence = {}
     if method == "POST" or method == "PATCH":
         new_target = method == "POST" or (current is not None and (
             data["target_kind"] != current["target_kind"] or data["project_id"] != current["project_id"]))
-        target_error = await _valid_target(binding, user, restrictions, data, gateway, new_target)
+        target_error = await _valid_target(binding, user, restrictions, data, gateway, new_target, target_evidence)
         if target_error:
             return target_error
         if data["category_id"]:
@@ -272,10 +297,10 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
             binding.prepare("""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN
               EXISTS(SELECT 1 FROM expense_categories WHERE owner_id=? AND id=? AND archived_at IS NULL)
               THEN 1 ELSE 0 END)""").bind(user["id"], data["category_id"]),
-            binding.prepare("""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN
+            (_target_guard(binding, user["id"], target_evidence) if data["target_kind"] == "project" else binding.prepare("""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN
               ?='shared' OR EXISTS(SELECT 1 FROM ledger_projects WHERE owner_id=? AND id=?
                 AND status='active') THEN 1 ELSE 0 END)""").bind(
-                data["target_kind"], user["id"], data["project_id"]),
+                data["target_kind"], user["id"], data["project_id"])),
             binding.prepare("""INSERT INTO expenses(id,owner_id,target_kind,project_id,category_id,
               occurred_on,amount_minor,currency,purpose,note,quantity_decimal,unit,revision,
               created_at,updated_at,deleted_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""").bind(*values),
@@ -294,9 +319,11 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
             return error.response()
         except Exception:
             try:
-                _, _, _, replay_rows = await _snapshot(binding, headers, now, "expenses:write",
+                _, replay_restrictions, _, replay_rows = await _snapshot(binding, headers, now, "expenses:write",
                     lambda owner: [binding.prepare("""SELECT request_sha256,response_json
                         FROM expense_create_idempotency WHERE owner_id=? AND idempotency_key=?""").bind(owner, key)])
+                if not target_allowed(replay_restrictions, data["target_kind"], data["project_id"]):
+                    return _error(403, "TARGET_FORBIDDEN")
                 if replay_rows[0] and replay_rows[0][0]["request_sha256"] == digest:
                     return 201, json.loads(replay_rows[0][0]["response_json"])
             except PrincipalAuthError as exc:
@@ -326,9 +353,7 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
             EXISTS(SELECT 1 FROM expense_categories WHERE owner_id=? AND id=? AND archived_at IS NULL)
             THEN 1 ELSE 0 END)""").bind(user["id"], data["category_id"]))
     if method == "PATCH" and new_target and data["target_kind"] == "project":
-        commands.append(binding.prepare("""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN
-            EXISTS(SELECT 1 FROM ledger_projects WHERE owner_id=? AND id=? AND status='active')
-            THEN 1 ELSE 0 END)""").bind(user["id"], data["project_id"]))
+        commands.append(_target_guard(binding, user["id"], target_evidence))
     commands += [binding.prepare(sql).bind(*values),
         binding.prepare("INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN changes()=1 THEN 1 ELSE 0 END)"),
         binding.prepare("""INSERT INTO expense_events(id,expense_id,owner_id,actor_kind,actor_id,

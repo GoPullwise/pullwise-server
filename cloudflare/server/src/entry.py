@@ -25,7 +25,7 @@ from pullwise_server.cloudflare_jev_gateway import WorkerJevGateway
 from pullwise_server.cloudflare_ledger_reports import CsvExport
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1, PlanLimitError
 from pullwise_server.ledger_plan_policy import parse_policy
-from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initialize_product, reconcile_schema_reads
+from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initialize_product, reconcile_schema_reads, upgrade_product_schema
 from pullwise_server.cloudflare_native_d1 import NativeD1
 from pullwise_server.json_input import validate_json_unicode
 
@@ -108,6 +108,7 @@ class _Application:
             "Cookie": request.headers.get("cookie") or "",
             "Authorization": request.headers.get("authorization") or "",
             "X-Pullwise-Api-Key": request.headers.get("x-pullwise-api-key") or "",
+            "X-Pullwise-Workspace": request.headers.get("x-pullwise-workspace") or "",
             "X-Request-Id": request.headers.get("x-request-id") or "",
             "If-Match": request.headers.get("if-match") or "",
             "Idempotency-Key": request.headers.get("idempotency-key") or "",
@@ -115,13 +116,22 @@ class _Application:
             "Referer": request.headers.get("referer") or "",
         }
         now = int(time.time())
+        if path.startswith("/api/v1/"):
+            workspace_values = params.get("workspaceId", [])
+            if (len(workspace_values) > 1 or workspace_values and (
+                    not workspace_values[0] or headers["X-Pullwise-Workspace"]
+                    and workspace_values[0] != headers["X-Pullwise-Workspace"])):
+                return Response.json({"error": {"code": "INVALID_INPUT"}}, status=422,
+                    headers={"Cache-Control": "no-store"})
+            if workspace_values:
+                headers["X-Pullwise-Workspace"] = workspace_values[0]
         self.binding.now = now
         trusted_origins = {value.strip() for value in (
             getattr(self.env, "PULLWISE_ALLOWED_ORIGINS", "") + "," +
             getattr(self.env, "PULLWISE_APP_URL", "")).split(",")
             if value.strip() and value.strip() != "*"}
         try:
-            identity = await handle_identity_request(
+            identity = None if path == "/api/v1/repositories" else await handle_identity_request(
                 method=request.method, path=path, params=params,
                 headers=headers, binding=self.binding,
                 gateway=WorkerGitHubGateway(self.env), now=now,
@@ -148,7 +158,8 @@ class _Application:
             return Response.json(payload, status=status, headers={"Cache-Control": "no-store"})
         if path.startswith(("/api/v1/projects", "/api/v1/categories",
                             "/api/v1/expenses", "/api/v1/reports/",
-                            "/api/v1/expense-suggestions")):
+                            "/api/v1/expense-suggestions", "/api/v1/workspaces",
+                            "/api/v1/workspace-invitations", "/api/v1/repositories")):
             from pullwise_server.cloudflare_principal import _cookie_sessions
             if request.method in {"POST", "PATCH", "DELETE"} and _cookie_sessions(headers):
                 from urllib.parse import urlsplit as split_origin
@@ -175,10 +186,13 @@ class _Application:
                 status, payload = error.response()
             except (ValueError, UnicodeError):
                 status, payload = 422, {"error": {"code": "INVALID_INPUT"}}
-            except Exception:
-                status, payload = 503, {"error": {"code": "SERVER_UNAVAILABLE"}}
+            except Exception as error:
+                if path == "/api/v1/repositories":
+                    status, payload = _identity_failure(self.env, error)
+                else:
+                    status, payload = 503, {"error": {"code": "SERVER_UNAVAILABLE"}}
             response_headers = {"Cache-Control": "no-store",
-                "Vary": "Cookie, Authorization, X-Pullwise-Api-Key"}
+                "Vary": "Cookie, Authorization, X-Pullwise-Api-Key, X-Pullwise-Workspace"}
             if status == 204:
                 return Response(None, status=status, headers=response_headers)
             if isinstance(payload, CsvExport):
@@ -404,7 +418,9 @@ class ValidationBudget(DurableObject):
             return Response.json({"limits": {"rowsRead": self._journal().read_ceiling, "rowsWritten": WRITE_CEILING},
                 "reserved": {"rowsRead": state["reserved_read"], "rowsWritten": state["reserved_written"]},
                 "observed": {"rowsRead": state["actual_read"], "rowsWritten": state["actual_written"]},
-                "schemaReady": bool(state.get("schema_ready")), "stopped": state["stopped"]},
+                "schemaReady": bool(state.get("schema_ready")),
+                "schemaVersion": state.get("schema_version", 4 if state.get("schema_ready") else 0),
+                "stopped": state["stopped"]},
                 headers={"Cache-Control": "no-store"})
         if (request.method not in {"GET", "POST", "PATCH", "DELETE"} or
                 not (path.startswith(("/api/v1/", "/api-keys", "/auth/", "/integrations"))
@@ -421,6 +437,9 @@ class ValidationBudget(DurableObject):
                     async def execute():
                         reconcile_schema_reads(journal)
                         native = NativeD1(self.env.DB)
+                        if (str(getattr(self.env, "PULLWISE_PREVIEW_SCHEMA_UPGRADE_ENABLED", "0")) == "1"
+                                and journal.snapshot().get("schema_ready")):
+                            await upgrade_product_schema(native, journal)
                         await initialize_product(native, journal)
                         ticket = journal.begin_product(now=time.time())
                         binding = ProductMeteredD1(native, journal, ticket)

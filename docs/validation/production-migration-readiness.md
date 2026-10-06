@@ -1,7 +1,8 @@
 # 同一代码从 Preview 迁移到正式环境
 
 2026-10-06 工程修复。当前任务只做 Preview 远程验收；正式 D1 仍默认暂停。
-多人账本、多仓库和 Organization 新版本尚未开发。
+后续多人账本、多仓库和 Organization 新版本已实现，其独立验收见
+`workspaces-native-local-2026-10-06.json` 与最新发布记录。
 
 ## 已修复的迁移阻塞
 
@@ -25,10 +26,15 @@ TypeSafe 凭据使用独立 Worker Secret，套餐与每日/月度模型限额�
 
 ## 正式环境的显式启用路径
 
-使用同一份代码和四个 canonical migrations，正式数据库、GitHub App、
+使用同一份代码和五个 canonical migrations，正式数据库、GitHub App、
 callback、Creem live 产品与 Secret 按正式配置绑定。迁移由独立操作应用到
 正式 D1；部署脚本不自动迁移或复制 Preview 数据。实际启用前应确认正式
 schema 与必要 Secret 已就绪，业务入口不会用 Preview 初始化替代它们。
+
+0005 仅追加成员、邀请、审计、仓库关联及项目列，回填旧单仓库关联；
+已有正式 v4 schema 可按顺序应用 0005，空正式库应用 0001–0005。
+既有 owner/project/expense ID 和金额历史不重写。正式仍由独立迁移操作
+准备 schema，不会自动调用 Preview 的受控升级器。本轮没有执行正式迁移。
 
 以下检查完全在本地执行，只审查正式启用候选，不访问 Cloudflare：
 

@@ -10,7 +10,7 @@ import hashlib
 import json
 import secrets
 from typing import Any, Mapping
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from .cloudflare_oauth_state_adapter import D1OAuthStates
 from .cloudflare_session_adapter import D1SessionTransactions
@@ -124,7 +124,21 @@ def _oauth_url(client_id: str, callback_url: str, state: str, verifier: str) -> 
     })
 
 
-def _repo_items(rows: object, installation_id: int) -> list[dict]:
+def _installation_account(value: object) -> dict | None:
+    """Only complete current installation metadata can identify an Organization."""
+    if not isinstance(value, dict):
+        return None
+    account_id, login, kind = value.get("id"), value.get("login"), value.get("type")
+    if (type(account_id) is not int or not 1 <= account_id <= 9007199254740991
+            or not isinstance(login, str) or not 1 <= len(login) <= 100
+            or kind not in {"User", "Organization"}):
+        return None
+    from .json_input import validate_json_unicode
+    validate_json_unicode(login)
+    return {"id": account_id, "login": login, "type": kind}
+
+
+def _repo_items(rows: object, installation_id: int, account: dict | None = None) -> list[dict]:
     if not isinstance(rows, list) or len(rows) > 1000:
         raise ValueError("invalid repository list")
     items = []
@@ -133,17 +147,22 @@ def _repo_items(rows: object, installation_id: int) -> list[dict]:
         if not isinstance(row, dict):
             raise ValueError("invalid repository")
         repo_id, name = row.get("id"), row.get("full_name")
-        if type(repo_id) is not int or repo_id <= 0 or not isinstance(name, str) or "/" not in name:
+        if (type(repo_id) is not int or not 1 <= repo_id <= 9007199254740991
+                or not isinstance(name, str) or "/" not in name):
             raise ValueError("invalid repository")
+        from .json_input import validate_json_unicode
+        validate_json_unicode(name)
         if repo_id not in seen:
             seen.add(repo_id)
             items.append({"id": str(repo_id), "githubRepoId": repo_id,
-                          "fullName": name[:300], "installationId": str(installation_id)})
+                          "fullName": name[:300], "installationId": str(installation_id),
+                          "account": account})
     return items
 
 
 async def read_repository_access(user: dict, gateway: Any) -> dict:
     from .cloudflare_github_gateway import GitHubFailure
+    user = user.get("_actor", user)
     try:
         return await _read_repository_access(user, gateway)
     except GitHubFailure as error:
@@ -169,22 +188,26 @@ async def _read_repository_access(user: dict, gateway: Any) -> dict:
     installations = await gateway.installations(token)
     if not isinstance(installations, list) or len(installations) > 10:
         raise ValueError("invalid or excessive GitHub installations")
-    items, seen, installation_ids = [], set(), set()
+    items, seen, installation_ids, organizations = [], set(), set(), {}
     for installation in installations:
         installation_id = installation.get("id") if isinstance(installation, dict) else None
-        if type(installation_id) is not int or installation_id <= 0:
+        if type(installation_id) is not int or not 1 <= installation_id <= 9007199254740991:
             raise ValueError("invalid GitHub installation")
         if installation_id in installation_ids:
             continue
         installation_ids.add(installation_id)
-        rows = _repo_items(await gateway.repositories(token, installation_id), installation_id)
+        account = _installation_account(installation.get("account"))
+        if account is not None and account["type"] == "Organization":
+            organizations[account["id"]] = account
+        rows = _repo_items(await gateway.repositories(token, installation_id), installation_id, account)
         for item in rows:
             if item["githubRepoId"] not in seen:
                 seen.add(item["githubRepoId"])
                 items.append(item)
         if len(items) > 1000:
             raise ValueError("excessive authorized repositories")
-    return {"items": items, "githubAccess": "authorized" if items else missing}
+    return {"items": items, "githubAccess": "authorized" if items else missing,
+            "organizations": list(organizations.values())}
 
 
 async def handle_identity_request(*, binding: Any, gateway: Any, now: int,
@@ -240,8 +263,10 @@ async def handle_identity_request(*, binding: Any, gateway: Any, now: int,
             return 400, {"error": {"code": "OAUTH_STATE_INVALID"}}, no_store
         destination = _redirect(record.get("redirectTo", ""), app_url, "/projects")
         if _param(params, "error") or not _param(params, "code"):
-            return _redirect_result(destination + ("&" if "?" in destination else "?") +
-                                    urlencode({"github_error": _param(params, "error") or "missing_oauth_code"}))
+            parsed = urlsplit(destination)
+            error_query = urlencode({"github_error": _param(params, "error") or "missing_oauth_code"})
+            query = parsed.query + ("&" if parsed.query else "") + error_query
+            return _redirect_result(urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, parsed.fragment)))
         token = await gateway.exchange(_param(params, "code"), callback_url, record["codeVerifier"])
         profile = await gateway.profile(token)
         github_id, login = profile.get("id"), profile.get("login")
@@ -300,7 +325,10 @@ async def handle_identity_request(*, binding: Any, gateway: Any, now: int,
         if not isinstance(installations, list) or not any(
                 isinstance(item, dict) and item.get("id") == installation_id for item in installations):
             return 403, {"error": {"code": "INSTALLATION_NOT_AUTHORIZED"}}, no_store
-        items = _repo_items(await gateway.repositories(token, installation_id), installation_id)
+        installation = next(item for item in installations if isinstance(item, dict)
+                            and item.get("id") == installation_id)
+        items = _repo_items(await gateway.repositories(token, installation_id), installation_id,
+                            _installation_account(installation.get("account")))
         next_user = {**user, "githubRepositoryAccess": {
             "mode": "github-app", "status": "authorized", "authorizedUserId": user["id"],
             "authorizedGithubId": user["githubId"], "authorizedGithubLogin": user["githubLogin"],
@@ -332,7 +360,8 @@ async def handle_identity_request(*, binding: Any, gateway: Any, now: int,
             result = {**result, "needsAuthorization": result["githubAccess"] != "authorized"}
         if path == "/api/v1/repositories":
             result = {"items": result["items"], "nextCursor": None,
-                      "githubAccess": result["githubAccess"]}
+                      "githubAccess": result["githubAccess"],
+                      "organizations": result.get("organizations", [])}
         if path == "/integrations":
             result = {"github": {"connected": result["githubAccess"] == "authorized",
                                  "authorizationPending": False, "mode": "github-app" if access else None,

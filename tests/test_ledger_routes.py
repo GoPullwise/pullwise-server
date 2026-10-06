@@ -21,6 +21,7 @@ class LedgerRoutesTests(unittest.TestCase):
             db.execute("""CREATE TABLE api_keys(id TEXT PRIMARY KEY,user_id TEXT,name TEXT,
                 key_prefix TEXT,key_hash TEXT UNIQUE,scopes TEXT,expires_at INTEGER,
                 restrictions TEXT,created_at INTEGER,last_used_at INTEGER,revoked_at INTEGER)""")
+            db.executescript((migration.parent / "0005_workspaces_repositories.sql").read_text())
         self.binding = D1ShapedSQLite(self.store)
         _, _, headers = login(self.binding, GitHubStub(), self.now)
         self.headers = {"Cookie": headers["Set-Cookie"].split(";", 1)[0],

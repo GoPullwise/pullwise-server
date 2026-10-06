@@ -35,7 +35,8 @@ def _seed_health_read_tables(db):
                   "expense_create_idempotency", "expense_suggestion_budget",
                   "expense_suggestion_events", "api_keys", "billing_public_catalog",
                   "d1_command_guard", "account_entitlement_authority",
-                  "billing_webhook_receipts", "ledger_plan_usage"):
+                  "billing_webhook_receipts", "ledger_plan_usage", "workspace_members",
+                  "workspace_invites", "workspace_events", "ledger_project_repositories"):
         db.execute(f'CREATE TABLE IF NOT EXISTS "{table}" (id TEXT PRIMARY KEY)')
 
 
@@ -89,7 +90,9 @@ def test_health_rejects_incomplete_d1_auth_schema(tmp_path):
 
 
 @pytest.mark.parametrize("table", ["ledger_projects", "expenses", "expense_events",
-                                   "expense_suggestion_events", "billing_public_catalog"])
+                                   "expense_suggestion_events", "billing_public_catalog",
+                                   "workspace_members", "workspace_invites", "workspace_events",
+                                   "ledger_project_repositories"])
 def test_health_rejects_missing_required_table(tmp_path, table):
     fixture, _, _ = seed(tmp_path / "domain.db")
     with fixture.store._immediate() as db:

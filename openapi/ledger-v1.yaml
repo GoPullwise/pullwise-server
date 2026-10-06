@@ -1,13 +1,21 @@
 openapi: 3.1.0
 info:
   title: Pullwise GitHub Project Ledger API
-  version: 0.1.0-draft
+  version: 0.2.0
   description: |
     Target contract for the replacement ledger. S01-S05 provide identity,
     billing, API keys, current profile and repository authorization; project,
     expense and report routes begin at S06. Web uses its same-origin /api proxy; direct
     clients call these paths on the Server Worker. All private responses are
     Cache-Control: no-store. Money is grouped by currency without conversion.
+    Each user's existing personal ledger is an immutable workspace. Explicit
+    invitations share all existing and future ledger data; they do not grant
+    GitHub organization or repository access. Select a ledger with
+    X-Pullwise-Workspace, or workspaceId on CSV links. Conflicting selectors are
+    rejected. API keys are permanently bound to one ledger and intersect the
+    issuing member's current role; membership revision changes invalidate team
+    keys. All members use the ledger owner's plan, capacity and model budget.
+    Account billing remains the signed-in user's own account service.
 servers:
   - url: /
 security:
@@ -17,8 +25,103 @@ tags:
   - name: Ledger
   - name: Reports
 paths:
+  /api/v1/workspaces:
+    get:
+      operationId: listWorkspaces
+      x-pullwise-scope: profile:read
+      security: [{cookieSession: []}]
+      description: Personal ledger first, then explicitly joined ledgers; no GET-side initialization.
+      responses:
+        '200': {description: Current accessible ledgers, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Workspace'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /api/v1/workspaces/{workspaceId}/members:
+    parameters: [{$ref: '#/components/parameters/WorkspacePath'}]
+    get:
+      operationId: listWorkspaceMembers
+      x-pullwise-scope: profile:read
+      security: [{cookieSession: []}]
+      responses:
+        '200': {description: Owner and current members, content: {application/json: {schema: {type: object, required: [items, workspace], properties: {items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/WorkspaceMember'}}, workspace: {$ref: '#/components/schemas/Workspace'}}}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/workspaces/{workspaceId}/members/{userId}:
+    parameters: [{$ref: '#/components/parameters/WorkspacePath'}, {name: userId, in: path, required: true, schema: {type: string}}]
+    patch:
+      operationId: updateWorkspaceMember
+      x-pullwise-scope: profile:read
+      security: [{cookieSession: []}]
+      description: Owner can grant Admin/Editor/Viewer. Admin can manage only Editor/Viewer. Owner cannot be changed or removed.
+      parameters: [{$ref: '#/components/parameters/IfMatch'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [role], properties: {role: {$ref: '#/components/schemas/AssignableRole'}}}}}}
+      responses:
+        '200': {description: Updated member with a new revision, content: {application/json: {schema: {$ref: '#/components/schemas/WorkspaceMember'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+    delete:
+      operationId: removeWorkspaceMember
+      x-pullwise-scope: profile:read
+      security: [{cookieSession: []}]
+      parameters: [{$ref: '#/components/parameters/IfMatch'}]
+      responses:
+        '204': {description: Removed; subsequent resource and key requests fail current membership checks}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+  /api/v1/workspaces/{workspaceId}/invites:
+    parameters: [{$ref: '#/components/parameters/WorkspacePath'}]
+    get:
+      operationId: listWorkspaceInvites
+      x-pullwise-scope: profile:read
+      security: [{cookieSession: []}]
+      description: Owner/Admin only. Tokens and hashes are never returned by reads.
+      responses:
+        '200': {description: Pending unexpired invitations, content: {application/json: {schema: {type: object, properties: {items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/WorkspaceInvitation'}}}}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    post:
+      operationId: inviteWorkspaceMember
+      x-pullwise-scope: profile:read
+      security: [{cookieSession: []}]
+      description: Resolve a GitHub login to its stable numeric user ID; a 24-hour token is displayed once. Financial roles do not grant GitHub access.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [githubLogin, role], properties: {githubLogin: {type: string, minLength: 1, maxLength: 39}, role: {$ref: '#/components/schemas/AssignableRole'}}}}}}
+      responses:
+        '201': {description: Invitation metadata and one-time token, content: {application/json: {schema: {allOf: [{$ref: '#/components/schemas/WorkspaceInvitation'}, {type: object, required: [token], properties: {token: {type: string, pattern: '^pwi_[A-Za-z0-9_-]{43}$'}}}]}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/workspaces/{workspaceId}/invites/{id}:
+    parameters: [{$ref: '#/components/parameters/WorkspacePath'}, {$ref: '#/components/parameters/Id'}]
+    delete:
+      operationId: revokeWorkspaceInvitation
+      x-pullwise-scope: profile:read
+      security: [{cookieSession: []}]
+      parameters: [{$ref: '#/components/parameters/IfMatch'}]
+      responses:
+        '204': {description: Invitation permanently revoked}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+  /api/v1/workspace-invitations/preview:
+    post:
+      operationId: previewWorkspaceInvitation
+      x-pullwise-scope: profile:read
+      security: [{cookieSession: []}]
+      description: Recipient-bound read; confirmation does not join or write. Unused token, expiry, stable recipient ID and current inviter authority are checked.
+      requestBody: {$ref: '#/components/requestBodies/InvitationToken'}
+      responses:
+        '200': {description: Invitation and target ledger for explicit confirmation}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/workspace-invitations/accept:
+    post:
+      operationId: acceptWorkspaceInvitation
+      x-pullwise-scope: profile:read
+      security: [{cookieSession: []}]
+      description: Atomically consume a single-use token, grant membership and publish the real actor's audit event. Removed-member generations advance; old keys do not revive.
+      requestBody: {$ref: '#/components/requestBodies/InvitationToken'}
+      responses:
+        '200': {description: Accepted target ledger and membership}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
   /api/v1/me:
     get:
+      parameters: [{$ref: '#/components/parameters/WorkspaceHeader'}]
       operationId: getLedgerMe
       x-pullwise-scope: profile:read
       responses:
@@ -28,9 +131,9 @@ paths:
     get:
       operationId: listLedgerRepositories
       x-pullwise-scope: projects:read
-      parameters: [{$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      parameters: [{$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       responses:
-        '200': {description: Current GitHub App authorized repositories, content: {application/json: {schema: {$ref: '#/components/schemas/RepositoryPage'}}}}
+        '200': {description: Current actor GitHub App repositories ordered by stable numeric ID; cursor is the last repository ID. No automatic binding or installation expansion, content: {application/json: {schema: {$ref: '#/components/schemas/RepositoryPage'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '502': {description: Invalid bounded GitHub response; error code GITHUB_RESPONSE_INVALID}
@@ -39,11 +142,12 @@ paths:
     get:
       operationId: listLedgerProjects
       x-pullwise-scope: projects:read
-      parameters: [{$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}, {$ref: '#/components/parameters/From'}, {$ref: '#/components/parameters/To'}]
+      parameters: [{$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}, {$ref: '#/components/parameters/From'}, {$ref: '#/components/parameters/To'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       responses:
         '200': {description: Owner projects and per-currency totals, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectPage'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
     post:
+      parameters: [{$ref: '#/components/parameters/WorkspaceHeader'}]
       operationId: createLedgerProject
       x-pullwise-scope: projects:write
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectInput'}}}}
@@ -55,6 +159,7 @@ paths:
   /api/v1/projects/{id}:
     parameters: [{$ref: '#/components/parameters/Id'}]
     get:
+      parameters: [{$ref: '#/components/parameters/WorkspaceHeader'}]
       operationId: getLedgerProject
       x-pullwise-scope: projects:read
       responses:
@@ -63,7 +168,7 @@ paths:
     patch:
       operationId: updateLedgerProject
       x-pullwise-scope: projects:write
-      parameters: [{$ref: '#/components/parameters/IfMatch'}]
+      parameters: [{$ref: '#/components/parameters/IfMatch'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectPatch'}}}}
       responses:
         '429': {$ref: '#/components/responses/RateLimited'}
@@ -72,11 +177,13 @@ paths:
         '412': {$ref: '#/components/responses/PreconditionFailed'}
   /api/v1/categories:
     get:
+      parameters: [{$ref: '#/components/parameters/WorkspaceHeader'}]
       operationId: listExpenseCategories
       x-pullwise-scope: categories:read
       responses:
         '200': {description: Account categories including archived entries, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Category'}}}}}
     post:
+      parameters: [{$ref: '#/components/parameters/WorkspaceHeader'}]
       operationId: createExpenseCategory
       x-pullwise-scope: categories:write
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CategoryInput'}}}}
@@ -89,7 +196,7 @@ paths:
     patch:
       operationId: updateExpenseCategory
       x-pullwise-scope: categories:write
-      parameters: [{$ref: '#/components/parameters/IfMatch'}]
+      parameters: [{$ref: '#/components/parameters/IfMatch'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CategoryInput'}}}}
       responses:
         '429': {$ref: '#/components/responses/RateLimited'}
@@ -100,7 +207,7 @@ paths:
       operationId: archiveExpenseCategory
       x-pullwise-scope: categories:write
       description: Archive only; existing expenses retain their category reference.
-      parameters: [{$ref: '#/components/parameters/IfMatch'}]
+      parameters: [{$ref: '#/components/parameters/IfMatch'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       responses:
         '429': {$ref: '#/components/responses/RateLimited'}
         '204': {description: Archived}
@@ -110,7 +217,7 @@ paths:
     get:
       operationId: listExpenses
       x-pullwise-scope: expenses:read
-      parameters: [{$ref: '#/components/parameters/Target'}, {$ref: '#/components/parameters/ProjectId'}, {$ref: '#/components/parameters/CategoryId'}, {$ref: '#/components/parameters/From'}, {$ref: '#/components/parameters/To'}, {$ref: '#/components/parameters/Currency'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}]
+      parameters: [{$ref: '#/components/parameters/Target'}, {$ref: '#/components/parameters/ProjectId'}, {$ref: '#/components/parameters/CategoryId'}, {$ref: '#/components/parameters/From'}, {$ref: '#/components/parameters/To'}, {$ref: '#/components/parameters/Currency'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       responses:
         '200': {description: Active expenses only, content: {application/json: {schema: {$ref: '#/components/schemas/ExpensePage'}}}}
         '403': {$ref: '#/components/responses/Forbidden'}
@@ -126,7 +233,7 @@ paths:
         returns assistance for manual completion. Provider failure or exhausted Jev
         budget does not block a write with an explicit category. Idempotent replay
         returns the stored result without another model call or budget reservation.
-      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ExpenseInput'}}}}
       responses:
         '429': {$ref: '#/components/responses/RateLimited'}
@@ -139,12 +246,13 @@ paths:
       operationId: exportExpenses
       x-pullwise-scope: expenses:read
       description: Uses list filters; active records only. CSV cells must escape spreadsheet formulas.
-      parameters: [{$ref: '#/components/parameters/Target'}, {$ref: '#/components/parameters/ProjectId'}, {$ref: '#/components/parameters/CategoryId'}, {$ref: '#/components/parameters/From'}, {$ref: '#/components/parameters/To'}, {$ref: '#/components/parameters/Currency'}]
+      parameters: [{$ref: '#/components/parameters/Target'}, {$ref: '#/components/parameters/ProjectId'}, {$ref: '#/components/parameters/CategoryId'}, {$ref: '#/components/parameters/From'}, {$ref: '#/components/parameters/To'}, {$ref: '#/components/parameters/Currency'}, {$ref: '#/components/parameters/WorkspaceHeader'}, {$ref: '#/components/parameters/WorkspaceQuery'}]
       responses:
         '200': {description: Streamed CSV, content: {text/csv: {schema: {type: string}}}}
   /api/v1/expenses/{id}:
     parameters: [{$ref: '#/components/parameters/Id'}]
     get:
+      parameters: [{$ref: '#/components/parameters/WorkspaceHeader'}]
       operationId: getExpense
       x-pullwise-scope: expenses:read
       responses:
@@ -154,7 +262,7 @@ paths:
       operationId: updateExpense
       x-pullwise-scope: expenses:write
       description: Moving an expense checks write authority on both old and new targets. Max gets automatic advisory assistance; categoryId remains required and existing values are never changed by inference.
-      parameters: [{$ref: '#/components/parameters/IfMatch'}]
+      parameters: [{$ref: '#/components/parameters/IfMatch'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ExpensePatchInput'}}}}
       responses:
         '429': {$ref: '#/components/responses/RateLimited'}
@@ -166,7 +274,7 @@ paths:
       operationId: removeExpense
       x-pullwise-scope: expenses:write
       description: Soft delete and audit event; immediately excluded from list, export and reports.
-      parameters: [{$ref: '#/components/parameters/IfMatch'}]
+      parameters: [{$ref: '#/components/parameters/IfMatch'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       responses:
         '429': {$ref: '#/components/responses/RateLimited'}
         '204': {description: Removed or already removed by the same owner}
@@ -176,25 +284,26 @@ paths:
     get:
       operationId: getLedgerSummary
       x-pullwise-scope: reports:read
-      parameters: [{$ref: '#/components/parameters/Target'}, {$ref: '#/components/parameters/ProjectId'}, {$ref: '#/components/parameters/CategoryId'}, {$ref: '#/components/parameters/From'}, {$ref: '#/components/parameters/To'}, {$ref: '#/components/parameters/Currency'}]
+      parameters: [{$ref: '#/components/parameters/Target'}, {$ref: '#/components/parameters/ProjectId'}, {$ref: '#/components/parameters/CategoryId'}, {$ref: '#/components/parameters/From'}, {$ref: '#/components/parameters/To'}, {$ref: '#/components/parameters/Currency'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       responses:
         '200': {description: Separate project, shared and account totals by currency, content: {application/json: {schema: {$ref: '#/components/schemas/Report'}}}}
   /api/v1/reports/timeseries:
     get:
       operationId: getLedgerTimeseries
       x-pullwise-scope: reports:read
-      parameters: [{$ref: '#/components/parameters/Target'}, {$ref: '#/components/parameters/ProjectId'}, {$ref: '#/components/parameters/CategoryId'}, {$ref: '#/components/parameters/From'}, {$ref: '#/components/parameters/To'}, {$ref: '#/components/parameters/Currency'}, {name: bucket, in: query, schema: {type: string, enum: [day, month]}}]
+      parameters: [{$ref: '#/components/parameters/Target'}, {$ref: '#/components/parameters/ProjectId'}, {$ref: '#/components/parameters/CategoryId'}, {$ref: '#/components/parameters/From'}, {$ref: '#/components/parameters/To'}, {$ref: '#/components/parameters/Currency'}, {name: bucket, in: query, schema: {type: string, enum: [day, month]}}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       responses:
         '200': {description: Per-currency date buckets, content: {application/json: {schema: {$ref: '#/components/schemas/Report'}}}}
   /api/v1/reports/categories:
     get:
       operationId: getLedgerCategoriesReport
       x-pullwise-scope: reports:read
-      parameters: [{$ref: '#/components/parameters/Target'}, {$ref: '#/components/parameters/ProjectId'}, {$ref: '#/components/parameters/CategoryId'}, {$ref: '#/components/parameters/From'}, {$ref: '#/components/parameters/To'}, {$ref: '#/components/parameters/Currency'}]
+      parameters: [{$ref: '#/components/parameters/Target'}, {$ref: '#/components/parameters/ProjectId'}, {$ref: '#/components/parameters/CategoryId'}, {$ref: '#/components/parameters/From'}, {$ref: '#/components/parameters/To'}, {$ref: '#/components/parameters/Currency'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       responses:
         '200': {description: Per-currency category buckets including historical archived categories, content: {application/json: {schema: {$ref: '#/components/schemas/Report'}}}}
   /api/v1/expense-suggestions:
     post:
+      parameters: [{$ref: '#/components/parameters/WorkspaceHeader'}]
       operationId: suggestExpense
       x-pullwise-scope: suggestions:use
       description: Advanced draft advice only; ordinary expense writes already include Max assistance without this endpoint or its scope. Never writes an expense. Disabled unless evaluated and enabled. Shares the account limit of 20 attempts per UTC day and monthly Jev reservation with automatic assistance.
@@ -208,17 +317,24 @@ paths:
       operationId: recordExpenseSuggestionDecision
       x-pullwise-scope: suggestions:use
       description: Record the user's selected category and target after reviewing a suggestion; never writes an expense.
-      parameters: [{$ref: '#/components/parameters/Id'}]
+      parameters: [{$ref: '#/components/parameters/Id'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, required: [categoryId, target], properties: {categoryId: {type: string}, target: {$ref: '#/components/schemas/Target'}}}}}}
       responses:
         '429': {$ref: '#/components/responses/RateLimited'}
         '204': {description: Decision recorded}
         '403': {$ref: '#/components/responses/Forbidden'}
 components:
+  requestBodies:
+    InvitationToken:
+      required: true
+      content: {application/json: {schema: {type: object, additionalProperties: false, required: [token], properties: {token: {type: string, pattern: '^pwi_[A-Za-z0-9_-]{43}$'}}}}}
   securitySchemes:
     cookieSession: {type: apiKey, in: cookie, name: pw_session}
     bearerKey: {type: http, scheme: bearer, bearerFormat: 'pwk_ API key'}
   parameters:
+    WorkspacePath: {name: workspaceId, in: path, required: true, schema: {type: string, pattern: '^[A-Za-z0-9_-]{1,120}$'}}
+    WorkspaceHeader: {name: X-Pullwise-Workspace, in: header, schema: {type: string}, description: Explicit ledger selection; never grants membership and cannot override a key binding}
+    WorkspaceQuery: {name: workspaceId, in: query, schema: {type: string}, description: CSV/native-link selector; must agree with any header}
     Id: {name: id, in: path, required: true, schema: {type: string}}
     IfMatch: {name: If-Match, in: header, required: true, schema: {type: string}, description: Quoted revision ETag}
     IdempotencyKey: {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 128}}
@@ -239,11 +355,44 @@ components:
     InvalidInput: {description: Invalid or missing field. CATEGORY_REQUIRED on create may include top-level assistance when Max inference cannot confidently select an existing category. No expense is saved in that case.}
     RateLimited: {description: Account write rate, monthly write allowance or Jev budget exhausted}
   schemas:
-    Me:
+    AssignableRole: {type: string, enum: [admin, editor, viewer]}
+    Workspace:
       type: object
-      required: [id, scopes, entitlements]
+      required: [id, ownerId, name, role, revision, permissions]
+      properties:
+        id: {type: string, description: Immutable ledger owner partition; existing data is preserved}
+        ownerId: {type: string}
+        name: {type: string}
+        role: {type: string, enum: [owner, admin, editor, viewer]}
+        revision: {type: integer, minimum: 1, maximum: 9007199254740991, description: Current member generation; Owner has implicit revision 1}
+        permissions: {type: object, required: [writeExpenses, manageProjects, manageCategories, manageMembers, manageAdmins], properties: {writeExpenses: {type: boolean}, manageProjects: {type: boolean}, manageCategories: {type: boolean}, manageMembers: {type: boolean}, manageAdmins: {type: boolean}}}
+    WorkspaceMember:
+      type: object
+      required: [userId, role, revision]
+      properties:
+        userId: {type: string}
+        name: {type: [string, 'null']}
+        githubLogin: {type: [string, 'null']}
+        role: {type: string, enum: [owner, admin, editor, viewer]}
+        revision: {type: integer, minimum: 1, maximum: 9007199254740991}
+        joinedAt: {type: [string, 'null']}
+    WorkspaceInvitation:
+      type: object
+      required: [id, recipient, role, status, revision, expiresAt, createdAt]
       properties:
         id: {type: string}
+        recipient: {type: object, required: [githubId, login], properties: {githubId: {type: string}, login: {type: string}}}
+        role: {$ref: '#/components/schemas/AssignableRole'}
+        status: {type: string, enum: [pending, accepted, revoked]}
+        revision: {type: integer, minimum: 1}
+        expiresAt: {type: string, format: date-time}
+        createdAt: {type: string, format: date-time}
+    Me:
+      type: object
+      required: [id, scopes, entitlements, workspace]
+      properties:
+        id: {type: string}
+        workspace: {$ref: '#/components/schemas/Workspace'}
         scopes: {type: array, items: {type: string}}
         entitlements: {$ref: '#/components/schemas/Entitlements'}
     Entitlements:
@@ -270,16 +419,32 @@ components:
             rollover: {type: boolean, const: false}
     Repository:
       type: object
-      required: [githubRepoId, fullName]
+      required: [githubRepoId, fullName, installationId, account]
       properties:
-        githubRepoId: {type: integer, minimum: 1}
+        githubRepoId: {type: integer, minimum: 1, maximum: 9007199254740991}
         fullName: {type: string}
+        isBound: {type: boolean, description: A repository binding exists in the selected ledger, including archived projects. API keys consider only their explicitly allowed projects. No project ID or cached metadata is disclosed.}
+        installationId: {type: string, pattern: '^[1-9][0-9]{0,15}$'}
+        account:
+          oneOf: [{$ref: '#/components/schemas/GitHubAccount'}, {type: 'null'}]
+    GitHubAccount:
+      type: object
+      required: [id, login, type]
+      properties:
+        id: {type: integer, minimum: 1, maximum: 9007199254740991}
+        login: {type: string, maxLength: 100}
+        type: {type: string, enum: [User, Organization]}
     RepositoryPage:
       type: object
-      required: [items, nextCursor, githubAccess]
+      required: [items, nextCursor, githubAccess, organizations]
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/Repository'}}
         nextCursor: {type: [string, 'null']}
+        organizations:
+          type: array
+          maxItems: 10
+          description: Current actor authorized installation account metadata only; organization membership does not grant ledger access.
+          items: {$ref: '#/components/schemas/GitHubAccount'}
         githubAccess:
           type: string
           enum: [authorized, not_connected, lost, reauthorization_required]
@@ -290,25 +455,75 @@ components:
         - {type: object, required: [kind], additionalProperties: false, properties: {kind: {const: shared}}}
     ProjectInput:
       type: object
-      required: [githubRepoId]
+      additionalProperties: false
+      oneOf:
+        - {required: [githubRepoId], not: {required: [githubRepoIds]}}
+        - {required: [githubRepoIds], not: {required: [githubRepoId]}}
       properties:
-        githubRepoId: {type: integer, minimum: 1}
+        githubRepoId: {type: integer, minimum: 1, maximum: 9007199254740991, deprecated: true, description: Compatible singular repository selection}
+        githubRepoIds:
+          type: array
+          minItems: 1
+          maxItems: 30
+          uniqueItems: true
+          items: {type: integer, minimum: 1, maximum: 9007199254740991}
+          description: Explicit currently actor-authorized selection; a repository belongs to one project per ledger, including archived projects. Cross-organization selections are allowed.
+        name: {type: string, maxLength: 120, description: Optional financial project name; persists independently of GitHub grants}
         description: {type: string, maxLength: 2000}
+        githubOrganizationId: {type: [integer, 'null'], minimum: 1, maximum: 9007199254740991, description: Optional association verified against current actor installation account metadata; never selects all organization repositories}
     ProjectPatch:
       type: object
+      additionalProperties: false
+      minProperties: 1
+      not: {required: [githubRepoId, githubRepoIds]}
       properties:
+        githubRepoId: {type: integer, minimum: 1, maximum: 9007199254740991, deprecated: true}
+        githubRepoIds:
+          type: array
+          minItems: 1
+          maxItems: 30
+          uniqueItems: true
+          items: {type: integer, minimum: 1, maximum: 9007199254740991}
+          description: Atomically replace the full explicit repository set under If-Match. Every selected repository must currently be authorized to the actor. Omit to retain historical lost bindings.
+        name: {type: string, maxLength: 120}
+        githubOrganizationId: {type: [integer, 'null'], minimum: 1, maximum: 9007199254740991}
         description: {type: string, maxLength: 2000}
         status: {type: string, enum: [active, archived]}
+    BoundRepository:
+      type: object
+      required: [githubRepoId, githubFullName, githubAccess, installationId, account]
+      properties:
+        githubRepoId: {type: integer, minimum: 1, maximum: 9007199254740991}
+        githubFullName: {type: [string, 'null'], description: Null when the actor's current GitHub access cannot be verified; cached names are never exposed}
+        githubAccess: {type: string, enum: [authorized, lost, reauthorization_required, unavailable]}
+        installationId: {type: [string, 'null']}
+        account:
+          oneOf: [{$ref: '#/components/schemas/GitHubAccount'}, {type: 'null'}]
+    ProjectOrganization:
+      type: object
+      required: [id, login, type, githubAccess]
+      properties:
+        id: {type: integer, minimum: 1, maximum: 9007199254740991}
+        login: {type: [string, 'null']}
+        type: {const: Organization}
+        githubAccess: {type: string, enum: [authorized, lost, reauthorization_required, unavailable]}
     Project:
       type: object
-      required: [id, githubRepoId, description, status, githubAccess, revision, totals]
+      required: [id, name, githubRepoId, githubRepoIds, repositories, githubOrganizationId, githubOrganization, description, status, githubAccess, canCreateExpense, revision, totals]
       properties:
         id: {type: string}
-        githubRepoId: {type: integer, minimum: 1}
-        githubFullName: {type: [string, 'null'], description: Null whenever current GitHub authorization cannot be verified; owner history remains available}
+        name: {type: string, maxLength: 120}
+        githubRepoId: {type: integer, minimum: 1, maximum: 9007199254740991, description: Compatibility anchor; always one of the currently bound repositories}
+        githubRepoIds: {type: array, minItems: 1, maxItems: 30, items: {type: integer, minimum: 1, maximum: 9007199254740991}}
+        repositories: {type: array, minItems: 1, maxItems: 30, items: {$ref: '#/components/schemas/BoundRepository'}}
+        githubOrganizationId: {type: [integer, 'null'], minimum: 1, maximum: 9007199254740991}
+        githubOrganization:
+          oneOf: [{$ref: '#/components/schemas/ProjectOrganization'}, {type: 'null'}]
+        githubFullName: {type: [string, 'null'], description: Compatibility anchor name from the actor's current grant; ledger financial history remains available}
         description: {type: string}
         status: {type: string, enum: [active, archived]}
-        githubAccess: {type: string, enum: [authorized, lost, reauthorization_required, unavailable]}
+        githubAccess: {type: string, enum: [authorized, partial, lost, reauthorization_required, unavailable]}
+        canCreateExpense: {type: boolean, description: Active project with at least one bound repository currently authorized to the actor. Historical edits and deletion do not require a live GitHub grant.}
         revision: {type: integer, minimum: 1}
         totals: {type: array, items: {$ref: '#/components/schemas/MoneyTotal'}}
     ProjectPage:

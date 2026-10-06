@@ -19,6 +19,7 @@ from .cloudflare_principal import (
     PrincipalAuthError, _bearer, _cookie_sessions, _header,
     _principal, _resource_auth_snapshot,
 )
+from .cloudflare_ledger_auth import ledger_principal, ROLE_SCOPES
 
 
 def _new_api_token() -> str:
@@ -107,33 +108,37 @@ async def create_api_key(*, binding: Any, headers: Mapping[str, object],
             expires_at = now + raw_seconds
     if expires_at is not None and expires_at <= now:
         return 400, {"error": {"code": "INVALID_REQUEST"}}
-    try:
-        user, _ = await _principal(binding, headers, scope="profile:read", now=now)
-    except PrincipalAuthError as failure:
-        return failure.status, {"error": {"code": failure.code}}
     proof: dict = {}
-    auth, validate = _resource_auth_snapshot(binding, headers, user, {}, now,
-        "profile:read", proof)
-    snapshot = await binding.batch(auth)
+    selected = restrictions.get("workspaceId") or _header(headers, "X-Pullwise-Workspace")
+    if restrictions.get("workspaceId") and _header(headers, "X-Pullwise-Workspace") not in {"", restrictions["workspaceId"]}:
+        return 400, {"error": {"code": "INVALID_RESTRICTION"}}
+    selected_headers = {**headers, "X-Pullwise-Workspace": selected or ""}
     try:
+        user, _, auth, validate = await ledger_principal(binding=binding,
+            headers=selected_headers, scope="profile:read", now=now, proof=proof)
+        snapshot = await binding.batch(auth)
         validate([part.results for part in snapshot])
     except PrincipalAuthError as failure:
         return failure.status, {"error": {"code": failure.code}}
+    workspace = user["_workspace"]
+    if any(scope not in ROLE_SCOPES[workspace["role"]] for scope in scopes):
+        return 403, {"error": {"code": "ROLE_FORBIDDEN"}}
+    if selected:
+        if restrictions.get("workspaceMemberRevision", workspace["revision"]) != workspace["revision"]:
+            return 403, {"error": {"code": "WORKSPACE_MEMBERSHIP_CHANGED"}}
+        restrictions.update(workspaceId=workspace["id"], workspaceMemberRevision=workspace["revision"])
     token = _new_api_token()
     key_id = f"ak_{uuid.uuid4().hex}"
-    record = {"id": key_id, "user_id": user["id"],
+    record = {"id": key_id, "user_id": user["_actor"]["id"],
         "name": _text(body.get("name")) or "API key", "key_prefix": token[:16],
         "key_hash": hashlib.sha256(token.encode()).hexdigest(),
         "scopes": json.dumps(scopes, separators=(",", ":")),
         "restrictions": json.dumps(restrictions, separators=(",", ":")),
         "expires_at": expires_at, "created_at": now,
         "last_used_at": None, "revoked_at": None}
+    from .cloudflare_ledger_api import _write_guard
     statements = [
-        binding.prepare("""INSERT INTO d1_command_guard(ok)
-            VALUES(CASE WHEN EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u
-                WHERE a.name='users' AND u.key=? AND u.value=?)
-              AND EXISTS(SELECT 1 FROM app_state WHERE name='sessions' AND payload=?)
-              THEN 1 ELSE 0 END)""").bind(user["id"], proof["user"], proof["sessions"]),
+        _write_guard(binding, proof, user["id"], now),
         binding.prepare("""INSERT INTO api_keys(id,user_id,name,key_prefix,key_hash,
             scopes,expires_at,restrictions,created_at,last_used_at,revoked_at)
             VALUES(?,?,?,?,?,?,?,?,?,NULL,NULL)""").bind(

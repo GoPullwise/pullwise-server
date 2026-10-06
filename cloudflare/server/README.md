@@ -1,16 +1,43 @@
 # Pullwise Server Worker
 
-`src/entry.py` is the Cloudflare Python Worker for the project expense ledger. It routes GitHub sign-in and App authorization, account API keys, Creem subscription and webhook requests, `/api/v1` ledger resources, per-currency reports, paginated CSV export, and optional Jev suggestions.
+`src/entry.py` is the Cloudflare Python Worker for the project expense ledger. It routes GitHub sign-in and App authorization, workspace membership and invitations, account API keys, Creem subscription and webhook requests, multi-repository `/api/v1` ledger resources, per-currency reports, paginated CSV export, and optional Jev suggestions.
+
+The new workspace/Organization/multi-repository version is implemented locally
+as of 2026-10-06. Final verification, native schema-upgrade proof and preview
+publication are pending. Original-version preview evidence does not validate
+this release.
 
 ## Source and database
 
 `sync_server_modules.py` copies only Worker-reachable `pullwise_server` modules into `src/pullwise_server`; run it after changing Server source and run `--check` in CI. Do not edit the mirrored files directly.
 
 Migrations apply in order: `0001_ledger.sql`, `0002_identity_billing_keys.sql`,
-`0003_ledger_suggestions.sql`, `0004_ledger_plan_usage.sql`. They remain
-unexecuted in production; preview has initialized the canonical schema behind
-its existing journal. Preview and production use different D1 databases. Health
-requires all 14 tables. The deploy script never applies remote migrations.
+`0003_ledger_suggestions.sql`, `0004_ledger_plan_usage.sql`,
+`0005_workspaces_repositories.sql`. Production remains unmigrated and paused;
+the existing preview uses the original four-migration schema. The new canonical
+schema has 18 tables and 33 SQLite indexes. Health requires all 18 tables.
+The deploy script never applies remote migrations.
+
+0005 appends `workspace_members`, `workspace_invites`, `workspace_events` and
+`ledger_project_repositories`, plus project `name` and
+`github_organization_id` columns. It backfills each original repository binding
+to the same project ID. Existing ledger owner IDs become workspace IDs with an
+implicit Owner; no expense, audit, idempotency or finance history is rewritten.
+Do not modify migrations 0001–0004 or import preview data into production.
+
+Fresh preview initialization and the exact legacy-v4-to-v5 upgrade are distinct
+compiled plans. The existing preview must use its binding-only, one-shot upgrade
+under the same ValidationBudget journal, database, counters and 100,000-read /
+1,000-write ceilings. It verifies the exact legacy schema and bounded project
+backfill, then executes 0005 atomically. The versioned preview upgrade flag
+explicitly enables this before the first eligible application request under
+the existing DO lock; ordinary product SQL cannot submit migration DDL.
+Partial, unknown or stopped outcomes retain reservations and cannot be retried
+or reset. Local native SQL/budget measurement has passed with 324 reads/25 writes;
+its Miniflare metadata has absent attempts and uses pinned no-retry source
+provenance without inventing values. Deployed read phases still require native
+attempts=1; the finite preview upgrade is the final runtime gate. Current bounds
+are in [D1 validation](../../docs/validation/d1-validation-budget.md).
 
 ## Configuration
 

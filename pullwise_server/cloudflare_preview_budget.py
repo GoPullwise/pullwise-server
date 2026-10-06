@@ -10,9 +10,14 @@ import json
 import re
 import time
 
-from .cloudflare_preview_schema import INDEX_COUNTS, PRIMARY_KEYS, SCHEMA_SQL
+from .cloudflare_preview_schema import (
+    INDEX_COUNTS, PRIMARY_KEYS, SCHEMA_SQL, SCHEMA_VERSION, SCHEMA_FINGERPRINT,
+    SCHEMA_OBJECTS, LEGACY_INDEX_COUNTS, LEGACY_SCHEMA_OBJECTS,
+    LEGACY_SCHEMA_FINGERPRINT, UPGRADE_SQL,
+)
 from .cloudflare_validation_budget import (
     BudgetError, MeteredD1, OperationBound, RequestPlan, _Statement, _field,
+    READ_CEILING, WRITE_CEILING,
 )
 
 _TOKEN = re.compile(r"--[^\n]*|/\*[\s\S]*?\*/|'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|[A-Za-z_][\w]*|\d+|\?|\S")
@@ -191,8 +196,180 @@ _STATE_SQL = "SELECT name,payload FROM app_state LIMIT 7"
 _EMPTY_SQL = "SELECT name FROM sqlite_master LIMIT 65"
 _INITIAL = RequestPlan("product-schema", "POST", "/_internal/initialize", 1, (
     OperationBound((_EMPTY_SQL,), 384, 0),
-    OperationBound(SCHEMA_SQL, 2000, 128),
+    OperationBound(SCHEMA_SQL, 4000, 256),
 ))
+_SCHEMA_QUERY = ("SELECT type,name,tbl_name,sql FROM sqlite_schema "
+    "WHERE name NOT GLOB '_cf_*' AND (name NOT GLOB 'sqlite_*' "
+    "OR name GLOB 'sqlite_autoindex_*') ORDER BY type,name LIMIT 129")
+_LEGACY_COUNT_SQL = "SELECT " + ",".join(
+    f'(SELECT COUNT(*) FROM {table}) AS {table}' for table in LEGACY_INDEX_COUNTS)
+_UPGRADE_CASE = "product-schema-v4-to-v5"
+
+
+def _current_schema(state):
+    return (state.get("schema_version") == SCHEMA_VERSION
+            and state.get("schema_fingerprint") == SCHEMA_FINGERPRINT)
+
+
+def _schema_objects(result):
+    rows = list(_field(result, "results", []))
+    if len(rows) >= 129:
+        raise BudgetError("PREVIEW_SCHEMA_MISMATCH")
+    objects = []
+    for row in rows:
+        kind, name, table, sql = (_field(row, key) for key in ("type", "name", "tbl_name", "sql"))
+        if not all(type(value) is str for value in (kind, name, table)) or not (
+                sql is None or type(sql) is str):
+            raise BudgetError("PREVIEW_SCHEMA_MISMATCH")
+        objects.append((kind, name, table, " ".join(sql.split()) if sql else None))
+    return tuple(objects)
+
+
+def _read_bound(rows):
+    return 3 * (sum(rows.values()) + rows["app_state"] + 16)
+
+
+def _upgrade_plan(state):
+    """Compile one finite plan from already persisted cardinality ceilings."""
+    data = state.get("product_data")
+    rows = data.get("rows") if isinstance(data, dict) else None
+    if (not isinstance(rows, dict) or set(rows) != set(LEGACY_INDEX_COUNTS)
+            or any(type(n) is not int or not 0 <= n <= WRITE_CEILING for n in rows.values())
+            or rows["d1_command_guard"] != 0
+            or not isinstance(data.get("json"), dict)
+            or any(type(n) is not int or n < 0 for n in data["json"].values())
+            or type(data.get("arrays")) is not int or data["arrays"] < 0):
+        raise BudgetError("PREVIEW_DATA_BOUND")
+    projects = rows["ledger_projects"]
+    upper = {**rows, "workspace_members": 0, "workspace_invites": 0,
+             "workspace_events": 0, "ledger_project_repositories": projects}
+    # DDL catalog/index writes have a fixed margin. Conservatively include a
+    # full indexed project rewrite for each ADD COLUMN, as well as each scalar
+    # repository backfill and its two indexes. Native proof may tighten this
+    # compiled bound, never reclaim any already reserved writes.
+    writes = 128 + projects * (1 + INDEX_COUNTS["ledger_project_repositories"]
+                              + 2 * (1 + 2 * LEGACY_INDEX_COUNTS["ledger_projects"]))
+    operations = (
+        OperationBound((_SCHEMA_QUERY,), 384, 0),
+        OperationBound((_LEGACY_COUNT_SQL, _STATE_SQL), _read_bound(rows), 0),
+        OperationBound(UPGRADE_SQL, 384 * len(UPGRADE_SQL) + 32 * projects, writes),
+        OperationBound((_SCHEMA_QUERY, _COUNT_SQL, _STATE_SQL), 384 + _read_bound(upper), 0),
+    )
+    if (sum(op.rows_read for op in operations) > READ_CEILING
+            or sum(op.rows_written for op in operations) > WRITE_CEILING):
+        raise BudgetError("BUDGET_EXHAUSTED")
+    return RequestPlan(_UPGRADE_CASE, "POST", "/_internal/schema-upgrade", 1, operations), upper
+
+
+def begin_product_schema_upgrade(journal, plan, *, now):
+    """Persist one compiled upgrade reservation using existing product admission.
+
+    Generic finite plans retain their request cap. No caller SQL, budget reset,
+    retry, new journal name or namespace is introduced by this path.
+    """
+    state = journal.snapshot()
+    if (plan.name != _UPGRADE_CASE or plan.max_requests != 1
+            or state.get("schema_ready") is not True
+            or state.get("schema_version") not in (None, 4)
+            or state.get("schema_fingerprint") not in (None, LEGACY_SCHEMA_FINGERPRINT)
+            or state["cases"].get("product-schema") != 1
+            or state["cases"].get(_UPGRADE_CASE, 0) != 0
+            or state.get("schema_upgrade") is not None):
+        raise BudgetError("SCHEMA_UPGRADE_UNREVIEWED")
+    # Compare against our compiled plan before consuming the one case.
+    reviewed, _ = _upgrade_plan(state)
+    if plan != reviewed:
+        raise BudgetError("SCHEMA_UPGRADE_UNREVIEWED")
+    if (state["reserved_read"] + plan.rows_read > journal.read_ceiling
+            or state["reserved_written"] + plan.rows_written > WRITE_CEILING):
+        journal._reject("BUDGET_EXHAUSTED")
+    ticket = journal.begin_product(now=now)
+    journal.reserve_operation(ticket, reads=plan.rows_read, writes=plan.rows_written, now=now)
+    state = journal.check(ticket, now=now)
+    state["cases"][_UPGRADE_CASE] = 1
+    state["schema_upgrade"] = {"from": 4, "to": SCHEMA_VERSION,
+                               "request": ticket, "complete": False}
+    journal._save(state)
+    return ticket
+
+
+def _validated_product_data(count_result, state_result, upper, tables):
+    count_rows = list(_field(count_result, "results", []))
+    states = list(_field(state_result, "results", []))
+    if len(count_rows) != 1 or len(states) > 6:
+        raise BudgetError("PREVIEW_DATA_BOUND")
+    counts = {table: _field(count_rows[0], table) for table in tables}
+    if any(type(n) is not int or not 0 <= n <= upper[table] for table, n in counts.items()):
+        raise BudgetError("PREVIEW_DATA_BOUND")
+    if counts["d1_command_guard"]:
+        raise BudgetError("NONEMPTY_GUARD")
+    sizes, arrays = {}, 0
+    for row in states:
+        payload = _field(row, "payload")
+        if type(payload) is not str or len(payload.encode("utf-8")) > 8192:
+            raise BudgetError("PREVIEW_DATA_BOUND")
+        data = json.loads(payload)
+        sizes[str(_field(row, "name"))] = len(data) if isinstance(data, (dict, list)) else 0
+        arrays = max(arrays, _json_size(data))
+    return {"rows": counts, "json": sizes, "arrays": arrays}
+
+
+async def upgrade_product_schema(binding, journal, *, clock=time.time):
+    """One binding-only v4-to-v5 upgrade; caller holds the existing DO lock.
+
+    The native D1 batch is atomic. D1 and DO storage cannot share a transaction;
+    an interrupted/unknown result stops with its entire reservation retained.
+    The explicit, versioned preview upgrade flag gates this path at request
+    ingress; ordinary product SQL cannot submit DDL or choose another migration.
+    """
+    if _current_schema(journal.snapshot()):
+        return
+    plan, upper = _upgrade_plan(journal.snapshot())
+    ticket = begin_product_schema_upgrade(journal, plan, now=clock())
+    meter = MeteredD1(binding, journal, ticket, plan, clock=clock)
+
+    async def execute(sql):
+        results = await meter.batch([meter.prepare(statement) for statement in sql])
+        attempts = [_field(_field(result, "meta"), "total_attempts") for result in results]
+        write_contract = sql == UPGRADE_SQL
+        # D1 only automatically retries read-only queries. Every statement in
+        # this exact frozen group contains a write keyword (CREATE/ALTER/INSERT),
+        # so an absent attempts field is covered by that documented contract.
+        # https://developers.cloudflare.com/d1/observability/debug-d1/#automatic-retries
+        # No other SQL group or caller-supplied operation receives this rule.
+        if any(not (write_contract and value is None)
+               and (type(value) is not int or value != 1) for value in attempts):
+            journal._reject("MIGRATION_ATTEMPTS_UNPROVEN")
+        if write_contract:
+            state = journal.check(ticket, now=clock())
+            state["schema_upgrade"]["write_execution"] = {
+                "native_attempts": attempts,
+                "provenance": "d1-nonretryable-write-contract-v1",
+            }
+            journal._save(state)
+        return results
+
+    try:
+        schema = await execute(plan.operations[0].sql)
+        if _schema_objects(schema[0]) != LEGACY_SCHEMA_OBJECTS:
+            journal._reject("PREVIEW_SCHEMA_MISMATCH")
+        legacy = await execute(plan.operations[1].sql)
+        _validated_product_data(legacy[0], legacy[1],
+            journal.snapshot()["product_data"]["rows"], LEGACY_INDEX_COUNTS)
+        await execute(plan.operations[2].sql)
+        verified = await execute(plan.operations[3].sql)
+        if _schema_objects(verified[0]) != SCHEMA_OBJECTS:
+            journal._reject("PREVIEW_SCHEMA_MISMATCH")
+        data = _validated_product_data(verified[1], verified[2], upper, INDEX_COUNTS)
+        state = journal.check(ticket, now=clock())
+        state.update(product_data=data, schema_version=SCHEMA_VERSION,
+                     schema_fingerprint=SCHEMA_FINGERPRINT)
+        state["schema_upgrade"]["complete"] = True
+        journal._save(state)
+        journal.finish(ticket, now=clock())
+    except BaseException:
+        journal.stop("SCHEMA_UPGRADE_OUTCOME_UNKNOWN")
+        raise
 
 
 def initial_data():
@@ -208,6 +385,7 @@ def reconcile_schema_reads(journal):
     """
     state = journal.snapshot()
     if (state.get("schema_read_reconciled") or not state.get("schema_ready")
+            or state.get("schema_version") not in (None, 4)
             or state["stopped"] != "BUDGET_EXHAUSTED"
             or state["cases"].get("product-schema") != 1):
         return
@@ -237,6 +415,8 @@ def reconcile_schema_reads(journal):
 
 async def initialize_product(binding, journal, *, clock=time.time):
     if journal.snapshot().get("schema_ready"):
+        if not _current_schema(journal.snapshot()):
+            raise BudgetError("SCHEMA_UPGRADE_REQUIRED")
         return
     ticket = journal.begin(_INITIAL, now=clock())
     meter = MeteredD1(binding, journal, ticket, _INITIAL, clock=clock)
@@ -248,6 +428,9 @@ async def initialize_product(binding, journal, *, clock=time.time):
             journal._reject("PREVIEW_DATABASE_NOT_EMPTY")
         await meter.batch([meter.prepare(sql) for sql in SCHEMA_SQL])
         journal.save_product_state(ticket, initial_data(), now=clock(), initialized=True)
+        state = journal.check(ticket, now=clock())
+        state.update(schema_version=SCHEMA_VERSION, schema_fingerprint=SCHEMA_FINGERPRINT)
+        journal._save(state)
         journal.finish(ticket, now=clock())
     except BaseException:
         journal.stop("INITIALIZATION_OUTCOME_UNKNOWN")
@@ -258,6 +441,9 @@ class ProductMeteredD1(MeteredD1):
     def __init__(self, binding, journal, ticket, *, clock=time.time):
         self._binding, self.journal, self.ticket, self.clock = binding, journal, ticket, clock
         self.data = journal.snapshot()["product_data"]
+        if (set(self.data["rows"]) != set(INDEX_COUNTS)
+                or journal.snapshot().get("schema_ready") and not _current_schema(journal.snapshot())):
+            raise BudgetError("SCHEMA_UPGRADE_REQUIRED")
         self.calls = 0
 
     async def _operation(self, statements, reads, writes):
@@ -315,6 +501,9 @@ class ProductMeteredD1(MeteredD1):
                 tokens = _tokens(s.sql)
                 cost = sql_write_bound(s.sql, guards)
                 references = re.findall(r"\b(?:FROM|JOIN)\s+([a-zA-Z_][\w]*)", s.sql, re.I)
+                if any(table.lower() not in {*INDEX_COUNTS, "json_each", "sqlite_master", "sqlite_schema"}
+                       for table in references):
+                    raise ValueError("unknown referenced table")
                 physical = [self.data["rows"].get(t.lower(), 64 if t.lower() in {
                     "sqlite_master", "sqlite_schema"} else 0) for t in references if t.lower() != "json_each"]
                 names = {t.lower() for t in references if t.lower() != "json_each"}
