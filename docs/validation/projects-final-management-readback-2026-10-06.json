@@ -1,0 +1,76 @@
+{
+  "date": "2026-10-06",
+  "scope": "Management API only; no application D1 queries, production activation or payments",
+  "verifiedAtUtc": "2026-10-06T15:30:00Z",
+  "readback": {
+    "route": {
+      "success": true,
+      "status": 200,
+      "helperPresent": false
+    },
+    "preview": {
+      "success": true,
+      "status": 200,
+      "bindings": [
+        {
+          "database_id": "e9dc3b89-f81f-4fce-87ef-d8797d879fb4",
+          "id": "e9dc3b89-f81f-4fce-87ef-d8797d879fb4",
+          "name": "DB",
+          "type": "d1"
+        },
+        {
+          "name": "PULLWISE_D1_ACCESS_ENABLED",
+          "text": "1",
+          "type": "plain_text"
+        },
+        {
+          "name": "PULLWISE_MODE",
+          "text": "preview",
+          "type": "plain_text"
+        }
+      ],
+      "logpush": false
+    },
+    "production": {
+      "success": true,
+      "status": 200,
+      "bindings": [
+        {
+          "database_id": "80a29a0d-5699-449f-9541-a01dc461ca9d",
+          "id": "80a29a0d-5699-449f-9541-a01dc461ca9d",
+          "name": "DB",
+          "type": "d1"
+        },
+        {
+          "name": "PULLWISE_D1_ACCESS_ENABLED",
+          "text": "0",
+          "type": "plain_text"
+        },
+        {
+          "name": "PULLWISE_MODE",
+          "text": "production",
+          "type": "plain_text"
+        }
+      ],
+      "logpush": false
+    },
+    "namespace": {
+      "success": true,
+      "status": 200,
+      "fixedCoordinatorPresent": true,
+      "helperPresent": false,
+      "count": 1,
+      "result_info": {
+        "page": 1,
+        "per_page": 100,
+        "count": 1,
+        "total_count": 1
+      }
+    }
+  },
+  "helperScriptAbsence": {
+    "apiErrorCode": 10007,
+    "message": "This Worker does not exist on your account.",
+    "limitation": "First parallel management verification returned this expected absence error; remaining fields were verified separately without repeating the script GET."
+  }
+}

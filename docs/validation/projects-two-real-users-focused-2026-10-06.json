@@ -1,0 +1,169 @@
+{
+  "date": "2026-10-06",
+  "passed": true,
+  "source": "Actual preview Cookie sessions for two real GitHub accounts in isolated ephemeral Chromium contexts",
+  "runId": "bd664110c1a7c5327251e3a857b8d7cf",
+  "runnerSha256": "43eb714d9c8c23442888a07fb99643ee84e1de3980f89b6a7527ffbaf275acf0",
+  "executionVersion": {
+    "server": "ab500595-328d-4fc2-b897-7c6137659c92",
+    "web": "ea62c7a0-37e4-4693-b78a-bbb3c96c53b6"
+  },
+  "executionSource": {
+    "server": "58f78d11dbe60141175593e379cbb40c977d01e9",
+    "web": "4e72574c19daec85ba713dd2d14a40034f7c03e7",
+    "branches": "main"
+  },
+  "deploymentMetadataProvenance": "Source commits and immutable Worker versions supplied by the release owner; this evidence review made no remote requests.",
+  "accounts": [
+    {
+      "login": "SanChai20",
+      "userId": "usr_github_64345844",
+      "role": "Immutable shared-ledger Owner"
+    },
+    {
+      "login": "DFerryman",
+      "userId": "usr_github_208442317",
+      "rolesExercised": [
+        "viewer",
+        "editor",
+        "admin",
+        "removed"
+      ]
+    }
+  ],
+  "manifest": {
+    "origin": "https://preview.pull-wise.com",
+    "businessHttpLimit": 110,
+    "networkRequestLimit": 400,
+    "mutationAttemptLimit": 16,
+    "confirmedWriteLimit": 12,
+    "minimumMutationIntervalMs": 10000,
+    "cleanupMutationReserve": 4,
+    "cleanupBusinessHttpReserve": 20,
+    "cleanupDeadlineReserveMs": 120000,
+    "clientRetries": 0,
+    "newProjects": 0,
+    "projectIdReadOnly": "prj_9b24f6b1b7244aaa8a9fc649a8e3dcd6",
+    "maximumExpenses": 1,
+    "maximumCategories": 1,
+    "maximumInvitations": 1,
+    "maximumKeys": 1,
+    "realPayments": false,
+    "modelCalls": false,
+    "screenshots": false,
+    "traces": false,
+    "storageState": false,
+    "credentialPersistence": false,
+    "fixtures": "Only new QA invitation/membership, shared expense, key and optional category",
+    "baselineResultUnchanged": "/workspace/qa-private/remote-projects-two-users-result.json"
+  },
+  "checks": [
+    {
+      "name": "two_fresh_real_identities_and_owner_free_pro",
+      "passed": true
+    },
+    {
+      "name": "new_viewer_invitation_accept_ui",
+      "passed": true
+    },
+    {
+      "name": "owner_manual_reload_then_editor_role_ui",
+      "passed": true
+    },
+    {
+      "name": "editor_shared_expense_create_edit_ui",
+      "passed": true
+    },
+    {
+      "name": "admin_project_read_and_old_key_invalidated_rest",
+      "passed": true
+    },
+    {
+      "name": "removal_blocks_workspace_session_and_key_preserves_personal_ledger",
+      "passed": true
+    }
+  ],
+  "uiEvidence": [
+    "Owner created one Viewer invitation; the second account accepted it and the UI selected the shared ledger.",
+    "Owner used manual Reload and waited for the current members response before saving Editor and Admin roles.",
+    "Editor created and edited one new QA Shared pool expense through the normal expense form; POST 201 and PATCH 200 were confirmed.",
+    "Owner removed the new membership through the Members confirmation UI; DELETE 204 was confirmed."
+  ],
+  "restEvidence": [
+    "Each account authenticated as its expected stable GitHub user ID and retained its own personal workspace; Owner Free/Pro prerequisite avoided automatic model calls.",
+    "One recipient-owned workspace-revision key was created through REST, worked before the role change, and returned 403 after Editor changed to Admin. Key assertions omitted Cookie credentials.",
+    "Current Admin profile reported manageProjects permission and GET of the existing archived QA project returned 200; no new project was created.",
+    "After removal, the shared-workspace Cookie request returned 404 and the old key was denied with an allowed 403/404; the recipient personal workspace remained accessible with 200.",
+    "Cleanup read the current QA expense before soft deletion, revoked the newly created key, confirmed the invitation was no longer pending, and archived the newly created QA category."
+  ],
+  "counts": {
+    "businessHttp": 89,
+    "network": 150,
+    "mutationAttempts": 12,
+    "confirmedWrites": 12
+  },
+  "counterUnits": "HTTP requests and mutation responses; these counts are not D1 rows read/written.",
+  "cleanup": [
+    {
+      "name": "soft_delete_new_qa_shared_expense",
+      "status": "complete"
+    },
+    {
+      "name": "revoke_new_qa_key",
+      "status": "complete"
+    },
+    {
+      "name": "confirm_new_invitation_terminal",
+      "status": "complete"
+    },
+    {
+      "name": "archive_new_qa_category",
+      "status": "complete"
+    }
+  ],
+  "cleanupComplete": true,
+  "membershipCleanup": "The newly joined membership was already removed by the main UI action and its access denial was verified before cleanup.",
+  "credentialPersistence": false,
+  "rawFinancialEvidence": false,
+  "fixtureIds": {
+    "category": "cat_e0fd2011556f4479b12c7f730c054b84",
+    "invitation": "win_719c37e506b146eea36e2e7216d902b0",
+    "expense": "exp_4cfd74c828b2438a9aef94bc9f9671cd",
+    "key": "ak_c51594bad7c3489f94773368ec1194de"
+  },
+  "previousRun": {
+    "runId": "2cad33dc290e052a29dc24e9436cfeb0",
+    "passed": false,
+    "failure": {
+      "stage": "editor_shared_create_edit",
+      "code": "QA_UI_OR_TRANSPORT_FAILURE"
+    },
+    "counts": {
+      "businessHttp": 107,
+      "network": 169,
+      "mutationAttempts": 13,
+      "confirmedWrites": 12,
+      "deniedRequests": 0
+    },
+    "cleanupComplete": true
+  },
+  "baselineEvidence": "projects-two-real-users-baseline-2026-10-06.json",
+  "baselinePreserved": true,
+  "independentReview": {
+    "passed": true,
+    "manifestMatchesFrozenRunner": true,
+    "runnerSha256MatchesPlan": true,
+    "allSixChecksPresentAndPassed": true,
+    "allCountsWithinCaps": true,
+    "allCleanupConfirmed": true,
+    "baselinePrivateSha256": "6ffba1de09ff1af70b6b479bbdf91c627dd6082f3ff205c06636a4c1909c1372",
+    "baselineEvidenceSha256": "ef13db388a969a5a47bdd2299d5bd9dc0268665d3e6d0a6381cc3e55169bf886",
+    "reviewRemoteRequests": 0
+  },
+  "limitations": [
+    "Projects create, multi-repository/Organization filter, detail, search, Reports/CSV, archive/reactivate and Viewer read-only controls plus actual 403 are evidenced by the original baseline checks. Its original cached-members runner failure remains false and unchanged.",
+    "Admin project access, team-key creation/invalidation and post-removal permission assertions used REST; invitation acceptance, role changes, Shared pool expense create/edit and membership removal used the UI.",
+    "The follow-up read the existing archived QA project and created no additional project. Soft-deleted expenses and archived QA categories retain ordinary accounting history.",
+    "No real payment, live subscription change, model request, direct remote SQL, screenshot, trace, storageState or credential file was used."
+  ]
+}

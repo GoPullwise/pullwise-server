@@ -1,12 +1,17 @@
 # Preview 共享身份/账单状态容量审查 — 2026-10-06
 
-本报告保留修复前的容量基线与源代码 SHA256。后续本地源码已完成逐记录改造：
+本报告保留修复前的容量基线与源代码 SHA256。后续源码已完成并发布逐记录改造：
 五种身份/账单状态使用现有 `app_state` 的 `record:<kind>:<id>` 主键，账号记录
 ≤512 KiB，其他记录与 HTTP ingress ≤8 KiB；没有改变 schema 5、数据库或 journal。
 旧数据经一次有界原子 copy/cutover 保留全部字段，旧容器清为空，完成 marker
 防止重放。并发 CAS、未知停止、严格 JSON、规模、权限与成本证据分别验收。
-本报告的基线数字没有改写成新系统容量承诺；新源码仍须通过原生迁移/重启验收
-并正式发布，才能声称线上共享容量 blocker 已解除。
+本报告的基线数字没有改写成新系统容量承诺；新源码已经通过原生迁移/重启、
+500 用户/1,000 会话规模验收，并发布为 preview
+`ab500595-328d-4fc2-b897-7c6137659c92`。实际有限 GET 验证一次 cutover 后
+`stateStorageVersion=1`、schema 5、原数据库/journal 和正常 ingress；后续双真实
+账号角色流程也通过。详见 [发布记录](state-records-preview-release-2026-10-06.json)
+及 [双账号补充验收](projects-two-real-users-focused-2026-10-06.json)。修复前 blocker
+已由逐记录存储解除，单账号包络及原有完整性停止仍保留。
 
 实际修复选择保留完整有界账号记录，未在此轮拆分 embedded repo/billing history：
 原生本地规模测试已验证 197,041-byte 账号含 1,000 repos 和 100 条账单 history。

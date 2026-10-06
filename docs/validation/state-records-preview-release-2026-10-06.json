@@ -1,0 +1,212 @@
+{
+  "date": "2026-10-06",
+  "scope": "preview only; no production D1, real payment or model requests",
+  "source": {
+    "server": "58f78d11dbe60141175593e379cbb40c977d01e9",
+    "serverTree": "4a456a790a0c706a5144ee39238da6367bc6aa63",
+    "webRuntime": "4e72574c19daec85ba713dd2d14a40034f7c03e7"
+  },
+  "publication": {
+    "serverVersion": "ab500595-328d-4fc2-b897-7c6137659c92",
+    "serverDeployment": "125d0b9c-ade3-42de-9745-1cb5c3a99d8d",
+    "trafficPercent": 100,
+    "serverModules": 78,
+    "serverModuleBytes": 575180,
+    "webVersionUnchanged": "ea62c7a0-37e4-4693-b78a-bbb3c96c53b6",
+    "previewDatabaseUnchanged": "e9dc3b89-f81f-4fce-87ef-d8797d879fb4",
+    "coordinatorNamespaceUnchanged": "0e0ce4946c5e4d5f81c606273ba94b5d",
+    "secretNamesRetained": true,
+    "productionD1Access": 0,
+    "observabilityEnabled": false
+  },
+  "validation": {
+    "serverFullTests": 893,
+    "serverPython": "3.10.12",
+    "webPriorFullTests": 434,
+    "webRuntimeChanged": false,
+    "mirrorStaticShellAndDryRunPassed": true,
+    "nativeEvidence": "state-records-native-2026-10-06.json",
+    "projectsNativeEvidence": "projects-state-records-native-2026-10-06.json",
+    "realBaseline": "projects-two-real-users-baseline-2026-10-06.json",
+    "realRemainingStatus": "completed: focused consented run passed all six checks; original failed baseline preserved",
+    "realFocusedEvidence": "projects-two-real-users-focused-2026-10-06.json",
+    "temporaryHelperCleanup": "real-account-helper-cleanup-2026-10-06.json",
+    "finalManagementReadback": "projects-final-management-readback-2026-10-06.json",
+    "focusedPlan": "projects-two-real-users-focused-plan-2026-10-06.json"
+  },
+  "publicProof": {
+    "before": {
+      "mode": "before",
+      "scope": "Actual anonymous preview; exact finite GETs only; no cookies or client retries",
+      "requests": [
+        {
+          "path": "/api/_preview/budget",
+          "status": 200,
+          "body": {
+            "productOperationMode": true,
+            "limits": {
+              "rowsRead": null,
+              "rowsWritten": null
+            },
+            "historicalCeilings": {
+              "rowsRead": 100000,
+              "rowsWritten": 1000
+            },
+            "reserved": {
+              "rowsRead": 40782,
+              "rowsWritten": 1093
+            },
+            "observed": {
+              "rowsRead": 29140,
+              "rowsWritten": 604
+            },
+            "schemaReady": true,
+            "schemaVersion": 5,
+            "stopped": null
+          }
+        }
+      ],
+      "passed": true,
+      "networkRequests": 1,
+      "completedAt": "2026-10-06T15:05:46.457Z"
+    },
+    "after": {
+      "mode": "after",
+      "scope": "Actual anonymous preview; exact finite GETs only; no cookies or client retries",
+      "requests": [
+        {
+          "path": "/api/_preview/budget",
+          "status": 200,
+          "body": {
+            "productOperationMode": true,
+            "limits": {
+              "rowsRead": null,
+              "rowsWritten": null
+            },
+            "historicalCeilings": {
+              "rowsRead": 100000,
+              "rowsWritten": 1000
+            },
+            "reserved": {
+              "rowsRead": 40782,
+              "rowsWritten": 1093
+            },
+            "observed": {
+              "rowsRead": 29140,
+              "rowsWritten": 604
+            },
+            "schemaReady": true,
+            "schemaVersion": 5,
+            "stateStorageVersion": 0,
+            "stopped": null
+          }
+        },
+        {
+          "path": "/api/health",
+          "status": 200,
+          "body": {
+            "ok": true,
+            "service": "pullwise-server",
+            "database": {
+              "type": "d1",
+              "configured": true
+            }
+          }
+        },
+        {
+          "path": "/api/_preview/budget",
+          "status": 200,
+          "body": {
+            "productOperationMode": true,
+            "limits": {
+              "rowsRead": null,
+              "rowsWritten": null
+            },
+            "historicalCeilings": {
+              "rowsRead": 100000,
+              "rowsWritten": 1000
+            },
+            "reserved": {
+              "rowsRead": 56506,
+              "rowsWritten": 1166
+            },
+            "observed": {
+              "rowsRead": 29447,
+              "rowsWritten": 667
+            },
+            "schemaReady": true,
+            "schemaVersion": 5,
+            "stateStorageVersion": 1,
+            "stopped": null
+          }
+        },
+        {
+          "path": "/api/health",
+          "status": 200,
+          "body": {
+            "ok": true,
+            "service": "pullwise-server",
+            "database": {
+              "type": "d1",
+              "configured": true
+            }
+          }
+        },
+        {
+          "path": "/api/_preview/budget",
+          "status": 200,
+          "body": {
+            "productOperationMode": true,
+            "limits": {
+              "rowsRead": null,
+              "rowsWritten": null
+            },
+            "historicalCeilings": {
+              "rowsRead": 100000,
+              "rowsWritten": 1000
+            },
+            "reserved": {
+              "rowsRead": 56558,
+              "rowsWritten": 1166
+            },
+            "observed": {
+              "rowsRead": 29499,
+              "rowsWritten": 667
+            },
+            "schemaReady": true,
+            "schemaVersion": 5,
+            "stateStorageVersion": 1,
+            "stopped": null
+          }
+        }
+      ],
+      "passed": true,
+      "migrationWindowDelta": {
+        "observedWrites": 63,
+        "reservedWrites": 73
+      },
+      "verifiedReadWindowDelta": {
+        "observedWrites": 0,
+        "reservedWrites": 0
+      },
+      "limitations": [
+        "Global snapshots include concurrent normal users; deltas alone do not attribute per-request writes. First ingress may perform the explicit one-shot storage cutover."
+      ],
+      "networkRequests": 5,
+      "forwarded": 5,
+      "blocked": 0,
+      "completedAt": "2026-10-06T15:14:26.657Z"
+    },
+    "networkGetsIncludingBefore": 6,
+    "applicationBusinessMutations": 0,
+    "stateStorageVersionBefore": 0,
+    "stateStorageVersionAfter": 1,
+    "schemaVersionRetained": 5,
+    "migrationWindowObservedWriteDelta": 63,
+    "migrationWindowReservedWriteDelta": 73,
+    "subsequentHealthObservedWriteDelta": 0,
+    "subsequentHealthReservedWriteDelta": 0,
+    "cumulativeCountersPreserved": true,
+    "attribution": "Global snapshots include concurrent users; migration-window deltas are not claimed as exclusively attributable per-request counters."
+  }
+}

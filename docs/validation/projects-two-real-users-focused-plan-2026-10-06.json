@@ -1,6 +1,6 @@
 {
   "date": "2026-10-06",
-  "status": "prepared_not_executed_remotely",
+  "status": "actual_remote_complete",
   "runner": "/workspace/qa-private/remote-members-focused.mjs",
   "runnerSha256": "43eb714d9c8c23442888a07fb99643ee84e1de3980f89b6a7527ffbaf275acf0",
   "manifest": {
@@ -122,9 +122,34 @@
     "No preexisting recipient membership in the Owner workspace; Owner plan Free or Pro avoids any automatic model call"
   ],
   "limitations": [
-    "Prepared runner and synthetic browser fixtures do not claim real-account completion",
+    "The localVerification section remains synthetic; actual two-account completion is recorded separately in actualCompletion and the linked focused evidence.",
     "The original real Projects/Viewer baseline failure remains false and unchanged",
     "Admin project access and key invalidation use actual REST reads; ordinary invite, roles and Shared pool expense actions use the UI",
     "No real payment, live subscription change, model request, remote SQL, screenshots, traces or credential files"
-  ]
+  ],
+  "actualCompletion": {
+    "passed": true,
+    "runId": "bd664110c1a7c5327251e3a857b8d7cf",
+    "evidence": "projects-two-real-users-focused-2026-10-06.json",
+    "runnerSha256": "43eb714d9c8c23442888a07fb99643ee84e1de3980f89b6a7527ffbaf275acf0",
+    "executionVersion": {
+      "server": "ab500595-328d-4fc2-b897-7c6137659c92",
+      "web": "ea62c7a0-37e4-4693-b78a-bbb3c96c53b6"
+    },
+    "executionSource": {
+      "server": "58f78d11dbe60141175593e379cbb40c977d01e9",
+      "web": "4e72574c19daec85ba713dd2d14a40034f7c03e7",
+      "branches": "main"
+    },
+    "checksPassed": 6,
+    "counts": {
+      "businessHttp": 89,
+      "network": 150,
+      "mutationAttempts": 12,
+      "confirmedWrites": 12
+    },
+    "cleanupComplete": true,
+    "baselinePassed": false,
+    "baselinePreserved": true
+  }
 }

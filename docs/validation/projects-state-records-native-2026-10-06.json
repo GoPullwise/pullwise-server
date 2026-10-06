@@ -1,0 +1,457 @@
+{
+  "passed": true,
+  "localOnly": true,
+  "nativePythonFFI": true,
+  "configuredMode": "local",
+  "syntheticProvenance": true,
+  "syntheticAccounts": 2,
+  "realAccounts": 0,
+  "remoteRequests": 0,
+  "remoteD1RowsRead": 0,
+  "remoteD1RowsWritten": 0,
+  "realProviderRequests": 0,
+  "realPayments": 0,
+  "clientRetries": 0,
+  "canonicalEntrySha256": "9ccad459d56b2bae502a1728bcbbf3ba85b93fc327aba668057fe0b128b2e154",
+  "observedHealthMode": null,
+  "checks": [
+    "native Response(bytes) preserves multibyte UTF-8",
+    "Projects create/list/detail/edit revisions/archive/restore/rebind and repository uniqueness; historical totals exact",
+    "Two synthetic accounts invite/accept single use, actual actor grants/idempotency, workspace isolation, Editor/Viewer/Admin restrictions and removal/key invalidation",
+    "Checkout cannot grant entitlement; signed paid exact-once replay, bad signature, provider rejection/unknown outcomes, pending upgrade, cancel/resume, unpaid downgrade and paid recovery"
+  ],
+  "sqlAssertions": {
+    "expenses": 2,
+    "member_events": 1,
+    "outstanding_guards": 0,
+    "bad_receipts": 0,
+    "paid_receipts": 1,
+    "removed_members": 1,
+    "hashed_invites": 1,
+    "workspace_events": 5,
+    "member_usage": 0
+  },
+  "localHttpRequests": 79,
+  "localHttpCap": 100,
+  "localNativeStatements": 711,
+  "localNativeRowsRead": 707,
+  "localNativeRowsWritten": 325,
+  "nativeAttemptsValues": [
+    null
+  ],
+  "nativeAttemptsFabricated": false,
+  "fixtureGatewayCalls": {
+    "github_fixture": 48,
+    "creem_fixture": 6
+  },
+  "responses": [
+    {
+      "method": "GET",
+      "path": "/health",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/_fixture/account-init",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/_fixture/bytes",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/me",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/me",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspaces",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/repositories",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/repositories",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/projects",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/projects",
+      "status": 409
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/projects",
+      "status": 422
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects",
+      "status": 422
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects",
+      "status": 413
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/projects/prj_ad0fd5e1f24d4787b35f5687bbae8e71",
+      "status": 412
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/projects/prj_ad0fd5e1f24d4787b35f5687bbae8e71",
+      "status": 428
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/projects/prj_ad0fd5e1f24d4787b35f5687bbae8e71",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/categories",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/expenses",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/expenses",
+      "status": 201
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/prj_ad0fd5e1f24d4787b35f5687bbae8e71",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/reports/summary",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/reports/timeseries",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/reports/categories",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/expenses/export",
+      "status": 200
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/projects/prj_ad0fd5e1f24d4787b35f5687bbae8e71",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/expenses",
+      "status": 403
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/projects/prj_ad0fd5e1f24d4787b35f5687bbae8e71",
+      "status": 403
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/projects/prj_ad0fd5e1f24d4787b35f5687bbae8e71",
+      "status": 200
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/projects/prj_ad0fd5e1f24d4787b35f5687bbae8e71",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/projects",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/workspaces/usr_github_710001/invites",
+      "status": 201
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/workspace-invitations/preview",
+      "status": 403
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/workspace-invitations/preview",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/workspace-invitations/accept",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/workspace-invitations/preview",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/workspace-invitations/accept",
+      "status": 410
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/me",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/prj_ad0fd5e1f24d4787b35f5687bbae8e71",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/expenses",
+      "status": 201
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/expenses",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/expenses",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api-keys",
+      "status": 201
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/me",
+      "status": 200
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/workspaces/usr_github_710001/members/usr_github_710002",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/me",
+      "status": 403
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/expenses",
+      "status": 403
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/workspaces/usr_github_710001/members/usr_github_710002",
+      "status": 200
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/workspaces/usr_github_710001/members/usr_github_710001",
+      "status": 403
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/workspaces/usr_github_710001/members/usr_github_710002",
+      "status": 204
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/expenses",
+      "status": 404
+    },
+    {
+      "method": "POST",
+      "path": "/billing/checkout-sessions",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/billing",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/webhooks/creem",
+      "status": 400
+    },
+    {
+      "method": "GET",
+      "path": "/billing",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/webhooks/creem",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/billing",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/webhooks/creem",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/billing",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/billing/change-interval",
+      "status": 503
+    },
+    {
+      "method": "GET",
+      "path": "/billing",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/billing/change-interval",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/billing",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/billing/change-interval",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/billing/cancel-subscription",
+      "status": 409
+    },
+    {
+      "method": "POST",
+      "path": "/webhooks/creem",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/billing",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/billing/cancel-subscription",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/billing/cancel-subscription",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/billing/resume-subscription",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/billing/resume-subscription",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/webhooks/creem",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/billing",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/webhooks/creem",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/billing",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/billing/change-interval",
+      "status": 503
+    },
+    {
+      "method": "GET",
+      "path": "/billing",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/billing/change-interval",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/projects/prj_ad0fd5e1f24d4787b35f5687bbae8e71",
+      "status": 200
+    }
+  ],
+  "runtimeStopped": true,
+  "sourceSnapshotComparisonAtFinalFreeze": {
+    "changedModules": [
+      "cloudflare_state_records.py"
+    ],
+    "changedDefinitions": [
+      "read_records"
+    ],
+    "usage": "User enumeration is not called by this Projects/subscription journey; final safe16-user enumeration is independently validated in the preserved capacity fixture."
+  },
+  "recordStorageSyntheticFixture": true,
+  "previousPartialRealAccountBaseline": "projects-two-real-users-baseline-2026-10-06.json",
+  "finalRealAccountAcceptance": false
+}

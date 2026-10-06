@@ -1,0 +1,123 @@
+{
+  "date": "2026-10-06",
+  "scope": "Temporary first-party preview-only two-real-account acceptance helpers; no production testing or payments",
+  "authorization": "User explicitly approved 30-minute memory-only session delegation; each account used normal Preview login and explicitly confirmed the first-party form",
+  "currentHelper": {
+    "helperName": "pullwise-preview-qa-30a44ee25562",
+    "runId": "bd664110c1a7c5327251e3a857b8d7cf",
+    "routeId": "f87d74e8726a4405b03ca6ccfc6b8703",
+    "localCleanupScopeCasesPassed": 4,
+    "remoteCleanupConfirmed": true,
+    "remoteRequestsByThisAgent": 0,
+    "scope": "Exact random preview helper route + inert deletion migration for PreviewQaRelay only + exact temporary helper script; all product routes/services/ValidationBudget untouched",
+    "durableSanitizedEvidencePreserved": true,
+    "credentialsRecovered": false,
+    "confirmedAtUTC": "2026-10-06T15:30Z",
+    "confirmationSource": "root remote execution and readback; no repeat remote checks by helper agent",
+    "routeRemovalStatus": 200,
+    "namespaceRemovalStatus": 200,
+    "scriptRemovalStatus": 200,
+    "readback": {
+      "helperRouteAbsent": true,
+      "helperNamespaceAbsent": true,
+      "namespaceCount": 1,
+      "fixedCoordinatorNamespacePreserved": "0e0ce4946c5e4d5f81c606273ba94b5d",
+      "helperScriptAbsent": true,
+      "scriptGetCloudflareErrorCode": 10007,
+      "scriptGetVerificationNote": "Composite verification tool call returned the expected Worker nonexistent error; preserved as observed without retest",
+      "productionD1AccessEnabled": 0,
+      "previewD1AccessEnabled": 1,
+      "originalDatabasesRetained": true
+    },
+    "receiver": {
+      "process": "51578",
+      "exited": true,
+      "sessionCredentialsCleared": true,
+      "credentialPersistence": false
+    },
+    "localControlFilesRemoved": true,
+    "localRemovedControlFiles": [
+      "private.json",
+      "manifest.json",
+      "upload.execute.js",
+      "secrets.execute.js",
+      "activate.execute.js",
+      "cleanup.execute.js",
+      "deployment-metadata.json"
+    ],
+    "confirmationTimePrecision": "minute"
+  },
+  "focusedAcceptance": {
+    "runId": "bd664110c1a7c5327251e3a857b8d7cf",
+    "passed": true,
+    "checksPassed": 6,
+    "counts": {
+      "businessHttp": 89,
+      "network": 150,
+      "mutationAttempts": 12,
+      "confirmedWrites": 12
+    },
+    "cleanupComplete": true,
+    "credentialPersistence": false,
+    "rawFinancialEvidence": false
+  },
+  "helperSecurityProof": {
+    "nativeWorkerCasesPassed": 31,
+    "receiverCasesPassed": 9,
+    "activationGuardCasesPassed": 14,
+    "cleanupScopeMockCasesPassed": 4,
+    "workerSourceSha256": "513e5910fa6b2047ae91acf50925950208939c49e2a0782e9e7742a007fd226f",
+    "receiverSourceSha256": "d9cf232f04d10958672c7b161bee642d65cca889c32e93787ee0bedb77a1b541",
+    "manualAttemptLimitPerAccount": 3,
+    "maximumAuthSessionGets": 6,
+    "maximumSuccessfulSessionFrames": 2,
+    "privateReceiverConnections": 1,
+    "automaticRetries": 0,
+    "persistentCredentials": false,
+    "observabilityDisabledBeforeRouteActivation": true
+  },
+  "priorHelpers": [
+    {
+      "helper": "pullwise-preview-qa-55ae28a68b5a",
+      "runId": "594568a28df8d96ae4d2a076619ac458",
+      "rootConfirmedCleanup": {
+        "routeDeletedStatus": 200,
+        "namespaceRemovalStatus": 200,
+        "scriptDeletedStatus": 200
+      },
+      "receivedAccountFrames": 0,
+      "reason": "Consumed receiver ended before deadline; no credential frames received; new helper is a separately prepared one-shot run, no reconnect.",
+      "preRouteBootstrap": {
+        "observedRejectedUpgradeStatus": 404,
+        "helperReached": false
+      },
+      "oldDiagnosticLimitation": "Old CLI exposed only generic stopped; exact idle close cause was not observed."
+    },
+    {
+      "helperName": "pullwise-preview-qa-d090d5bd0d9e",
+      "routeId": "a26f2844da1f440a9d808dc1445f96fb",
+      "namespaceId": "692b21b99f4d4e78a6992d06b931a8b4",
+      "confirmationSource": "root explicit cleanup confirmation",
+      "routeDelete": 200,
+      "namespaceMigrationRemoval": 200,
+      "scriptDelete": 200,
+      "receiverProcess": "84084 terminated SIGTERM143; one DF session cleared from memory; no San session received",
+      "reason": "fresh combined helper after identity-validation UX repair; no success flags reset in an existing namespace"
+    },
+    {
+      "helperName": "pullwise-preview-qa-70f496f76250",
+      "confirmationSource": "root explicit full cleanup confirmation",
+      "routeRemoval": 200,
+      "namespaceRemoval": 200,
+      "scriptRemoval": 200,
+      "receiverProcess": "30716 finished failed-baseline acceptance; credentials cleared from process memory",
+      "baselinePreserved": "/workspace/qa-private/remote-projects-two-users-result.json",
+      "reason": "fresh focused follow-up after final product normalization gates; no credentials recovered and no existing success flags reset"
+    }
+  ],
+  "limitations": [
+    "Cleanup readback is the root agent supplied remote evidence, not an independently repeated remote request.",
+    "Prior failed-baseline acceptance is preserved separately; focused acceptance does not replace it.",
+    "Soft-deleted QA expenses, archived QA categories and ordinary audit history remain according to product rules."
+  ]
+}

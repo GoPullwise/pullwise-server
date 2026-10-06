@@ -2,26 +2,59 @@
 
 Updated 2026-10-06. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
 
-## Account storage and real-user continuation (2026-10-06, in progress)
+## Account storage published; real-user acceptance complete (2026-10-06)
 
-The published versions below remain the current remote artifact. A follow-up
-repair is moving shared identity and billing JSON maps to exact individual
-records in the same D1 table. The [capacity review](preview-state-capacity-review-2026-10-06.md)
-preserves the original reproducible blocker. Migration, restart and native
-accounting must pass before this working source is published.
+Server source `58f78d11dbe60141175593e379cbb40c977d01e9` is on main and
+preview `ab500595-328d-4fc2-b897-7c6137659c92` serves 100% traffic. Shared
+identity and billing JSON maps now use exact individual records in the same
+D1 table, with typed user snapshots up to 512 KiB and unchanged 8 KiB HTTP
+ingress. Full Server checks pass **893 tests** plus mirror/static/shell/dry-run.
+The Web runtime and its earlier 434-test artifact remain unchanged.
+
+[Native acceptance](state-records-native-2026-10-06.md) passed legal legacy
+cutover, actual workerd restart, old sessions/roles, 500 users/1,000 sessions,
+1,000 repository entries/100 billing history events and signed subscription
+success/failure/replay. It preserves both harness failures and their bounded
+continuation; no bulk seed or cumulative counter was reset. These are local
+synthetic accounts, with no remote D1/provider or real payment requests.
+
+[Actual publication proof](state-records-preview-release-2026-10-06.json)
+retains the original preview D1/DO namespace and Secret names, production
+access 0, schema 5 and all cumulative counters. Six finite anonymous GETs
+including pre-publication status observed stateStorageVersion 0→1 and healthy
+ingress. The migration window added 63 observed/73 reserved writes; the
+subsequent health window added zero writes. These are global snapshots, so the
+migration-window delta is not presented as exclusive request attribution.
+The [capacity review](preview-state-capacity-review-2026-10-06.md) retains
+its original pre-repair blocker and separate published follow-up provenance.
 
 The [first two-real-user run](projects-two-real-users-baseline-2026-10-06.json)
 passed ten checks across Projects, reports/CSV, invitations and Viewer access.
 It stopped before the Editor update because the runner kept an old Owner
 Members view after recipient acceptance. The failed result remains unchanged;
-all confirmed QA fixtures were cleaned up. The remaining role/key/removal
-flow has a separate finite runner and requires fresh memory-only consent
-after publication. No payment, model call or customer credential persistence
-occurred in the real run.
+all confirmed QA fixtures were cleaned up.
 
-## Projects, collaboration and cost follow-up (2026-10-06)
+The [separate focused real run](projects-two-real-users-focused-2026-10-06.json)
+passed all six checks after both accounts explicitly renewed consent. SanChai20
+was Owner and DFerryman was the invited member. Actual UI checks covered Viewer
+invitation acceptance, Owner reload and Editor role change, and shared-expense
+creation/editing. REST checks verified Admin project reads, revision-bound key
+invalidation and member removal blocking workspace sessions/keys while retaining
+the personal ledger. The run used 89 business HTTP requests, 150 total network
+requests and 12 mutation attempts/confirmed writes, with at least ten seconds
+between mutations and no client retries. New QA expense, category, invitation,
+membership and key cleanup completed. No real payment, model call, screenshot,
+trace, session file or raw financial evidence was persisted.
 
-Current source is Server `80f398c3d1e332aa91eefe2d5ccf885c227b14cc`
+The [temporary helper cleanup](real-account-helper-cleanup-2026-10-06.json)
+removed the exact route, helper namespace and Worker. Management read-back found
+only the original product coordinator namespace, preview D1 access 1 and
+production D1 access 0. These finite checks cover the listed release workflows;
+they are not a load test or an actual charged payment acceptance.
+
+## Earlier Projects, collaboration and cost publication (2026-10-06)
+
+This earlier publication used Server `80f398c3d1e332aa91eefe2d5ccf885c227b14cc`
 and Web `4e72574c19daec85ba713dd2d14a40034f7c03e7`, pushed to main.
 Explicit preview publication serves Server
 `7882f562-8c5e-4c5a-a898-d52943dc63e6` and Web
@@ -57,7 +90,8 @@ OAuth state/session transaction. Source audit finds no writes in health or
 session reads, but aggregate snapshots cannot prove attribution. The original
 zero-write gate remains recorded as failed; it is not rewritten as a pass.
 
-Two real-user acceptance is a separate bounded run after both accounts consent;
+Two real-user acceptance was a separate bounded gate at this publication.
+The subsequent baseline and focused results above preserve its actual outcome;
 it is not established by any local fixture or the public smoke above.
 
 ## Shared ledger and multi-repository release (2026-10-06, final)

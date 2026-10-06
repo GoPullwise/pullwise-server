@@ -1,0 +1,390 @@
+{
+  "date": "2026-10-06",
+  "passed": true,
+  "scope": "Finite local native Python Worker/D1/SQLite DO acceptance; synthetic accounts and signed billing facts only.",
+  "realAccounts": 0,
+  "remoteD1Operations": 0,
+  "realProviderRequests": 0,
+  "realPayments": 0,
+  "clientRetries": 0,
+  "finalSourceSha256": {
+    "cloudflare_preview_budget.py": "6767eacc025e1a3a056c1a209e91f4d57cf5da48e1caccf85980cf0532ea27bf",
+    "cloudflare_state_records.py": "3ad41cf8aa0d8f8db5f1a4e1972ce14de2c2bab51dd8b094089ff20363c7b881",
+    "cloudflare_validation_budget.py": "48deb528340ba172c56052b7dd7fa2a56792863ea0a7f2315c9b015b594e500d",
+    "cloudflare_preview_rate.py": "1d2f6446f73e72d4cf96c8d7576d527ea1ca5f4b7cc4b392d6991dc395151993",
+    "cloudflare_account_adapter.py": "c7c0378da2982510671bea8fa027954194662c17201c663424cebee3fd086e46",
+    "cloudflare_d1_mapping.py": "30a9bbc39b5e4e695d3c17aeb7a9b53eb2ed86c6faf12ac8e57e7c59ef61ba1c"
+  },
+  "schema": {
+    "version": 5,
+    "fingerprint": "8aa939b2f065a1fb893f37c8c14fe96fe979d31686c084f1602c5dab7e5acc3f",
+    "storageVersion": 1,
+    "ddlUpgradeRequired": false
+  },
+  "previousReleaseBaseline": "projects-preview-follow-up-release-2026-10-06.json",
+  "previousNativeBaseline": "projects-subscriptions-native-2026-10-06.json",
+  "previousPartialRealAccountBaseline": "projects-two-real-users-baseline-2026-10-06.json",
+  "oldRealAccountEvidenceIsFinalRecordStorageAcceptance": false,
+  "capacity": {
+    "passed": true,
+    "users": 500,
+    "sessions": 1000,
+    "repositories": 1000,
+    "billingHistory": 100,
+    "ownerRecordBytes": 197041,
+    "bulkScalarStatements": 1494,
+    "bulkBatches": 24,
+    "largeAccountCASReadWrite": true,
+    "postWriteNumericCardinalityRefresh": {
+      "statements": 2,
+      "rowsRead": 3023,
+      "rowsWritten": 0,
+      "statementMeta": [
+        {
+          "rowsRead": 1514,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1509,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "physicalAppStateRows": 1509
+    },
+    "oldSessionAfterCapacity": true,
+    "editorWriteScopeAuthorizedProjectManageDenied": true,
+    "keysetPageSize": 17,
+    "keysetDistinctSecondPage": true,
+    "receiptRowsUnchanged": true,
+    "guardRows": 0,
+    "stopped": null,
+    "firstCapacitySourceSha256": {
+      "pullwise_server/cloudflare_account_adapter.py": "c7c0378da2982510671bea8fa027954194662c17201c663424cebee3fd086e46",
+      "pullwise_server/cloudflare_d1_mapping.py": "30a9bbc39b5e4e695d3c17aeb7a9b53eb2ed86c6faf12ac8e57e7c59ef61ba1c",
+      "pullwise_server/cloudflare_preview_budget.py": "e0c9835c9af8fc7f7d6ab6cf041a2a18298da150e82699c8476c317595a3bc41",
+      "pullwise_server/cloudflare_principal.py": "a620fab13eb8f025908b6c44704851a3029042396ea63d036c6ead9bebdd1f89",
+      "pullwise_server/cloudflare_session_adapter.py": "0043a42082eb45f280782adea7d52a5a85eda597c6cf16af62277a54db3ca79d",
+      "pullwise_server/cloudflare_state_records.py": "1e465fba33bedd2e06f86ce8f3d41b5bff3a8bf121eafa0473d0c2977574cf09",
+      "application_entry.py": "9ccad459d56b2bae502a1728bcbbf3ba85b93fc327aba668057fe0b128b2e154"
+    },
+    "finalLargeAccountRecheck": {
+      "passed": true,
+      "ownerRecordBytes": 198163,
+      "canonicalAccountCAS": true,
+      "byteEnvelopeAndIdentityHardeningCurrent": true,
+      "oldOwnerAndMemberSessionsPreserved": true,
+      "repositoriesRetained": 1000,
+      "historyRetained": 100,
+      "authorityRevisionBefore": 14,
+      "authorityRevisionAfter": 16,
+      "effectivePlan": "free",
+      "retainedAccountJsonUnchanged": true
+    },
+    "finalPagination": {
+      "passed": true,
+      "requestedLimit": 17,
+      "firstPageRecords": 16,
+      "secondPageRecords": 16,
+      "disjointNextCursor": true,
+      "nativeStatements": 2,
+      "nativeRowsRead": 48,
+      "nativeRowsWritten": 0,
+      "pageByteCounts": [
+        202588,
+        4720
+      ]
+    },
+    "finalStatus": {
+      "passed": true,
+      "schemaVersion": 5,
+      "stateStorageVersion": 1,
+      "requests": 17,
+      "actualRead": 93588,
+      "actualWritten": 3227,
+      "reservedRead": 1130482,
+      "reservedWritten": 3686,
+      "evidenceRows": 189,
+      "stopped": null
+    },
+    "localHttpRequestsAttempted": 20,
+    "localHttpRequestsCompleted": 20,
+    "nativeStatements": 1857,
+    "nativeRowsRead": 93588,
+    "nativeRowsWritten": 3227,
+    "nativeMetaMatchesCumulativeJournal": true,
+    "nativeAttemptsObserved": [
+      null
+    ],
+    "workerdReadyEvents": 5,
+    "runtimeStopped": true
+  },
+  "largeUserBilling": [
+    {
+      "passed": true,
+      "storedStatus": "active",
+      "effectivePlan": "pro",
+      "accountRevision": 12,
+      "retainedRepositories": 1000,
+      "retainedBillingHistory": 100,
+      "opaqueRetainedFieldPreserved": true,
+      "guardRows": 0
+    },
+    {
+      "passed": true,
+      "storedStatus": "unpaid",
+      "effectivePlan": "free",
+      "accountRevision": 14,
+      "retainedRepositories": 1000,
+      "retainedBillingHistory": 100,
+      "opaqueRetainedFieldPreserved": true,
+      "guardRows": 0
+    },
+    {
+      "passed": true,
+      "storedStatus": "unpaid",
+      "effectivePlan": "free",
+      "accountRevision": 14,
+      "retainedRepositories": 1000,
+      "retainedBillingHistory": 100,
+      "opaqueRetainedFieldPreserved": true,
+      "guardRows": 0
+    }
+  ],
+  "finalCutover": {
+    "passed": true,
+    "migratedRecords": 10,
+    "legacyMapsEmpty": true,
+    "oldSessionsPreserved": true,
+    "oauthStatesPreserved": true,
+    "billingEventsPendingPreserved": true,
+    "rolesAndAccountRevisionsPreserved": true,
+    "schemaVersion": 5,
+    "schemaFingerprint": "8aa939b2f065a1fb893f37c8c14fe96fe979d31686c084f1602c5dab7e5acc3f",
+    "atomicCutoverMutationBatches": 1,
+    "cutoverNativeBatches": [
+      {
+        "statements": 2,
+        "rowsRead": 17,
+        "rowsWritten": 0
+      },
+      {
+        "statements": 17,
+        "rowsRead": 45,
+        "rowsWritten": 37
+      },
+      {
+        "statements": 3,
+        "rowsRead": 53,
+        "rowsWritten": 0
+      }
+    ],
+    "explicitLocalSeedNativeStatements": 11,
+    "explicitLocalSeedMetered": true,
+    "unknownEmptyLegacyRetainedAndSnapshotCAS": true,
+    "counterBefore": {
+      "requests": 2,
+      "reserved_read": 6432,
+      "reserved_written": 512,
+      "actual_read": 149,
+      "actual_written": 98
+    },
+    "counterAfter": {
+      "requests": 4,
+      "reserved_read": 16090,
+      "reserved_written": 559,
+      "actual_read": 304,
+      "actual_written": 135
+    },
+    "restart": {
+      "passed": true,
+      "reconstructedJournalObject": true,
+      "nativeStatements": 0,
+      "cutoverNotReplayed": true,
+      "journalUnchanged": true
+    },
+    "unsafeStop": {
+      "passed": true,
+      "unknownOutcomeStopRetained": true,
+      "restartRetainsUnsafeStop": true,
+      "nativeStatements": 0,
+      "separateLocalSafetyFixture": true
+    },
+    "localHttpRequestsAttempted": 5,
+    "localHttpRequestsCompleted": 4,
+    "nativeStatements": 92,
+    "nativeRowsRead": 304,
+    "nativeRowsWritten": 135,
+    "nativeMetaMatchesCumulativeJournal": true,
+    "workerdReadyEvents": 2,
+    "runtimeStopped": true
+  },
+  "journalAndRates": {
+    "nativeD1BindingPresent": false,
+    "journalUsageFieldsAreSyntheticD1Metadata": true,
+    "localHttpRequestsCompleted": 4,
+    "cases": [
+      {
+        "case": "product",
+        "passed": true,
+        "requests": 206,
+        "reservedRead": 411,
+        "actualRead": 411,
+        "reservedWritten": 205205,
+        "actualWritten": 205,
+        "evidenceRows": 206,
+        "boundedEvidenceResponse": 128,
+        "legacyEvidenceRetained": true,
+        "schemaRetained": true,
+        "accountedTimeoutClosed": true,
+        "manualStopSurvivesRestart": true
+      },
+      {
+        "case": "bounded",
+        "passed": true,
+        "genericBudgetExhaustionRetained": true
+      },
+      {
+        "case": "legacy",
+        "passed": true,
+        "accountedLegacyBudgetStopMigrated": true,
+        "legacyEvidenceRetained": true,
+        "noCounterReset": true,
+        "reservedWritten": 1002,
+        "actualWritten": 2
+      },
+      {
+        "case": "frequency",
+        "passed": true,
+        "directRateAdmissions": 1161,
+        "ip600": true,
+        "credential240": true,
+        "oauth10": true,
+        "actorWrite60": true,
+        "actorRead120": true,
+        "actorSecurity120": true,
+        "otherActorAllowed": true,
+        "restartKeepsSaturation": true,
+        "nextMinuteAllowed": true,
+        "lateRequestsCannotResetClock": true,
+        "hashedStorageOnly": true,
+        "expiredSubjectCount": 1,
+        "emergencyRevocationSeparated": true,
+        "d1Operations": 0
+      }
+    ],
+    "runtimeStopped": true
+  },
+  "finalCardinality": {
+    "case": "cardinality",
+    "passed": true,
+    "initialMarkerlessRefresh": true,
+    "firstRefreshPersisted": true,
+    "restartSkipsFullScan": true,
+    "ordinaryReadNoRefresh": true,
+    "mutationFlagFalseAtDispatch": true,
+    "mutationRefreshPersisted": true,
+    "verifiedPostWriteRestart": true,
+    "stateRecordStorageVersion": 1,
+    "canonicalCutoverNativeBatches": 3,
+    "nativeBatches": 7,
+    "nativeStatements": 26,
+    "nativeRowsRead": 64,
+    "nativeRowsWritten": 18,
+    "nativeAttempts": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "journalReservedRead": 4963,
+    "journalActualRead": 64,
+    "journalReservedWritten": 26,
+    "journalActualWritten": 18,
+    "stopped": null
+  },
+  "projectsAndSubscriptions": {
+    "evidence": "projects-state-records-native-2026-10-06.json",
+    "passed": true,
+    "localHttpRequests": 79,
+    "nativeStatements": 711,
+    "nativeRowsRead": 707,
+    "nativeRowsWritten": 325,
+    "realAccounts": 0,
+    "runtimeStopped": true
+  },
+  "fixtureCorrections": [
+    {
+      "phase": "initial capacity",
+      "failure": "'state'",
+      "completedHttpResponses": 6,
+      "reason": "Harness incorrectly expected private settlement state in public webhook ACK; canonical HTTP correctly returns only received=true.",
+      "correction": "Verified paid/unpaid/replay via actual persisted user/authority state; corrected expected authority revisions12/14/14. Original signed paid receipt preserved, billing suffix continued without reseed/reset.",
+      "retainedEvidence": "/workspace/scratch/state-capacity-native-20261006-attempt1.json",
+      "offlineSyntheticRecoverySelects": 2
+    },
+    {
+      "phase": "final six-row cutover restart",
+      "failure": "[Errno 104] Connection reset by peer",
+      "completedHttpResponses": 1,
+      "reason": "TCP readiness observed a still-closing old listener before the new workerd process was ready. Migration itself completed and all numeric native meta survived.",
+      "correction": "Require the new process Wrangler Ready log before TCP admission; continue only no-replay/status/unsafe checks on original files.",
+      "retainedEvidence": "/workspace/scratch/state-cutover-final-native-20261006.json"
+    }
+  ],
+  "sourceSequencing": {
+    "initialCapacityProofBeforeFinalHardening": true,
+    "finalCompilerNativeSixthRowProof": true,
+    "finalUserEnumerationClampedTo16": true,
+    "finalTypedLargeAccountNativeCASAuthProof": true,
+    "bulk1494RecordSeedExecutedOnce": true,
+    "allCountersAndFactsRetained": true,
+    "sourceResetOrAccountingReset": false,
+    "capacityStage17UserPaginationIsHistorical": true
+  },
+  "executionTotals": {
+    "observedPythonNativeStatements": 2686,
+    "observedPythonNativeRowsRead": 94663,
+    "observedPythonNativeRowsWritten": 3705,
+    "localHttpRequestsAttempted": 109,
+    "localHttpResponsesRetained": 108,
+    "projectFixtureCliSchemaAndSeedExcludedFromPythonNativeMeta": true,
+    "offlineRecoverySelectsExcludedFromPythonNativeMeta": 2,
+    "syntheticJournalMetaExcludedFromNativeD1Totals": true,
+    "remoteRequests": 0,
+    "allRuntimesStopped": true
+  },
+  "runtime": {
+    "bundleSha256": "3c3fd5a4179230e21e018e28b0e735e7c4abd8fe8e4ff39d2fd6bb2ea3a2e260",
+    "workerdSha256": "eb449c84ddd55ea357dc73e6c1b50bd255ccdc5d1875544c162435b7bd6168b6",
+    "nativeAttemptsFabricated": false
+  },
+  "rerunnableScripts": [
+    "scripts/check-state-capacity-native-runtime.py",
+    "scripts/check-projects-native-runtime.py",
+    "scripts/check-preview-journal-native-runtime.py"
+  ]
+}

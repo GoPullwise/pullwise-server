@@ -10,7 +10,7 @@
   "sizesAreUtf8CompactJson": true,
   "followUpRepair": {
     "status": "local_source_repair_implemented",
-    "published": false,
+    "published": true,
     "baselineResultsPreserved": true,
     "storage": "existing app_state record:<kind>:<id> primary keys",
     "schemaVersionUnchanged": 5,
@@ -19,7 +19,10 @@
     "recordPageBoundBytes": 8388608,
     "migration": "one explicit atomic legacy copy/cutover with all-observed-row CAS and same-journal marker",
     "semanticClosure": "empty fresh init, strict legacy decoding and strict typed full-record writes; no arbitrary normalized imports",
-    "finalNativeAndPublicationEvidenceRequired": true
+    "finalNativeAndPublicationEvidenceRequired": true,
+    "previewVersion": "ab500595-328d-4fc2-b897-7c6137659c92",
+    "publicationEvidence": "state-records-preview-release-2026-10-06.json",
+    "nativeEvidence": "state-records-native-2026-10-06.json"
   },
   "results": {
     "ordinaryUsersGlobalMap": {

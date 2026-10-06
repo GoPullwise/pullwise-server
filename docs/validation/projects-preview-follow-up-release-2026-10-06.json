@@ -51,7 +51,7 @@
     "verifiedReadCardinalityRescan": false
   },
   "realAccountAcceptance": {
-    "status": "pending separate consented run",
+    "status": "historical plan: pending at this earlier publication; subsequent results recorded separately below",
     "accounts": [
       "DFerryman",
       "SanChai20"
@@ -65,5 +65,25 @@
     "temporaryWindowMinutes": 30,
     "modelCalls": 0,
     "realPayments": 0
+  },
+  "subsequentAccountStoragePublication": {
+    "sourceServer": "58f78d11dbe60141175593e379cbb40c977d01e9",
+    "previewServerVersion": "ab500595-328d-4fc2-b897-7c6137659c92",
+    "evidence": "state-records-preview-release-2026-10-06.json",
+    "serverFullTests": 893
+  },
+  "subsequentRealAccountAcceptance": {
+    "status": "listed workflows complete across preserved baseline and separate passed focused run",
+    "baseline": "projects-two-real-users-baseline-2026-10-06.json",
+    "baselineOverallPassed": false,
+    "baselineChecksPassed": 10,
+    "focused": "projects-two-real-users-focused-2026-10-06.json",
+    "focusedOverallPassed": true,
+    "focusedChecksPassed": 6,
+    "qaCleanupComplete": true,
+    "temporaryHelperCleanup": "real-account-helper-cleanup-2026-10-06.json",
+    "realPayments": 0,
+    "credentialPersistence": false,
+    "limitations": "Admin project reads and stale-key/member-removal denial use actual REST rather than all-UI actions. Billing provider outcomes are local signed synthetic/native checks, not live charges."
   }
 }
