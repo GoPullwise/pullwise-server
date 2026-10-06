@@ -164,6 +164,7 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
     if method == "POST":
         if (not isinstance(body, dict) or set(body) - {"githubRepoId", "description"}
                 or type(body.get("githubRepoId")) is not int or body["githubRepoId"] <= 0
+                or body["githubRepoId"] > 9007199254740991
                 or not isinstance(body.get("description", ""), str)
                 or len(body.get("description", "")) > 2000):
             return _error(422, "INVALID_INPUT")
@@ -171,7 +172,8 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
         if (not isinstance(body, dict) or not body or set(body) - {"description", "status"}
                 or ("description" in body and (not isinstance(body["description"], str)
                     or len(body["description"]) > 2000))
-                or ("status" in body and body["status"] not in {"active", "archived"})):
+                or ("status" in body and (not isinstance(body["status"], str)
+                    or body["status"] not in {"active", "archived"}))):
             return _error(422, "INVALID_INPUT")
     if method == "GET":
         if item_id:
@@ -233,6 +235,10 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
     if item_id and existing is None:
         return _error(404, "NOT_FOUND")
     if method == "POST":
+        duplicate = await binding.prepare("""SELECT id FROM ledger_projects
+            WHERE owner_id=? AND github_repo_id=?""").bind(user["id"], body["githubRepoId"]).first()
+        if duplicate is not None:
+            return _error(409, "PROJECT_CONFLICT")
         repos = await _live_repos(user, gateway)
         repo_id = body["githubRepoId"]
         if repo_id not in repos:
@@ -314,6 +320,10 @@ async def _categories(binding, method, item_id, headers, body, now, scope):
     if method == "POST":
         category_id = "cat_" + uuid.uuid4().hex
         name = body["name"].strip()
+        duplicate = await binding.prepare("""SELECT id FROM expense_categories
+            WHERE owner_id=? AND lower(name)=lower(?) AND archived_at IS NULL""").bind(user["id"], name).first()
+        if duplicate is not None:
+            return _error(409, "CATEGORY_CONFLICT")
         commands = [_write_guard(binding, proof, user["id"], now),
             binding.prepare("""INSERT INTO expense_categories(id,owner_id,name,color,archived_at,
                 revision,created_at,updated_at) VALUES(?,?,?,?,NULL,1,?,?)""").bind(
@@ -339,6 +349,12 @@ async def _categories(binding, method, item_id, headers, body, now, scope):
     name = body["name"].strip() if method == "PATCH" else existing["name"]
     color = body.get("color") if method == "PATCH" else existing["color"]
     archived = stamp if method == "DELETE" else None
+    if method == "PATCH":
+        duplicate = await binding.prepare("""SELECT id FROM expense_categories
+            WHERE owner_id=? AND lower(name)=lower(?) AND archived_at IS NULL AND id<>?""").bind(
+                user["id"], name, item_id).first()
+        if duplicate is not None:
+            return _error(409, "CATEGORY_CONFLICT")
     commands = [_write_guard(binding, proof, user["id"], now),
         binding.prepare("""UPDATE expense_categories SET name=?,color=?,archived_at=?,
             revision=revision+1,updated_at=? WHERE id=? AND owner_id=? AND revision=?

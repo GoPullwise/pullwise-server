@@ -6,6 +6,10 @@ from collections.abc import Mapping, Sequence
 
 
 MAX_REQUEST_BYTES = 48 * 1024
+# Jev also limits state plus the longest question to 32k tokens. Keep a
+# separate UTF-8 envelope with headroom for provider-side formatting; the
+# complete-request byte limit alone does not constrain this smaller window.
+MAX_STATE_QUESTION_BYTES = 24 * 1024
 MAX_RESPONSE_BYTES = 1024 * 1024
 MAX_QUESTIONS = 48
 DEFAULT_JEV_MODEL = "jev-1.13.0"
@@ -112,7 +116,17 @@ def build_request(
         raise ValueError("request must be finite JSON data") from error
     if len(encoded) > MAX_REQUEST_BYTES:
         raise ValueError(f"request byte limit is {MAX_REQUEST_BYTES}")
-    return json.loads(encoded)
+    state_bytes = len(_canonical_bytes(state))
+    if any(state_bytes + len(_canonical_bytes(question)) > MAX_STATE_QUESTION_BYTES
+           for question in normalized_questions.values()):
+        raise ValueError(f"state plus question byte limit is {MAX_STATE_QUESTION_BYTES}")
+    normalized = json.loads(encoded)
+    # Option order is semantically visible to Jev. Preserve caller ordering so
+    # category ordering and explicit order-bias evaluations survive canonical
+    # JSON normalization. Identical input still yields an identical request.
+    for question_id, question in normalized_questions.items():
+        normalized["questions"][question_id]["criteria"] = dict(question["criteria"])
+    return normalized
 
 
 def _probability(value: object, field: str) -> float:

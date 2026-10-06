@@ -46,7 +46,7 @@ def wire_request(client, body, *, path='/api/v1/expenses'):
 
 
 @pytest.mark.parametrize('field', ['note', 'purpose', 'unit', 'quantity'])
-@pytest.mark.parametrize('surrogate', ['\ud800', '\udfff'], ids=['high', 'low'])
+@pytest.mark.parametrize('surrogate', ['\ud800', '\udfff', '\x00'], ids=['high', 'low', 'nul'])
 def test_escaped_lone_surrogate_rejected_before_jev_and_persistent_meter(preview, field, surrogate):
     client = payload_fixture.session(preview)
     status, response = wire_request(client, expense('cat_host', **{field: surrogate}))
@@ -67,7 +67,9 @@ def test_escaped_valid_emoji_round_trips_without_stopping_preview(preview):
 
 @pytest.mark.parametrize('path,body,expected', [
     ('/api/v1/categories', {'name': '\ud800'}, (422, {'error': {'code': 'INVALID_INPUT'}})),
+    ('/api/v1/categories', {'name': '\x00Hosting'}, (422, {'error': {'code': 'INVALID_INPUT'}})),
     ('/api-keys', {'name': '\udfff'}, (400, {'error': {'code': 'INVALID_REQUEST'}})),
+    ('/api-keys', {'name': '\x00Key'}, (400, {'error': {'code': 'INVALID_REQUEST'}})),
 ])
 def test_invalid_unicode_in_other_write_adapters_cannot_stop_preview(preview, path, body, expected):
     client = payload_fixture.session(preview)

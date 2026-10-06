@@ -114,6 +114,35 @@ class LedgerDeployContractTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("local checks", result.stderr.lower())
 
+    def test_release_uses_pinned_python_package_builder(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            repo = folder / "repo"
+            scripts = repo / "scripts"
+            worker = repo / "cloudflare/server"
+            scripts.mkdir(parents=True)
+            worker.mkdir(parents=True)
+            shutil.copyfile(SCRIPT, scripts / SCRIPT.name)
+            (scripts / "check-ledger-s01.py").symlink_to(ROOT / "scripts/check-ledger-s01.py")
+            (worker / "sync_server_modules.py").write_text("print('Fixture source sync')\n")
+            cli = worker / "node_modules/wrangler/wrangler-dist/cli.js"
+            cli.parent.mkdir(parents=True)
+            cli.touch()
+            fake_uv = folder / "uv"
+            fake_uv.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$PWD\" \"$@\"\n")
+            fake_uv.chmod(0o755)
+            result = subprocess.run(
+                [BASH, "scripts/deploy-cloudflare.sh", "--environment", "preview",
+                 "--execute", "--local-checks-passed"], cwd=repo,
+                text=True, capture_output=True, check=False,
+                env={**os.environ, "PULLWISE_PYTHON": Path(sys.executable).as_posix(),
+                     "PATH": str(folder) + os.pathsep + os.environ["PATH"]},
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(worker.as_posix(), result.stdout)
+            self.assertIn("run\n--frozen\n--python\n3.14.2\npywrangler\ndeploy\n--config\nwrangler.preview.jsonc", result.stdout)
+            self.assertNotIn("d1 migrations apply", result.stdout)
+
     def test_preview_and_production_are_separate_and_unconfigured(self):
         configs = []
         for environment in ("preview", "production"):

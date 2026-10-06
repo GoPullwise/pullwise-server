@@ -12,7 +12,7 @@ from typing import Any, Mapping
 
 from .api_key_dto_rules import (
     api_key_public_payload, parse_api_key_restrictions,
-    requested_api_key_scopes, _text, _timestamp,
+    requested_api_key_scopes, _text,
 )
 
 from .cloudflare_principal import (
@@ -90,10 +90,18 @@ async def create_api_key(*, binding: Any, headers: Mapping[str, object],
         restrictions = parse_api_key_restrictions(body.get("restrictions"))
     except ValueError:
         return 400, {"error": {"code": "INVALID_RESTRICTION"}}
-    expires_at = _timestamp(body.get("expiresAt") or body.get("expires_at"))
-    raw_seconds = body.get("expiresInSeconds") or body.get("expires_in_seconds")
+    raw_expiry = body.get("expiresAt", body.get("expires_at"))
+    expires_at = None
+    if raw_expiry is not None:
+        if not (type(raw_expiry) is int or isinstance(raw_expiry, str)
+                and len(raw_expiry) <= 16 and raw_expiry.isascii() and raw_expiry.isdigit()):
+            return 400, {"error": {"code": "INVALID_REQUEST"}}
+        expires_at = int(raw_expiry)
+        if not 0 <= expires_at <= 9007199254740991:
+            return 400, {"error": {"code": "INVALID_REQUEST"}}
+    raw_seconds = body.get("expiresInSeconds", body.get("expires_in_seconds"))
     if raw_seconds is not None:
-        if type(raw_seconds) is not int or raw_seconds < 0:
+        if type(raw_seconds) is not int or not 0 <= raw_seconds <= 9007199254740991 - now:
             return 400, {"error": {"code": "INVALID_REQUEST"}}
         if raw_seconds:
             expires_at = now + raw_seconds

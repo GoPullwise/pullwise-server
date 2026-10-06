@@ -111,20 +111,49 @@ class PlanLimitedD1:
         if jev_delta and plan != "max":
             raise PlanLimitError(403, "MAX_REQUIRED")
         period = datetime.fromtimestamp(self.now, timezone.utc).strftime("%Y-%m")
+        minute = self.now // 60
+        usage = await self.binding.prepare("""SELECT projects,records,month,writes,minute,
+            minute_writes,jev_reserved_microusd FROM ledger_plan_usage WHERE owner_id=?""").bind(owner).first()
+        if usage and (period < usage["month"] or minute < usage["minute"]):
+            raise PlanLimitError(409, "QUOTA_WINDOW_CHANGED")
+        if usage:
+            projects, records = usage["projects"], usage["records"]
+        elif project_delta or record_delta:
+            # Accounts created before the usage table retain their capacity
+            # history, including archived projects and removed expenses.
+            counts = await self.binding.prepare("""SELECT
+                (SELECT COUNT(*) FROM ledger_projects WHERE owner_id=?) AS projects,
+                (SELECT COUNT(*) FROM expenses WHERE owner_id=?) AS records""").bind(owner, owner).first()
+            projects, records = counts["projects"], counts["records"]
+        else:
+            projects = records = 0
+        month_writes = usage["writes"] if usage and usage["month"] == period else 0
+        minute_writes = usage["minute_writes"] if usage and usage["minute"] == minute else 0
+        # Expected business denials must not dispatch a failing native batch:
+        # its missing accounting would permanently stop the preview journal.
+        # The original UPSERT remains the authority for concurrent requests.
+        if project_delta and projects + project_delta > limits["projects"]:
+            raise PlanLimitError(403, "PROJECT_LIMIT")
+        if record_delta and records + record_delta > limits["records"]:
+            raise PlanLimitError(403, "RECORD_LIMIT")
+        if write_delta and minute_writes + write_delta > limits["writesPerMinute"]:
+            raise PlanLimitError(429, "WRITE_RATE_LIMIT")
+        if write_delta and month_writes + write_delta > limits["writesPerMonth"]:
+            raise PlanLimitError(429, "MONTHLY_WRITE_LIMIT")
         if jev_delta:
             cap = usd_micros(limits["jevMonthlyBudgetUsd"])
             if jev_delta > cap:
                 raise PlanLimitError(429, "JEV_BUDGET_LIMIT")
-            usage = await self.binding.prepare("""SELECT month,jev_reserved_microusd
-                FROM ledger_plan_usage WHERE owner_id=?""").bind(owner).first()
             if usage and usage["month"] == period and usage["jev_reserved_microusd"] + jev_delta > cap:
                 # Deterministic optional exhaustion must not dispatch a failing
                 # D1 batch. The atomic UPSERT still fences concurrent admission.
                 raise PlanLimitError(429, "JEV_BUDGET_LIMIT")
         counter = self.binding.prepare(_USAGE_SQL).bind(owner, owner, owner, project_delta,
-            owner, owner, record_delta, period, write_delta, self.now // 60, write_delta, jev_delta,
-            limits["projects"], limits["records"], limits["writesPerMinute"], limits["writesPerMonth"],
-            usd_micros(limits["jevMonthlyBudgetUsd"]), project_delta, record_delta, jev_delta, period, self.now // 60)
+            owner, owner, record_delta, period, write_delta, minute, write_delta, jev_delta,
+            limits["projects"], limits["records"],
+            limits["writesPerMinute"] if write_delta else max(limits["writesPerMinute"], minute_writes),
+            limits["writesPerMonth"] if write_delta else max(limits["writesPerMonth"], month_writes),
+            usd_micros(limits["jevMonthlyBudgetUsd"]), project_delta, record_delta, jev_delta, period, minute)
         try:
             # Keep original result indexes; domain callers rely on batch offsets.
             result = await self.binding.batch([raw[0], counter, *raw[1:]])

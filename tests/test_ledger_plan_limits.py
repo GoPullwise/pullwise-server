@@ -210,3 +210,63 @@ def test_key_revocation_is_not_blocked_by_an_exhausted_write_allowance(setup):
     with fixture.store.connect() as db:
         assert db.execute("SELECT revoked_at FROM api_keys WHERE id='key-local'").fetchone()[0] == fixture.now
         assert db.execute("SELECT writes FROM ledger_plan_usage").fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("allowance,kind,code", [
+    ("projects", "project", "PROJECT_LIMIT"),
+    ("records", "record", "RECORD_LIMIT"),
+    ("writesPerMinute", "project", "WRITE_RATE_LIMIT"),
+    ("writesPerMonth", "project", "MONTHLY_WRITE_LIMIT"),
+])
+def test_known_commercial_exhaustion_never_dispatches_a_failing_batch(setup, allowance, kind, code):
+    fixture, frozen = setup
+    with fixture.store._immediate() as db:
+        db.execute("INSERT INTO expense_categories(id,owner_id,name,created_at,updated_at) VALUES('category','owner','c','local','local')")
+    policy = default_policy()
+    policy["pro"][allowance] = 1
+    raw = D1ShapedSQLite(fixture.store)
+    limited = PlanLimitedD1(raw, policy=policy, now=fixture.now)
+    write(limited, frozen, fixture, 1, kind=kind)
+    batches = raw.batch_count
+    with pytest.raises(PlanLimitError, match=code):
+        write(limited, frozen, fixture, 2, kind=kind)
+    assert raw.batch_count == batches
+
+
+def test_initial_capacity_check_includes_legacy_archived_projects(setup):
+    fixture, frozen = setup
+    with fixture.store._immediate() as db:
+        db.execute("""INSERT INTO ledger_projects(id,owner_id,github_repo_id,github_full_name,
+            status,created_at,updated_at) VALUES('old','owner',100,'o/old','archived','local','local')""")
+    policy = default_policy()
+    policy["pro"]["projects"] = 1
+    raw = D1ShapedSQLite(fixture.store)
+    with pytest.raises(PlanLimitError, match="PROJECT_LIMIT"):
+        write(PlanLimitedD1(raw, policy=policy, now=fixture.now), frozen, fixture, 1)
+    assert raw.batch_count == 0
+    with fixture.store.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM ledger_plan_usage").fetchone()[0] == 0
+
+
+def test_internal_jev_reservation_survives_lowered_business_write_caps(setup):
+    fixture, _ = setup
+    with fixture.store._immediate() as db:
+        db.executescript((Path(__file__).resolve().parents[1] /
+                          "cloudflare/server/migrations/0003_ledger_suggestions.sql").read_text())
+        user = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])["owner"]
+        user["billing"] = {"plan": "max", "status": "active"}
+        frozen = json.dumps(user, separators=(",", ":"))
+        db.execute("UPDATE app_state SET payload=? WHERE name='users'", (json.dumps({"owner": user}),))
+    policy = default_policy()
+    raw = D1ShapedSQLite(fixture.store)
+    limited = PlanLimitedD1(raw, policy=policy, now=fixture.now)
+    write(limited, frozen, fixture, 1)
+    write(limited, frozen, fixture, 2)
+    policy["max"].update(writesPerMinute=1, writesPerMonth=1)
+    write(limited, frozen, fixture, 3, kind="jev")
+    with fixture.store.connect() as db:
+        assert tuple(db.execute("SELECT writes,minute_writes,jev_reserved_microusd FROM ledger_plan_usage").fetchone()) == (2, 2, 2753)
+    batches = raw.batch_count
+    with pytest.raises(PlanLimitError, match="WRITE_RATE_LIMIT"):
+        write(limited, frozen, fixture, 4)
+    assert raw.batch_count == batches

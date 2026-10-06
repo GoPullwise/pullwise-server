@@ -5,7 +5,7 @@ import json
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.parse import urlsplit, parse_qs
+from urllib.parse import urlsplit, parse_qs, unquote
 
 import pytest
 
@@ -38,12 +38,14 @@ def application(*, same_site="Lax", catalog_failure=None):
         calls.append("billing")
         return 200, {"accepted": True}
     namespace = {"Response": Response, "time": time, "urlsplit": urlsplit,
-        "parse_qs": parse_qs, "json": json, "PlanLimitError": PlanLimitError,
+        "parse_qs": parse_qs, "unquote": unquote, "json": json, "PlanLimitError": PlanLimitError,
         "handle_identity_request": identity, "handle_ledger_request": ledger,
         "read_or_refresh_catalog": catalog,
         "handle_billing_mutation": billing, "validate_json_unicode": validate_json_unicode,
         "CsvExport": CsvExport,
         "WorkerGitHubGateway": lambda _: None, "WorkerCreemGateway": lambda _: None}
+    target = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_request_target")
+    exec(compile(ast.Module(body=[target], type_ignores=[]), str(source), "exec"), namespace)
     node = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "_Application")
     exec(compile(ast.Module(body=[node], type_ignores=[]), str(source), "exec"), namespace)
     instance = namespace["_Application"].__new__(namespace["_Application"])
@@ -92,3 +94,25 @@ def test_preview_catalog_diagnostics_never_return_provider_exception_text():
     assert response.status == 503
     assert "unregistered_secret_value" not in json.dumps(response.payload)
     assert "transportDiagnostic" not in response.payload["error"]
+
+
+@pytest.mark.parametrize("path,status,code", [
+    ("/api/v1/expenses?cursor=" + "x" * 8193, 413, "REQUEST_TOO_LARGE"),
+    ("/api/v1/expenses/" + "x" * 8193, 413, "REQUEST_TOO_LARGE"),
+    ("/api/v1/expenses/" + "%61" * 3000, 413, "REQUEST_TOO_LARGE"),
+    ("/api/v1/expenses?cursor=%ED%A0%80", 422, "INVALID_INPUT"),
+    ("/api/v1/expenses?cursor=%00", 422, "INVALID_INPUT"),
+    ("/api/v1/expenses/%00", 422, "INVALID_INPUT"),
+    ("/api/v1/expenses?" + "&".join("x=" for _ in range(101)), 422, "INVALID_INPUT"),
+])
+def test_invalid_url_inputs_are_rejected_before_application_dispatch(path, status, code):
+    app, calls = application()
+    response = asyncio.run(app.fetch(request(path, method="GET")))
+    assert response.status == status and response.payload == {"error": {"code": code}}
+    assert calls == []
+
+
+def test_valid_encoded_emoji_query_reaches_application():
+    app, calls = application()
+    response = asyncio.run(app.fetch(request("/api/v1/expenses?cursor=%F0%9F%98%80", method="GET")))
+    assert response.status == 204 and calls == ["ledger"]

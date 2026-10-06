@@ -31,14 +31,17 @@ fi
 
 cd "$repo_root"
 "${PULLWISE_PYTHON:-python3}" scripts/check-ledger-s01.py --environment "$environment"
-config="cloudflare/server/wrangler.${environment}.jsonc"
+config="wrangler.${environment}.jsonc"
 wrangler="cloudflare/server/node_modules/wrangler/wrangler-dist/cli.js"
 if ((execute)); then
   [[ -f "$wrangler" ]] || { echo "Pinned local Wrangler installation is missing." >&2; exit 2; }
-  echo "Deploying paused Server only. D1 migrations remain outside this command."
+  command -v uv >/dev/null || { echo "uv is required for pinned Python Worker packaging." >&2; exit 2; }
+  "${PULLWISE_PYTHON:-python3}" cloudflare/server/sync_server_modules.py
+  echo "D1 migrations remain outside this command. Runtime switches stay as configured."
   echo "Deploying Server Worker for $environment"
-  node "$wrangler" deploy --config "$config"
+  cd cloudflare/server
+  uv run --frozen --python 3.14.2 pywrangler deploy --config "$config"
 else
   echo "Dry run only. After local verification, --execute --local-checks-passed would run:"
-  echo "node $wrangler deploy --config $config"
+  echo "cd cloudflare/server && uv run --frozen --python 3.14.2 pywrangler deploy --config $config"
 fi

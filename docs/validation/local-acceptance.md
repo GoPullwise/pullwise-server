@@ -1,6 +1,65 @@
 # Current local acceptance
 
-Updated 2026-10-02. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
+Updated 2026-10-06. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
+
+## Resumed product audit (2026-10-06)
+
+The user's current request explicitly supersedes the historical stop-testing
+instruction: inspect, repair, verify, push main and publish, then perform preview
+user acceptance. The implementation and source checks below are complete;
+publication and real-provider/browser results are recorded separately.
+
+- Expected project/category conflicts and deterministic project, record and
+  write limits return business errors before a failing native SQL dispatch.
+  Preview wrapper regressions verify the journal stays healthy. Atomic credential,
+  usage UPSERT and uniqueness fences remain authoritative for concurrency.
+- NUL JSON, invalid/oversized decoded and raw URL paths/query values, invalid
+  project filters and unsafe/noninteger API-key expiry fail before D1 admission.
+  Raw percent-encoded paths cannot bypass the 8 KiB parameter envelope.
+- Jev Choice option order is preserved; state plus the longest question has its
+  own conservative byte envelope. The gateway revalidates requests, closes
+  rejected/interrupted bodies and rejects missing/blank credentials. Versioned
+  questions state the task and uncertainty boundaries more precisely.
+- [TypeSafe review](typesafe-jev-review.md) documents official API/model sources,
+  suitable classification tasks and 36 agent-authored en/zh evaluation inputs.
+  Gold labels are not model predictions; no live quality result is claimed.
+- The deployment script uses locked pywrangler/Python packaging, source mirror
+  generation and the pinned local Wrangler. Unused TypeSafe SDK/httpx2 runtime
+  dependencies were removed; the native gateway remains the Worker transport.
+  Preview/prod isolation, database IDs, journal ceilings and runtime flags are
+  unchanged. No migration is needed for these repairs.
+
+Final Python 3.10.12 reference verification passed **476 tests**, including the
+release-command fixture, actual preview-wrapper denials and new input boundaries.
+Source sync/import closure, default/preview/production static checks and shell
+syntax passed. Web passed **339 tests** and eight finite actual local Chromium
+cases on desktop/phone; its companion distinguishes mocked APIs from providers.
+
+One preview read-only journal GET before publication returned: reserved
+**24,599 read / 416 written**, observed **17,557 read / 251 written**,
+schema ready, no stop, ceilings **100,000 read / 1,000 written**. It did not use
+D1 or reset accounting. The old cumulative request gate was already removed;
+Shared Pool owner isolation and explicit key permission remain product security.
+Production D1 stays paused, and both Jev flags stay off pending real quality/runtime
+acceptance. Current Cloudflare CLI authorization is being completed through OAuth.
+
+Four migrations passed against a fresh local D1 directory only. The first local
+Python Worker startup failed fetching its runtime bundle because direct network
+access is unavailable. Recovery downloaded the official 13,727,600-byte
+`pyodide_314.0.6_2026-08-17_6.capnp.bin` through the inherited proxy into a
+temporary runtime cache; SHA-256 matched the embedded Workerd integrity value.
+No route/proxy policy or product source was changed for this recovery.
+
+The final actual Python Worker/D1 fixture passed **17 finite loopback HTTP
+requests**: Cookie/Bearer reads, 251-row paginated CSV and spreadsheet-formula
+escaping, category/expense creation, exact replay, PATCH and stale 412,
+three report endpoints, repeated soft deletion/404 and recalculated totals.
+The fixture, its credentials and migrations stayed local; remote D1/provider
+calls were zero. Preview and production locked packaging both passed, with
+**430.59 KiB upload / 99.84 KiB gzip** after removing unused dependencies.
+Publication evidence follows when completed.
+
+The historical evidence below describes earlier sources and authorization.
 
 ## Product audit and automatic Max assistance (2026-10-02)
 

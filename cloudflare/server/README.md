@@ -8,27 +8,32 @@
 
 Migrations apply in order: `0001_ledger.sql`, `0002_identity_billing_keys.sql`,
 `0003_ledger_suggestions.sql`, `0004_ledger_plan_usage.sql`. They remain
-unexecuted remotely. Preview and production use different D1 databases. Health
+unexecuted in production; preview has initialized the canonical schema behind
+its existing journal. Preview and production use different D1 databases. Health
 requires all 14 tables. The deploy script never applies remote migrations.
 
 ## Configuration
 
-Preview now targets `preview-api.pull-wise.com` and a separate empty database,
-with the user's test Creem product IDs and test Secret bindings. Its GitHub
-provider fields remain unconfigured because the user waived real GitHub tests.
-Production uses
+Preview targets `preview-api.pull-wise.com` and its isolated ledger database,
+with test Creem product IDs/Secrets and the GoPullwise Preview GitHub App
+(`gopullwise-preview`). Its OAuth and installation callbacks run through
+`https://preview.pull-wise.com/api/`. Production uses
 the approved `api.pull-wise.com` domain and its distinct, initially empty D1
 database. Its GitHub App slug, required Secret names and product bindings have
 been checked; provider validity and real flows remain unverified.
 The production Worker `pullwise-server-production` uses the exact zone route
 `api.pull-wise.com/*`; the existing proxied DNS record is retained. Web already
 proxies to this origin. An empty database binding is not a completed migration.
-Both remote configs set `PULLWISE_D1_ACCESS_ENABLED=0`: all requests receive
-503 `D1_ACCESS_PAUSED` before any DB/provider access. Missing/invalid switch
-values also fail closed. Do not enable remote access until bounded validation
-controls and provider configuration pass. This switch is not a metered quota.
+Preview has `PULLWISE_D1_ACCESS_ENABLED=1` and
+`PULLWISE_PREVIEW_PRODUCT_ENABLED=1`. Its fixed ValidationBudget journal
+reserves SQL bounds before dispatch, with cumulative 100,000 reads / 1,000 writes
+and no reset endpoint. The cumulative request-count gate was already removed.
+Production retains `PULLWISE_D1_ACCESS_ENABLED=0`: requests receive
+503 `D1_ACCESS_PAUSED` before DB/provider access. Missing/invalid switch values
+also fail closed. This switch is a pause, not a metered quota.
 
-Supply `PULLWISE_GITHUB_CLIENT_ID`, `PULLWISE_GITHUB_CLIENT_SECRET`,
+Keep the nonsecret `PULLWISE_GITHUB_CLIENT_ID` in the environment config. Supply
+`PULLWISE_GITHUB_CLIENT_SECRET`,
 `PULLWISE_GITHUB_TOKEN_KEY`, `PULLWISE_CREEM_API_KEY` and
 `PULLWISE_CREEM_WEBHOOK_SECRET` through Cloudflare Secrets. The GitHub token
 key is 32 cryptographically random bytes encoded as unpadded base64url; reuse
@@ -62,9 +67,38 @@ The Web Worker removes its first `/api` prefix. The browser sends `/api/api/v1/*
 From the Server repository root:
 
 ```bash
+python3 -m pytest tests
 python3 scripts/check-ledger-s01.py --allow-placeholders
+python3 cloudflare/server/sync_server_modules.py
 python3 cloudflare/server/sync_server_modules.py --check
 bash -n scripts/deploy-cloudflare.sh
+cd cloudflare/server && npm ci && cd ../..
+bash scripts/deploy-cloudflare.sh --environment preview --execute --local-checks-passed
 ```
 
-The [local acceptance record](../../docs/validation/local-acceptance.md) records all current tests and outstanding runtime checks. All Wrangler/workerd and D1 commands, including local probes, are paused until explicit user authorization. Do not add cron triggers. `scripts/deploy-cloudflare.sh` prints intended steps by default and requires explicit execution for remote D1 migration and Worker deployment. Production needs separate review of migration, config and rollback.
+The release script uses locked Python 3.14.2 / pywrangler packaging with the
+locally pinned Wrangler, and preserves each environment's runtime switches.
+It never runs migrations. The Worker uses the native bounded TypeSafe gateway;
+the optional local SDK helper is not bundled as an unused runtime dependency.
+The current request authorizes these checks and deployments. Do not add cron
+triggers. The [acceptance record](../../docs/validation/local-acceptance.md)
+separates local mocks, native runtime evidence, publication and real providers.
+
+## Moving the verified release to production
+
+Deploy the same reviewed source with `--environment production`. Keep production
+paused until its schema, real GitHub App callbacks, live Creem products/Secrets,
+signed webhook flow and end-to-end acceptance are verified. Review migration
+counts and rollback before executing production SQL; the current database is
+documented as empty/unmigrated, not as a copy of preview.
+
+Use production's existing database, token-encryption key and provider identities.
+Never promote preview sessions, test payment facts or test App credentials.
+The Web production config binds `pullwise-server-production`; preview binds
+`pullwise-server-preview`. Cookie callbacks and allowed origins must match each
+Web host. Jev may be enabled only after the labeled en/zh and Worker transport
+gates pass. Production activation remains separate from code publication.
+
+Before each release, record the currently deployed version for rollback. If
+runtime acceptance fails, restore that version without resetting the preview
+journal or automatically retrying migrations, payments or uncertain model calls.

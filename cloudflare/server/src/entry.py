@@ -2,7 +2,7 @@
 import asyncio
 import json
 import time
-from urllib.parse import urlsplit, parse_qs
+from urllib.parse import urlsplit, parse_qs, unquote
 
 from workers import DurableObject, Response, WorkerEntrypoint
 
@@ -28,6 +28,31 @@ from pullwise_server.ledger_plan_policy import parse_policy
 from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initialize_product, reconcile_schema_reads
 from pullwise_server.cloudflare_native_d1 import NativeD1
 from pullwise_server.json_input import validate_json_unicode
+
+
+def _request_target(request):
+    """Bound decoded URL inputs before authentication, providers or D1."""
+    raw_url = str(request.url)
+    try:
+        if len(raw_url.encode("utf-8")) > 32768:
+            return None, Response.json({"error": {"code": "REQUEST_TOO_LARGE"}},
+                status=413, headers={"Cache-Control": "no-store"})
+        parsed = urlsplit(raw_url)
+        decoded_path = unquote(parsed.path, encoding="utf-8", errors="strict")
+        params = parse_qs(parsed.query, encoding="utf-8", errors="strict",
+            keep_blank_values=True, max_num_fields=100)
+        validate_json_unicode([decoded_path, params])
+        # Routing retains the raw path, so path IDs must satisfy the SQL
+        # envelope in that representation as well as after URL decoding.
+        texts = [parsed.path, decoded_path, *params.keys(),
+            *(value for values in params.values() for value in values)]
+        if any(len(value.encode("utf-8")) > 8192 for value in texts):
+            return None, Response.json({"error": {"code": "REQUEST_TOO_LARGE"}},
+                status=413, headers={"Cache-Control": "no-store"})
+    except (ValueError, UnicodeError):
+        return None, Response.json({"error": {"code": "INVALID_INPUT"}},
+            status=422, headers={"Cache-Control": "no-store"})
+    return (parsed.path, params), None
 
 
 def _csv_stream(export):
@@ -63,6 +88,10 @@ class _Application:
         if str(getattr(self.env, "PULLWISE_D1_ACCESS_ENABLED", "0")) != "1":
             return Response.json({"error": {"code": "D1_ACCESS_PAUSED"}}, status=503,
                                  headers={"Cache-Control": "no-store"})
+        target, invalid_target = _request_target(request)
+        if invalid_target is not None:
+            return invalid_target
+        path, params = target
         raw_products = getattr(self.env, "PULLWISE_CREEM_PRODUCT_IDS_JSON", "")
         try:
             products = product_bindings(json.loads(raw_products)) if raw_products else {}
@@ -85,7 +114,6 @@ class _Application:
             "Origin": request.headers.get("origin") or "",
             "Referer": request.headers.get("referer") or "",
         }
-        path = urlsplit(request.url).path
         now = int(time.time())
         self.binding.now = now
         trusted_origins = {value.strip() for value in (
@@ -94,7 +122,7 @@ class _Application:
             if value.strip() and value.strip() != "*"}
         try:
             identity = await handle_identity_request(
-                method=request.method, path=path, params=parse_qs(urlsplit(request.url).query),
+                method=request.method, path=path, params=params,
                 headers=headers, binding=self.binding,
                 gateway=WorkerGitHubGateway(self.env), now=now,
                 app_url=getattr(self.env, "PULLWISE_APP_URL", ""),
@@ -140,7 +168,7 @@ class _Application:
                 result = await handle_ledger_request(
                     binding=self.binding, gateway=WorkerGitHubGateway(self.env),
                     method=request.method, path=path,
-                    headers=headers, params=parse_qs(urlsplit(request.url).query),
+                    headers=headers, params=params,
                     body=body, now=now, suggestion_gateway=self.jev_gateway)
                 status, payload = result if result is not None else (404, {"error": {"code": "NOT_FOUND"}})
             except PlanLimitError as error:
@@ -211,7 +239,7 @@ class _Application:
         status, payload = await handle_http_request(
             method=request.method,
             path=path,
-            params=parse_qs(urlsplit(request.url).query),
+            params=params,
             headers=headers,
             read_body=read_body,
             binding=self.binding,
@@ -361,7 +389,10 @@ class ValidationBudget(DurableObject):
             return _unavailable(journal.snapshot()["stopped"])
 
     async def _product_fetch(self, request):
-        path = urlsplit(request.url).path
+        target, invalid_target = _request_target(request)
+        if invalid_target is not None:
+            return invalid_target
+        path, _ = target
         if path == "/_preview/budget" and request.method == "GET":
             state = self._journal().snapshot()
             return Response.json({"limits": {"rowsRead": self._journal().read_ceiling, "rowsWritten": WRITE_CEILING},

@@ -54,7 +54,8 @@ def _input(body, *, allow_missing_category=False):
     if not isinstance(body, dict) or set(body) - fields or not fields.difference(optional) <= set(body):
         raise ValueError("fields")
     target = body["target"]
-    if (not isinstance(target, dict) or target.get("kind") not in {"project", "shared"}
+    if (not isinstance(target, dict) or not isinstance(target.get("kind"), str)
+            or target["kind"] not in {"project", "shared"}
             or set(target) != ({"kind", "projectId"} if target.get("kind") == "project" else {"kind"})
             or (target["kind"] == "project" and (not isinstance(target["projectId"], str)
                 or not target["projectId"]))):

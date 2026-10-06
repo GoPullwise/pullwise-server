@@ -131,6 +131,23 @@ def test_preview_coordinator_unknown_paths_do_not_touch_storage_d1_or_providers(
     assert coordinator.journal is None
 
 
+@pytest.mark.parametrize("path,status,code", [
+    ("/api/v1/expenses?cursor=" + "x" * 8193, 413, "REQUEST_TOO_LARGE"),
+    ("/api/v1/expenses/" + "%61" * 3000, 413, "REQUEST_TOO_LARGE"),
+    ("/api/v1/expenses?cursor=%ED%A0%80", 422, "INVALID_INPUT"),
+    ("/api/v1/expenses?cursor=%00", 422, "INVALID_INPUT"),
+])
+def test_invalid_preview_product_url_cannot_open_a_budget_ticket(path, status, code):
+    entry = load_entry()
+    env = SimpleNamespace(PULLWISE_D1_ACCESS_ENABLED="1", PULLWISE_MODE="preview",
+        PULLWISE_PREVIEW_PRODUCT_ENABLED="1")
+    coordinator = entry.ValidationBudget(SimpleNamespace(), env)
+    payload, options = asyncio.run(coordinator.fetch(SimpleNamespace(
+        method="GET", url="https://preview.invalid" + path)))
+    assert options["status"] == status and payload == {"error": {"code": code}}
+    assert coordinator.journal is None
+
+
 def test_unreviewed_initialization_rpc_cannot_touch_storage_or_d1():
     entry = load_entry()
 

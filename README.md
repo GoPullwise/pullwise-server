@@ -34,10 +34,11 @@ domains/database IDs. Jev stays disabled until real-provider quality/runtime
 gates pass. The user authorized self-authored synthetic en/zh evaluation samples;
 their results must be recorded as synthetic-data validation.
 
-All Wrangler/workerd and D1 commands, including local probes, remain paused
-until the user explicitly resumes them. Do not add cron triggers. Before any
-remote validation, review the request row/operation budget, request frequency,
-pagination/cache policy, cost guard, migration and rollback. S17 runtime
-verification and S18 remote acceptance are recorded separately from publication.
-Both Workers have been published; production D1 access remains paused. See the
-current acceptance record for deployed versions and remaining provider gates.
+The current user request authorizes checks, fixes, main pushes and Cloudflare
+publication. Preview is active behind the existing cumulative 100,000-read /
+1,000-write journal; production D1 access remains paused. Do not reset that
+journal, add cron triggers or copy preview credentials/data into production.
+Keep remote validation finite and record its row reservations and actual results.
+Publication is separate from authenticated runtime/provider acceptance. See the
+[deployment guide](cloudflare/server/README.md) and current acceptance record for
+release commands and remaining gates.

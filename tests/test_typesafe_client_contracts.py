@@ -7,7 +7,8 @@ import types
 import unittest
 from unittest.mock import patch
 
-from pullwise_server.typesafe_client import DEFAULT_JEV_MODEL, build_request, run_jev_sdk, validate_response
+from pullwise_server.typesafe_client import (DEFAULT_JEV_MODEL, MAX_STATE_QUESTION_BYTES,
+                                           build_request, run_jev_sdk, validate_response)
 
 
 class TypeSafeClientContractsTest(unittest.TestCase):
@@ -143,6 +144,34 @@ class TypeSafeClientContractsTest(unittest.TestCase):
             with self.subTest(state=state):
                 with self.assertRaisesRegex(ValueError, "text-only"):
                     build_request(state=state, questions=question, model="jev-1.13.0")
+
+    def test_choice_criteria_order_survives_canonicalization_and_permutation(self):
+        def request(criteria):
+            return build_request(state={"note": "Shared cloud hosting", "purpose": "Cloud"},
+                questions={"q": {"type": "choice", "instructions": "Classify.", "criteria": criteria}},
+                model=DEFAULT_JEV_MODEL)
+        criteria = {"z_host": "Hosting", "a_tools": "Tools", "uncertain": "Unknown"}
+        first = request(criteria)
+        reversed_options = dict(reversed(list(criteria.items())))
+        second = request(reversed_options)
+        self.assertEqual(list(first["questions"]["q"]["criteria"]), list(criteria))
+        self.assertEqual(list(second["questions"]["q"]["criteria"]), list(reversed_options))
+        self.assertEqual(first, request(criteria))
+
+    def test_separate_state_plus_longest_question_context_envelope(self):
+        question = {"type": "choice", "instructions": "Classify.",
+                    "criteria": {"yes": "Yes", "no": "No"}}
+        with self.assertRaisesRegex(ValueError, "state plus question"):
+            build_request(state="x" * MAX_STATE_QUESTION_BYTES, questions={"q": question},
+                          model=DEFAULT_JEV_MODEL)
+        oversized_question = {**question, "instructions": "x" * MAX_STATE_QUESTION_BYTES}
+        with self.assertRaisesRegex(ValueError, "state plus question"):
+            build_request(state="small state", questions={"q": oversized_question}, model=DEFAULT_JEV_MODEL)
+        # Parallel questions can exceed that smaller envelope collectively.
+        # Each state/question pair still fits and the full request stays bounded.
+        questions = {f"q{index}": {**question, "instructions": "x" * 1000} for index in range(30)}
+        self.assertEqual(len(build_request(state="small state", questions=questions,
+                                          model=DEFAULT_JEV_MODEL)["questions"]), 30)
 
     def test_valid_choice_response_preserves_unknown_token_usage(self) -> None:
         response = self.valid_response()
