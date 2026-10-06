@@ -1,0 +1,79 @@
+{
+  "summary": {
+    "passed": true,
+    "nativePythonFFI": true,
+    "mode": "production",
+    "localHttpAttempts": 22,
+    "csvRecords": 251,
+    "formulaEscaped": true,
+    "ownerFence": 404,
+    "cookieOriginDenials": [
+      403,
+      403
+    ],
+    "trustedCookieWrite": 201,
+    "monthlyQuotaDenial": 429,
+    "remoteProductionRequests": 0,
+    "remoteD1RowsRead": 0,
+    "remoteD1RowsWritten": 0,
+    "providerRequests": 0,
+    "validationCoordinatorBindings": 0,
+    "syntheticProvenance": true,
+    "localSqlAssertionsPassed": true,
+    "commercialWritesCharged": 5,
+    "retainedRecordCapacity": 252,
+    "deniedWritesCharged": 0,
+    "idempotentReplaysCharged": 0,
+    "actualProductionConfigUnchanged": true,
+    "runtimeStopped": true,
+    "portsReleased": true,
+    "clientRetries": 0,
+    "proxyRetryMarkersObserved": false,
+    "canonicalEntrySha256": "96badb49c227a886e2a5de9a07660e50a87443025a5e6d39c6ab40c42705a32b",
+    "offlineInspectorRecovery": "excluded_miniflare_metadata_sqlite",
+    "additionalHttpRequestsAfterSuite": 0,
+    "limitation": "Local native runtime acceptance does not activate or validate remote production database."
+  },
+  "persistedSqlAssertions": {
+    "passed": true,
+    "usage": [
+      {
+        "owner_id": "runtime-owner",
+        "projects": 0,
+        "records": 252,
+        "month": "2026-10",
+        "writes": 5,
+        "minute": 29854551,
+        "minute_writes": 5,
+        "jev_reserved_microusd": 0,
+        "project_cap": 3,
+        "record_cap": 500,
+        "minute_cap": 10,
+        "month_cap": 5,
+        "jev_cap": 0,
+        "project_delta": 0,
+        "record_delta": 0,
+        "jev_delta": 0,
+        "previous_month": "2026-10",
+        "previous_minute": 29854551
+      }
+    ],
+    "counts": {
+      "totalExpenseRows": 252,
+      "activeExpenseRows": 251,
+      "categoryRows": 3,
+      "deniedCategoryRows": 0,
+      "modelBudgetRows": 0
+    },
+    "readOnlyInspection": true,
+    "nativePersistence": true,
+    "inspectionRecovery": {
+      "initialError": "metadata_sqlite_included_in_database_count",
+      "recoveredOffline": true,
+      "additionalHttpRequests": 0,
+      "persistenceReset": false
+    }
+  },
+  "provenance": "local-only agent-authored synthetic fixtures; actual Workerd Python SDK + NativeD1 FFI",
+  "noRemoteDatabaseOrProviderUse": true
+}

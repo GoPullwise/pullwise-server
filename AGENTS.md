@@ -12,8 +12,12 @@ Production D1 activation and real payment acceptance remain separate gates;
 publishing code does not prove those gates. Jev enablement requires actual
 provider/runtime and labeled en/zh quality evidence, not synthetic gold labels.
 Use `docs/validation/local-acceptance.md` for the latest release evidence.
-The user's later 2026-10-06 scope is preview-only testing/verification. Do not
-continue production repair, activation, deployment or validation for this task.
+The user's later 2026-10-06 scope is preview-only remote testing/verification.
+They subsequently reaffirmed that every original goal, including an engineering
+path to production, must be finished before the new multi-repository/team version.
+Production-compatible source/configuration repairs and isolated local runtime
+checks are authorized; do not activate production D1, migrate or perform remote
+production acceptance. Main Builds retain the checked-in production pause.
 
 ## Product and authority
 

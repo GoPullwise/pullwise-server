@@ -102,9 +102,10 @@ read-back confirmed mode `preview`, both flags `1`, the original D1 database and
 fixed validation namespace, and the TypeSafe Secret name. No migration, journal
 reset, production deployment or provider call was part of this activation.
 
-The checked-in config still defaults both flags to `0`; this release is an
-explicit preview runtime overlay. A subsequent ordinary config-only deploy
-disables suggestions unless the reviewed overlay is deliberately retained.
+At the first activation, the checked-in config still defaulted both flags to
+`0`, so that release used an explicit preview runtime overlay. The subsequent
+migration-readiness repair records both reviewed Preview flags as `1` in source
+to preserve enablement on ordinary deployments; production flags remain `0`.
 At this deployment stage, authenticated end-user acceptance was pending. That
 gate was subsequently completed in the finite user-consented run below.
 
@@ -172,6 +173,45 @@ all-traffic snapshots under the unchanged **100,000 / 1,000** ceilings, not
 exclusive per-test D1 attribution. Authenticated Free Shared behavior and the
 separate 36-case real Jev suite passed; paid checkout, fresh OAuth callback
 assertions and production acceptance are outside this completed preview run.
+
+## Migration-readiness follow-up
+
+The user subsequently asked whether every original goal, including direct
+engineering migration to production, was complete and instructed us to finish
+that before the new version. That review found a real remaining gap: Default
+rejected production even with D1 explicitly enabled, and the static checker
+prevented any correct production activation configuration.
+
+Both are now repaired while preserving checked-in production access `0`.
+The [migration guide](production-migration-readiness.md) documents the separate
+normal application path, isolated configuration checks and explicit future
+activation option. Preview still uses its original budget and neither runtime
+path loses authentication, owner/key restrictions or commercial quota fences.
+Web production configuration now routes HTML through existing SEO/www middleware
+with ASSETS; Preview assets and configuration remain unchanged. Jev Preview flags
+are now versioned as `1` following the earlier real quality gate.
+
+Server passed **497 tests**, Web **343 tests and build**, plus configuration,
+source sync and shell checks. The initial full Server attempt lacked permission
+for a single loopback socket; the properly enabled environment passed all 497.
+The actual native production-mode Worker/D1 fixture then passed **22/22 local
+HTTP requests**, including 251-row CSV/formula escaping, Cookie/Bearer, owner 404,
+missing/foreign Origin 403, trusted Origin 201, stale 412, exact replay and the
+monthly write-limit 429. It had no validation DO binding and made zero remote
+D1/provider requests. Persisted read-only SQL confirmed five charged commercial
+writes, no charges for denials/replays, 252 retained records/251 active, and zero
+Jev reservations. Entry SHA-256 matched final source
+`96badb49c227a886e2a5de9a07660e50a87443025a5e6d39c6ab40c42705a32b`.
+The fixture stopped its runtime and released both ports; formal config hash was
+unchanged. An initial offline inspector included Miniflare metadata.sqlite;
+excluding that non-product database fixed the inspector with no HTTP rerun or
+data reset. [Native local evidence](production-native-local-2026-10-06.json)
+distinguishes that result from remote formal activation, which was not performed.
+
+Locked Preview packaging passed at **430.99 KiB / 99.96 KiB gzip**. Final main
+publication and finite Preview release read-back are recorded after publication.
+The new multi-repository/Organization/team role requirements remain planning
+only and have not altered this product release.
 
 The historical evidence below describes earlier sources and authorization.
 

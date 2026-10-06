@@ -99,13 +99,20 @@ def test_every_preview_route_uses_the_same_singleton_without_direct_d1():
     assert len(calls) == 7 and set(names) == {"pullwise-s17-s18-2026-09-28"}
 
 
-def test_production_cannot_enter_preview_validation_even_if_enabled():
+def test_broken_production_binding_cannot_fall_back_to_preview_validation():
     entry = load_entry()
+    calls = []
+    class Namespace:
+        def idFromName(self, name):
+            calls.append(name)
+            raise AssertionError("Production entered preview validation")
     worker = entry.Default()
-    worker.env = SimpleNamespace(PULLWISE_D1_ACCESS_ENABLED="1", PULLWISE_MODE="production")
+    worker.env = SimpleNamespace(PULLWISE_D1_ACCESS_ENABLED="1", PULLWISE_MODE="production",
+        VALIDATION_BUDGET=Namespace())
     payload, options = asyncio.run(worker.fetch(SimpleNamespace(url="https://api.pull-wise.com/health")))
     assert options["status"] == 503
-    assert payload["error"]["code"] == "VALIDATION_CONTROL_REQUIRED"
+    assert payload["error"]["code"] == "SERVER_UNAVAILABLE"
+    assert calls == []
 
 
 def test_preview_coordinator_unknown_paths_do_not_touch_storage_d1_or_providers():

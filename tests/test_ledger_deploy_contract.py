@@ -53,7 +53,7 @@ class LedgerDeployContractTests(unittest.TestCase):
         self.assertEqual(args[args.index("--with") + 1], "PyYAML==6.0.3")
         self.assertIn("--no-project", args)
 
-    def test_remote_config_rejects_enabled_d1_and_cron(self):
+    def test_remote_config_rejects_invalid_d1_switch_and_cron(self):
         spec = importlib.util.spec_from_file_location("ledger_config_checker", ROOT / "scripts/check-ledger-s01.py")
         checker = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(checker)
@@ -62,13 +62,48 @@ class LedgerDeployContractTests(unittest.TestCase):
             folder = Path(directory)
             (folder / "src").mkdir()
             (folder / "src/entry.py").touch()
-            for enabled, crons in [("1", []), (None, []), ("0", ["* * * * *"])]:
+            for enabled, crons in [("invalid", []), (None, []), ("0", ["* * * * *"])]:
                 config = json.loads(json.dumps(original))
                 config["vars"]["PULLWISE_D1_ACCESS_ENABLED"] = enabled
                 config["triggers"] = {"crons": crons}
                 (folder / "wrangler.production.jsonc").write_text(json.dumps(config))
                 with patch.object(checker, "SERVER", folder), self.assertRaises(ValueError):
                     checker.validate_config("production", allow_placeholders=True)
+
+    def test_production_activation_config_accepts_only_its_isolated_runtime(self):
+        spec = importlib.util.spec_from_file_location("activation_checker", ROOT / "scripts/check-ledger-s01.py")
+        checker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checker)
+        original = json.loads((ROOT / "cloudflare/server/wrangler.production.jsonc").read_text())
+        self.assertEqual(original["vars"]["PULLWISE_D1_ACCESS_ENABLED"], "0")
+        original["vars"]["PULLWISE_D1_ACCESS_ENABLED"] = "1"
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            (folder / "src").mkdir()
+            (folder / "src/entry.py").touch()
+            path = folder / "wrangler.production.jsonc"
+            path.write_text(json.dumps(original))
+            with patch.object(checker, "SERVER", folder):
+                checker.validate_config("production", allow_placeholders=False)
+                for contamination in ("database", "host", "app", "callback", "provider", "coordinator", "preview_flag"):
+                    config = json.loads(json.dumps(original))
+                    if contamination == "database":
+                        config["d1_databases"][0]["database_id"] = "e9dc3b89-f81f-4fce-87ef-d8797d879fb4"
+                    elif contamination == "host":
+                        config["routes"] = [{"pattern": "preview-api.pull-wise.com", "custom_domain": True}]
+                    elif contamination == "app":
+                        config["vars"]["PULLWISE_APP_URL"] = config["vars"]["PULLWISE_ALLOWED_ORIGINS"] = "https://preview.pull-wise.com"
+                    elif contamination == "callback":
+                        config["vars"]["PULLWISE_GITHUB_CALLBACK_URL"] = "https://preview.pull-wise.com/api/auth/github/callback"
+                    elif contamination == "provider":
+                        config["vars"]["PULLWISE_CREEM_API_BASE_URL"] = "https://test-api.creem.io"
+                    elif contamination == "coordinator":
+                        config["durable_objects"] = {"bindings": [{"name": "VALIDATION_BUDGET", "class_name": "ValidationBudget"}]}
+                    else:
+                        config["vars"]["PULLWISE_PREVIEW_PRODUCT_ENABLED"] = "1"
+                    path.write_text(json.dumps(config))
+                    with self.subTest(contamination=contamination), self.assertRaises(ValueError):
+                        checker.validate_config("production", allow_placeholders=False)
 
     def test_reviewed_zone_route_preserves_existing_dns(self):
         spec = importlib.util.spec_from_file_location("ledger_config_checker", ROOT / "scripts/check-ledger-s01.py")
@@ -131,17 +166,31 @@ class LedgerDeployContractTests(unittest.TestCase):
             fake_uv = folder / "uv"
             fake_uv.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$PWD\" \"$@\"\n")
             fake_uv.chmod(0o755)
-            result = subprocess.run(
-                [BASH, "scripts/deploy-cloudflare.sh", "--environment", "preview",
-                 "--execute", "--local-checks-passed"], cwd=repo,
-                text=True, capture_output=True, check=False,
-                env={**os.environ, "PULLWISE_PYTHON": Path(sys.executable).as_posix(),
-                     "PATH": str(folder) + os.pathsep + os.environ["PATH"]},
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn(worker.as_posix(), result.stdout)
-            self.assertIn("run\n--frozen\n--python\n3.14.2\npywrangler\ndeploy\n--config\nwrangler.preview.jsonc", result.stdout)
-            self.assertNotIn("d1 migrations apply", result.stdout)
+            for environment, activate in (("preview", False), ("production", False), ("production", True)):
+                args = [BASH, "scripts/deploy-cloudflare.sh", "--environment", environment,
+                        "--execute", "--local-checks-passed"]
+                if activate:
+                    args.append("--activate-production")
+                with self.subTest(environment=environment, activate=activate):
+                    result = subprocess.run(args, cwd=repo,
+                        text=True, capture_output=True, check=False,
+                        env={**os.environ, "PULLWISE_PYTHON": Path(sys.executable).as_posix(),
+                             "PATH": str(folder) + os.pathsep + os.environ["PATH"]})
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn(worker.as_posix(), result.stdout)
+                    self.assertIn("run\n--frozen\n--python\n3.14.2\npywrangler\ndeploy\n--config\nwrangler."+environment+".jsonc", result.stdout)
+                    self.assertEqual("--var\nPULLWISE_D1_ACCESS_ENABLED:1" in result.stdout, activate)
+                    self.assertNotIn("d1 migrations apply", result.stdout)
+            paused = json.loads((ROOT / "cloudflare/server/wrangler.production.jsonc").read_text())
+            self.assertEqual(paused["vars"]["PULLWISE_D1_ACCESS_ENABLED"], "0")
+
+    def test_production_activation_option_cannot_target_preview(self):
+        result = subprocess.run([BASH, SCRIPT.relative_to(ROOT).as_posix(),
+            "--environment", "preview", "--activate-production"], cwd=ROOT,
+            text=True, capture_output=True, check=False,
+            env={**os.environ, "PULLWISE_PYTHON": Path(sys.executable).as_posix()})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires --environment production", result.stderr)
 
     def test_preview_and_production_are_separate_and_unconfigured(self):
         configs = []

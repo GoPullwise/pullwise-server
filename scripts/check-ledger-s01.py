@@ -14,7 +14,8 @@ SERVER = ROOT / "cloudflare" / "server"
 PLACEHOLDER_ID = "00000000-0000-0000-0000-000000000000"
 
 
-def validate_config(environment: str, allow_placeholders: bool) -> None:
+def validate_config(environment: str, allow_placeholders: bool,
+                    activate_production: bool = False) -> None:
     config_path = SERVER / f"wrangler.{environment}.jsonc"
     config = json.loads(config_path.read_text(encoding="utf-8"))
     if config.get("name") != f"pullwise-server-{environment}":
@@ -36,11 +37,18 @@ def validate_config(environment: str, allow_placeholders: bool) -> None:
         if not pattern.endswith("/*") or not zone or not (host == zone or host.endswith("." + zone)):
             raise ValueError("reviewed zone route is required")
     vars_ = config.get("vars", {})
+    if activate_production:
+        if environment != "production":
+            raise ValueError("production activation requires the production environment")
+        # Validate the explicit deploy overlay without changing the paused file.
+        vars_["PULLWISE_D1_ACCESS_ENABLED"] = "1"
     product_preview = (environment == "preview" and
                        vars_.get("PULLWISE_PREVIEW_PRODUCT_ENABLED") == "1")
-    if vars_.get("PULLWISE_D1_ACCESS_ENABLED") != "0" and not (
-            product_preview and vars_.get("PULLWISE_D1_ACCESS_ENABLED") == "1"):
-        raise ValueError("remote D1 access must remain paused")
+    access = vars_.get("PULLWISE_D1_ACCESS_ENABLED")
+    if access not in {"0", "1"}:
+        raise ValueError("D1 access must be an explicit 0 or 1")
+    if environment == "preview" and access == "1" and not product_preview:
+        raise ValueError("enabled preview D1 requires the product budget coordinator")
     if product_preview:
         bindings = config.get("durable_objects", {}).get("bindings", [])
         if (config.get("name") != "pullwise-server-preview" or len(bindings) != 1
@@ -68,6 +76,16 @@ def validate_config(environment: str, allow_placeholders: bool) -> None:
                             or host != "preview-api.pull-wise.com"
                             or app_url != "https://preview.pull-wise.com"):
         raise ValueError("active preview must retain its isolated database and hosts")
+    if environment == "production" and access == "1":
+        if (database_id != "80a29a0d-5699-449f-9541-a01dc461ca9d"
+                or host != "api.pull-wise.com" or app_url != "https://pull-wise.com"
+                or vars_.get("PULLWISE_GITHUB_CALLBACK_URL") != "https://pull-wise.com/api/auth/github/callback"
+                or vars_.get("PULLWISE_CREEM_API_BASE_URL") != "https://api.creem.io"
+                or vars_.get("PULLWISE_PREVIEW_PRODUCT_ENABLED", "0") != "0"
+                or any(binding.get("name") == "VALIDATION_BUDGET"
+                       or binding.get("class_name") == "ValidationBudget"
+                       for binding in config.get("durable_objects", {}).get("bindings", []))):
+            raise ValueError("active production must use its isolated database, hosts and live provider without preview controls")
     if not re.fullmatch(r"[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", database_id):
         raise ValueError("D1 database ID must be a UUID")
     if not allow_placeholders and (
@@ -125,10 +143,14 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--environment", choices=("preview", "production"))
     parser.add_argument("--allow-placeholders", action="store_true")
+    parser.add_argument("--activate-production", action="store_true",
+                        help="Validate an explicit production D1 activation overlay; no remote actions")
     args = parser.parse_args()
+    if args.activate_production and args.environment != "production":
+        parser.error("--activate-production requires --environment production")
     try:
         for environment in ((args.environment,) if args.environment else ("preview", "production")):
-            validate_config(environment, args.allow_placeholders)
+            validate_config(environment, args.allow_placeholders, args.activate_production)
         validate_contract()
     except (ValueError, KeyError, OSError, ImportError) as exc:
         print(f"S01 check failed: {exc}", file=sys.stderr)

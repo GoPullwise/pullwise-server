@@ -286,13 +286,19 @@ class Default(WorkerEntrypoint):
         if str(getattr(self.env, "PULLWISE_D1_ACCESS_ENABLED", "0")) != "1":
             return _unavailable("D1_ACCESS_PAUSED")
         mode = getattr(self.env, "PULLWISE_MODE", "")
-        if mode == "local":
-            # Only the explicitly local-only config has this mode. Offline
-            # config checks reject it in every remote deployment config.
+        if mode in ("local", "production"):
+            # Production activation uses the ordinary auth/quota application,
+            # without preview initialization or its validation coordinator.
+            # Local-only config exercises the same chain; remote config checks
+            # reject that local mode. Both still require explicit D1 access.
             try:
                 return await _Application(self.env, NativeD1(self.env.DB)).fetch(request)
             except ValueError:
                 return _unavailable("PLAN_POLICY_INVALID")
+            except Exception:
+                # Configuration/native errors must not expose binding details,
+                # credentials or arbitrary provider exception text.
+                return _unavailable("SERVER_UNAVAILABLE")
         if mode != "preview" or getattr(self.env, "VALIDATION_BUDGET", None) is None:
             return _unavailable("VALIDATION_CONTROL_REQUIRED")
         try:

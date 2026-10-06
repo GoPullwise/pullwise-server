@@ -251,8 +251,9 @@ The deploy and read-back made no model calls or migrations and did not touch
 production. Max eligibility, daily/monthly reservation, explicit user choices
 and failure fallback remain enforced.
 
-The repository config deliberately retains safe defaults `0`; this reviewed
-runtime overlay must be retained deliberately on a later preview deploy. This
-activation follows the actual evidence review, rather than the evaluator
-silently changing deployment bindings. It does not establish payment or
-authenticated end-user acceptance.
+At that first activation the repository config retained defaults `0`. The
+subsequent migration-readiness repair records the reviewed Preview flags as
+`1` in source, preserving this actual evidence-based activation on normal
+deployments. Production flags remain `0`. The evaluator itself never changes
+bindings. Authenticated Free Preview acceptance later passed and is recorded in
+local-acceptance.md; this synthetic suite does not establish payment acceptance.
