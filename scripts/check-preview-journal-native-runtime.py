@@ -24,7 +24,7 @@ ENTRY = r'''
 from workers import WorkerEntrypoint, DurableObject, Response
 from pullwise_server.cloudflare_validation_budget import BudgetJournal, BudgetError
 from pullwise_server.cloudflare_preview_rate import PreviewRateLimiter, PreviewRateLimit, request_channel
-from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initial_data, SCHEMA_VERSION, SCHEMA_FINGERPRINT
+from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initial_data, SCHEMA_VERSION, SCHEMA_FINGERPRINT, migrate_product_state_records
 from pullwise_server.cloudflare_native_d1 import NativeD1
 from pullwise_server.cloudflare_validation_budget import _field
 
@@ -74,38 +74,48 @@ class FixtureJournal(DurableObject):
                             "attempts": _field(meta, "total_attempts")})
                     return results
             native = ObservedD1(self.env.DB)
-            meter = ProductMeteredD1(native, journal, ticket, clock=lambda: 1002)
+            journal.finish(ticket, now=1003)
+            # The canonical fixed cutover runs once before ordinary record SQL.
+            # Keep its native usage in the same cumulative journal/evidence.
+            await migrate_product_state_records(native, journal, clock=lambda: 1004)
+            assert journal.snapshot()["state_storage_version"] == 1
+            migration_batches = native.batches
+            state = journal.snapshot()
+            state.pop("product_data_verified", None)
+            journal._save(state)
+            ticket = journal.begin_product(now=1010)
+            meter = ProductMeteredD1(native, journal, ticket, clock=lambda: 1011)
             assert not meter.cardinality_verified
             await meter.ensure_cardinality()
-            assert native.batches == 1 and journal.snapshot()["product_data_verified"] is True
+            assert native.batches == migration_batches + 1 and journal.snapshot()["product_data_verified"] is True
             assert meter.data["rows"]["app_state"] == 4
-            journal.finish(ticket, now=1003)
+            journal.finish(ticket, now=1012)
             journal = BudgetJournal(sql, preview_product=True, product_operations=True)
             ticket = journal.begin_product(now=2000)
             meter = ProductMeteredD1(native, journal, ticket, clock=lambda: 2001)
             native.meter = meter
             assert meter.cardinality_verified
             await meter.ensure_cardinality()
-            assert native.batches == 1
+            assert native.batches == migration_batches + 1
             # An ordinary read uses its own query without a full-table refresh.
             row = await meter.prepare("SELECT COUNT(*) AS count FROM expense_categories").first()
-            assert row["count"] == 0 and native.batches == 2
+            assert row["count"] == 0 and native.batches == migration_batches + 2
             native.writing = True
             await meter.batch([meter.prepare("""INSERT INTO expense_categories
                 (id,owner_id,name,revision,created_at,updated_at) VALUES(?,?,?,1,?,?)""").bind(
                     "native-category", "synthetic-owner", "Native category", "local", "local")])
             native.writing = False
-            assert native.marker_false_at_write and native.batches == 4
+            assert native.marker_false_at_write and native.batches == migration_batches + 4
             assert meter.cardinality_verified and journal.snapshot()["product_data_verified"] is True
             assert meter.data["rows"]["expense_categories"] == 1
             await meter.ensure_cardinality()
-            assert native.batches == 4
+            assert native.batches == migration_batches + 4
             journal.finish(ticket, now=2002)
             journal = BudgetJournal(sql, preview_product=True, product_operations=True)
             ticket = journal.begin_product(now=3000)
             meter = ProductMeteredD1(native, journal, ticket, clock=lambda: 3001)
             await meter.ensure_cardinality()
-            assert native.batches == 4 and meter.cardinality_verified
+            assert native.batches == migration_batches + 4 and meter.cardinality_verified
             assert meter.data["rows"]["expense_categories"] == 1
             journal.finish(ticket, now=3002)
             final = journal.snapshot()
@@ -114,6 +124,8 @@ class FixtureJournal(DurableObject):
                 "firstRefreshPersisted": True, "restartSkipsFullScan": True,
                 "ordinaryReadNoRefresh": True, "mutationFlagFalseAtDispatch": True,
                 "mutationRefreshPersisted": True, "verifiedPostWriteRestart": True,
+                "stateRecordStorageVersion": final["state_storage_version"],
+                "canonicalCutoverNativeBatches": migration_batches,
                 "nativeBatches": native.batches, "nativeStatements": len(native.results),
                 "nativeRowsRead": sum(item["rowsRead"] for item in native.results),
                 "nativeRowsWritten": sum(item["rowsWritten"] for item in native.results),

@@ -2,6 +2,64 @@
 
 Updated 2026-10-06. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
 
+## Account storage and real-user continuation (2026-10-06, in progress)
+
+The published versions below remain the current remote artifact. A follow-up
+repair is moving shared identity and billing JSON maps to exact individual
+records in the same D1 table. The [capacity review](preview-state-capacity-review-2026-10-06.md)
+preserves the original reproducible blocker. Migration, restart and native
+accounting must pass before this working source is published.
+
+The [first two-real-user run](projects-two-real-users-baseline-2026-10-06.json)
+passed ten checks across Projects, reports/CSV, invitations and Viewer access.
+It stopped before the Editor update because the runner kept an old Owner
+Members view after recipient acceptance. The failed result remains unchanged;
+all confirmed QA fixtures were cleaned up. The remaining role/key/removal
+flow has a separate finite runner and requires fresh memory-only consent
+after publication. No payment, model call or customer credential persistence
+occurred in the real run.
+
+## Projects, collaboration and cost follow-up (2026-10-06)
+
+Current source is Server `80f398c3d1e332aa91eefe2d5ccf885c227b14cc`
+and Web `4e72574c19daec85ba713dd2d14a40034f7c03e7`, pushed to main.
+Explicit preview publication serves Server
+`7882f562-8c5e-4c5a-a898-d52943dc63e6` and Web
+`ea62c7a0-37e4-4693-b78a-bbb3c96c53b6`, both at 100%.
+Management read-back retained the original preview D1 and fixed coordinator
+namespace, service binding and secret names. Production D1 remains 0.
+
+Final full checks pass 835 Server and 434 Web tests, lint/build, source mirror,
+offline configuration/static checks and shell syntax. Repairs cover project
+archive/reactivation and revision-safe settings drafts, completed-invite
+recovery, member permission isolation, billing lifecycle/redirect/error
+boundaries, input envelopes and larger bounded CSV exports. Native local
+Worker/SQL fixtures and built Chromium fixtures are separate evidence from
+real user sessions: see [Projects and subscriptions](projects-subscriptions-native-2026-10-06.json),
+[CSV](bounded-csv-native-2026-10-06.json),
+[journal, limiter and cardinality](preview-operation-journal-native-2026-10-06.json),
+and [payment audit](billing-subscriptions-2026-10-06.md).
+
+Normal preview product operations no longer use lifetime test request/row
+ceilings. Original cumulative counters and all integrity stops remain;
+short-window DO-only IP/credential/actual-user limits return 429 with
+Retry-After. Verified reads skip repeated cardinality scans, writes still
+refresh after dispatch, and Status uses initial/manual checks. Native DO
+cursor cost measurement and the USD 200/month planning target are in
+[cost plan](cloudflare-cost-plan-2026-10-06.md).
+
+[One actual public Chromium run](preview-public-release-2026-10-06.json)
+verified matching deployed asset hashes, healthy schema 5, preserved cumulative
+counters, manual health refresh and a 390px mobile layout. It forwarded five
+read-only API requests and no mutations. Concurrent user OAuth activity
+overlapped the run: global writes increased by three, matching one guarded
+OAuth state/session transaction. Source audit finds no writes in health or
+session reads, but aggregate snapshots cannot prove attribution. The original
+zero-write gate remains recorded as failed; it is not rewritten as a pass.
+
+Two real-user acceptance is a separate bounded run after both accounts consent;
+it is not established by any local fixture or the public smoke above.
+
 ## Shared ledger and multi-repository release (2026-10-06, final)
 
 The original audit, real consented preview lifecycle and 36 actual Jev cases

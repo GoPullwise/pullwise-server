@@ -9,6 +9,11 @@ from __future__ import annotations
 import json
 import re
 import time
+from dataclasses import dataclass
+from .cloudflare_state_records import (
+    STATE_KINDS, STATE_STORAGE_VERSION, USER_RECORD_BYTES, SMALL_RECORD_BYTES,
+    MAX_RECORD_ID_BYTES, record_parameter_limits, legacy_record_rows,
+)
 
 from .cloudflare_preview_schema import (
     INDEX_COUNTS, PRIMARY_KEYS, SCHEMA_SQL, SCHEMA_VERSION, SCHEMA_FINGERPRINT,
@@ -17,7 +22,7 @@ from .cloudflare_preview_schema import (
 )
 from .cloudflare_validation_budget import (
     BudgetError, MeteredD1, OperationBound, RequestPlan, _Statement, _field,
-    READ_CEILING, WRITE_CEILING,
+    READ_CEILING, WRITE_CEILING, ParameterBound,
 )
 
 _TOKEN = re.compile(r"--[^\n]*|/\*[\s\S]*?\*/|'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|[A-Za-z_][\w]*|\d+|\?|\S")
@@ -163,15 +168,22 @@ def _expense_json_parameters(sql):
 def _input_bound(params, *, sql=""):
     # An 8 KiB ingress can gain <1 KiB DTO metadata and <4 KiB assistance
     # (30 categories + uncertain, safe generated IDs, finite float probabilities).
-    # Only stored expense JSON gets this 16 KiB envelope; plain text/app_state
-    # and every other SQL parameter retain the original 8 KiB ceiling.
+    # Stored expense JSON has a 16 KiB envelope. A typed exact-key user record
+    # (including retained repo/billing history) has its separate 512 KiB bound.
+    # Plain text, ephemeral/event records and all HTTP ingress retain 8 KiB.
     expanded = _expense_json_parameters(sql)
+    record_limits = record_parameter_limits(sql, params)
     size = 0
+    total_bytes = 0
     for index, value in enumerate(params):
         if value is None or type(value) is int and -(2**53 - 1) <= value <= 2**53 - 1:
             continue
-        if type(value) is not str or len(value.encode("utf-8")) > (16384 if index in expanded else 8192):
+        limit = record_limits.get(index, 16384 if index in expanded else 8192)
+        if type(value) is not str or len(value.encode("utf-8")) > limit:
             raise ValueError("preview parameter exceeds input bound")
+        total_bytes += len(value.encode("utf-8"))
+        if total_bytes > 8 * 1024 * 1024:
+            raise ValueError("preview operation parameters exceed input bound")
         if index in expanded:
             decoded = json.loads(value)
             if not isinstance(decoded, dict):
@@ -193,6 +205,60 @@ def _input_bound(params, *, sql=""):
 _COUNT_SQL = "SELECT " + ",".join(
     f'(SELECT COUNT(*) FROM {table}) AS {table}' for table in INDEX_COUNTS)
 _STATE_SQL = "SELECT name,payload FROM app_state LIMIT 7"
+_RECORD_COUNT_SQL = "SELECT " + ",".join(
+    f"COALESCE(SUM(CASE WHEN name GLOB 'record:{kind}:*' THEN 1 ELSE 0 END),0) AS {kind}"
+    for kind in STATE_KINDS) + " FROM app_state"
+
+
+def _strict_record_sql():
+    # Structural aggregate only. Semantic validity is closed over empty init,
+    # strictly decoded legacy cutover, and strictly decoded typed mutations.
+    # Direct imports/console writes bypassing those paths are unsupported.
+    cases = []
+    for kind in STATE_KINDS:
+        prefix = f"record:{kind}:"
+        suffix = f"substr(name,{len(prefix) + 1})"
+        identity = (f"json_extract(payload,'$.id') IS NOT {suffix}" if kind == "users"
+                    else f"(json_type(payload,'$.id') IS NOT NULL AND json_extract(payload,'$.id') IS NOT {suffix})"
+                    if kind == "sessions" else f"json_extract(payload,'$.eventId') IS NOT {suffix}"
+                    if kind == "billingPendingUpdates" else "0")
+        cases.append(f"""WHEN name GLOB '{prefix}*' THEN CASE
+            WHEN instr(name,char(0))>0 OR name GLOB ('*['||char(1)||'-'||char(31)||char(127)||']*') THEN 1
+            WHEN json_valid(payload)=0 THEN 1
+            WHEN json_type(payload)!='object' THEN 1
+            WHEN length(CAST(payload AS BLOB))>{USER_RECORD_BYTES if kind == 'users' else SMALL_RECORD_BYTES} THEN 1
+            WHEN length(CAST({suffix} AS BLOB)) NOT BETWEEN 1 AND {MAX_RECORD_ID_BYTES} THEN 1
+            WHEN {identity} THEN 1 ELSE 0 END""")
+    return ("SELECT COALESCE(SUM(CASE WHEN name NOT GLOB 'record:*' THEN "
+            "CASE WHEN payload IN ('{}','[]') THEN 0 ELSE 1 END " + " ".join(cases) +
+            " ELSE 1 END),0) AS invalidRecords FROM app_state")
+
+
+_STRICT_RECORD_SQL = _strict_record_sql()
+_STATE_RECORD_CASE = "product-state-record-v1"
+
+
+def _record_product_data(count_result, state_result, upper, strict_result=None):
+    rows, kinds = list(_field(count_result, "results", [])), list(_field(state_result, "results", []))
+    if len(rows) != 1 or len(kinds) != 1:
+        raise BudgetError("PREVIEW_DATA_BOUND")
+    counts = {table: _field(rows[0], table) for table in INDEX_COUNTS}
+    if any(type(value) is not int or not 0 <= value <= upper[table] for table, value in counts.items()):
+        raise BudgetError("PREVIEW_DATA_BOUND")
+    if counts["d1_command_guard"]:
+        raise BudgetError("NONEMPTY_GUARD")
+    totals = {kind: _field(kinds[0], kind) for kind in STATE_KINDS}
+    if (any(type(value) is not int or not 0 <= value <= counts["app_state"] for value in totals.values())
+            or not 0 <= counts["app_state"] - sum(totals.values()) <= 6):
+        raise BudgetError("PREVIEW_DATA_BOUND")
+    if strict_result is not None:
+        invalid = list(_field(strict_result, "results", []))
+        if len(invalid) != 1 or _field(invalid[0], "invalidRecords") != 0:
+            raise BudgetError("STATE_RECORD_INVALID")
+    # No active product SQL iterates a global JSON map. Byte envelopes prove
+    # any future per-record virtual traversal's finite worst case separately.
+    return {"rows": counts, "json": {}, "arrays": USER_RECORD_BYTES // 2,
+            "records": totals}
 _EMPTY_SQL = "SELECT name FROM sqlite_master LIMIT 65"
 _INITIAL = RequestPlan("product-schema", "POST", "/_internal/initialize", 1, (
     OperationBound((_EMPTY_SQL,), 384, 0),
@@ -430,11 +496,115 @@ async def initialize_product(binding, journal, *, clock=time.time):
         await meter.batch([meter.prepare(sql) for sql in SCHEMA_SQL])
         journal.save_product_state(ticket, initial_data(), now=clock(), initialized=True)
         state = journal.check(ticket, now=clock())
-        state.update(schema_version=SCHEMA_VERSION, schema_fingerprint=SCHEMA_FINGERPRINT)
+        state.update(schema_version=SCHEMA_VERSION, schema_fingerprint=SCHEMA_FINGERPRINT,
+                     state_storage_version=STATE_STORAGE_VERSION)
+        state["state_record_migration"] = {"version": STATE_STORAGE_VERSION,
+            "request": ticket, "complete": True, "fresh": True, "copied_records": 0}
         journal._save(state)
         journal.finish(ticket, now=clock())
     except BaseException:
         journal.stop("INITIALIZATION_OUTCOME_UNKNOWN")
+        raise
+
+
+@dataclass(frozen=True)
+class _StateRecordPlan:
+    operations: tuple
+    copied_records: int
+
+
+def _compile_state_record_cutover(rows, physical_rows, now):
+    """One closed, atomic copy/clear batch derived only from bounded old state."""
+    records, sources = legacy_record_rows(rows)
+    checks = ["(SELECT COUNT(*) FROM app_state)=?",
+              "NOT EXISTS(SELECT 1 FROM app_state WHERE name GLOB 'record:*')",
+              "NOT EXISTS(SELECT 1 FROM d1_command_guard)"]
+    guard_params = [physical_rows]
+    # Guard every observed source, including preserved unknown-empty rows.
+    # Otherwise an unrelated row could grow after observation and only be
+    # detected by the postcommit structural check.
+    for row in rows:
+        name, payload = row["name"], row["payload"]
+        checks.append("EXISTS(SELECT 1 FROM app_state WHERE name=? AND payload=?)")
+        guard_params.extend((name, payload))
+    commands = [("INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN " +
+                 " AND ".join(checks) + " THEN 1 ELSE 0 END)", tuple(guard_params))]
+    for name, payload, empty in sources:
+        identity = "json_extract(j.value,'$.eventId')" if name == "billingPendingUpdates" else "j.key"
+        commands.append((f"""INSERT INTO app_state(name,payload,updated_at)
+            SELECT ?||{identity},j.value,? FROM app_state a,json_each(a.payload) j
+            WHERE a.name=? AND a.payload=?""", (f"record:{name}:", now, name, payload)))
+    for name, payload, empty in sources:
+        commands.extend([
+            ("UPDATE app_state SET payload=?,updated_at=? WHERE name=? AND payload=?",
+             (empty, now, name, payload)),
+            ("INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN changes()=1 THEN 1 ELSE 0 END)", ())])
+    commands.append(("DELETE FROM d1_command_guard", ()))
+    if len(commands) > 64:
+        raise ValueError("state cutover batch exceeds reviewed bound")
+    # PK insert entries, worst-case old-row index replacements and all guard
+    # insert/deletes. Preserve every write reservation after dispatch.
+    writes = 2 * len(records) + 3 * len(sources) + 2 * (len(sources) + 1)
+    reads = 8 * (physical_rows + len(records) + 16) * (len(records) + len(sources) + 16)
+    parameters = tuple(tuple(ParameterBound("integer", minimum=value, maximum=value)
+                            if type(value) is int else ParameterBound("text", max_bytes=max(1, len(value.encode("utf-8"))))
+                            for value in params) for _, params in commands)
+    bound = OperationBound(tuple(sql for sql, _ in commands), reads, writes, parameters=parameters)
+    return _StateRecordPlan((bound,), len(records)), commands
+
+
+async def migrate_product_state_records(binding, journal, *, clock=time.time):
+    """Explicit one-shot state cutover, same D1 schema and same DO journal.
+
+    The caller holds the preview lock. No route/helper GET migrates implicitly.
+    An incomplete or unknown outcome cannot replay, reset or recover this case.
+    """
+    state = journal.snapshot()
+    if state["stopped"]:
+        raise BudgetError(state["stopped"])
+    if state.get("state_storage_version") == STATE_STORAGE_VERSION:
+        marker = state.get("state_record_migration")
+        if marker is not None and marker.get("complete") is not True:
+            raise BudgetError("STATE_STORAGE_MIGRATION_UNAVAILABLE")
+        return
+    if not _current_schema(state):
+        raise BudgetError("SCHEMA_UPGRADE_REQUIRED")
+    ticket = journal.begin_state_record_migration(now=clock())
+    source_meter = ProductMeteredD1(binding, journal, ticket, clock=clock)
+    try:
+        data = state["product_data"]
+        read_bound = 3 * (sum(data["rows"].values()) + data["rows"]["app_state"] + 128)
+        observed = await source_meter._operation(
+            [source_meter.prepare(_COUNT_SQL), source_meter.prepare(_STATE_SQL)], read_bound, 0)
+        _validated_product_data(observed[0], observed[1], data["rows"], INDEX_COUNTS)
+        rows = [{"name": _field(row, "name"), "payload": _field(row, "payload")}
+                for row in _field(observed[1], "results", [])]
+        plan, commands = _compile_state_record_cutover(rows, data["rows"]["app_state"], int(clock()))
+        journal.reserve_operation(ticket, reads=plan.operations[0].rows_read,
+                                  writes=plan.operations[0].rows_written, now=clock())
+        current = journal.check(ticket, now=clock())
+        current["state_record_migration"].update(copied_records=plan.copied_records,
+            source_rows=len(rows), reserved_read=plan.operations[0].rows_read,
+            reserved_written=plan.operations[0].rows_written)
+        journal._save(current)
+        meter = MeteredD1(binding, journal, ticket, plan, clock=clock)
+        result = await meter.batch([meter.prepare(sql).bind(*params) for sql, params in commands])
+        attempts = [_field(_field(item, "meta"), "total_attempts") for item in result]
+        if any(value is not None and (type(value) is not int or value != 1) for value in attempts):
+            journal._reject("MIGRATION_ATTEMPTS_UNPROVEN")
+        upper = dict(data["rows"])
+        upper["app_state"] += plan.copied_records
+        await source_meter._refresh_records(upper, strict=True)
+        if sum(source_meter.data["records"].values()) != plan.copied_records:
+            journal._reject("STATE_STORAGE_COPY_MISMATCH")
+        current = journal.check(ticket, now=clock())
+        current["state_storage_version"] = STATE_STORAGE_VERSION
+        current["state_record_migration"].update(complete=True, write_execution={
+            "native_attempts": attempts, "provenance": "d1-nonretryable-write-contract-v1"})
+        journal._save(current)
+        journal.finish(ticket, now=clock())
+    except BaseException:
+        journal.stop("STATE_STORAGE_OUTCOME_UNKNOWN")
         raise
 
 
@@ -448,6 +618,8 @@ class ProductMeteredD1(MeteredD1):
         self.calls = 0
         self.inflight = False
         self.cardinality_verified = journal.snapshot().get("product_data_verified") is True
+        self.records_mode = journal.snapshot().get("state_storage_version") == STATE_STORAGE_VERSION
+        self.records_integrity_verified = self.records_mode and self.cardinality_verified
         self.rate_limiter, self.rate_channel = rate_limiter, rate_channel
         self.rate_rejection = None
         self._actor_admitted = False
@@ -496,6 +668,8 @@ class ProductMeteredD1(MeteredD1):
         return results
 
     async def refresh(self, upper=None):
+        if self.records_mode:
+            return await self._refresh_records(upper, strict=not self.records_integrity_verified)
         rows = upper or self.data["rows"]
         # COUNT traversals plus the bounded app_state scan, including at most
         # three native attempts for this read-only group. No application retry.
@@ -522,6 +696,20 @@ class ProductMeteredD1(MeteredD1):
         self.journal.save_product_state(self.ticket, self.data, now=self.clock(), verified=True)
         self.cardinality_verified = True
 
+    async def _refresh_records(self, upper=None, *, strict=False):
+        rows = upper or self.data["rows"]
+        sql = (_COUNT_SQL, _RECORD_COUNT_SQL, _STRICT_RECORD_SQL) if strict else (_COUNT_SQL, _RECORD_COUNT_SQL)
+        read_bound = 3 * (sum(rows.values()) + 4 * rows["app_state"] + 128)
+        result = await self._operation([self.prepare(query) for query in sql], read_bound, 0)
+        try:
+            self.data = _record_product_data(result[0], result[1], rows, result[2] if strict else None)
+        except BudgetError as error:
+            self.journal._reject(str(error))
+        self.journal.save_product_state(self.ticket, self.data, now=self.clock(), verified=True)
+        self.cardinality_verified = True
+        self.records_mode = True
+        self.records_integrity_verified = True
+
     async def batch(self, statements):
         statements = list(statements)
         if not statements or len(statements) > 64 or any(
@@ -534,6 +722,9 @@ class ProductMeteredD1(MeteredD1):
         # Routes already map ValueError to their ordinary invalid-input DTO.
         # SQL/cardinality failures below remain accounting integrity stops.
         arrays = [_input_bound(s.params, sql=s.sql) for s in statements]
+        if sum(len(value.encode("utf-8")) for statement in statements for value in statement.params
+               if isinstance(value, str)) > 8 * 1024 * 1024:
+            raise ValueError("preview operation parameters exceed input bound")
         try:
             for s, array_size in zip(statements, arrays):
                 tokens = _tokens(s.sql)

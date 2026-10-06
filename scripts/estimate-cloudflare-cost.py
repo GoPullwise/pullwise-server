@@ -11,7 +11,11 @@ def estimate(api_requests, stored_rows, d1_gb, do_gb, *, do_writes_per_request=8
     # Application-only native sample: 85 retained HTTP responses, 1,078 reads,
     # 345 writes. Final preview adds refresh only after a mutating batch.
     worker_requests = api_requests * 1.2  # 20% dynamic HTML/account overhead.
-    d1_reads = api_requests * (1078 / 85 + 0.3 * (stored_rows + 6))
+    # Record storage refresh counts all tables and separately aggregates record
+    # kinds in app_state. Budget an extra full physical-row count conservatively
+    # instead of the old scan of six shared JSON payloads. This is planning
+    # arithmetic, not the preview reservation or actual billing telemetry.
+    d1_reads = api_requests * (1078 / 85 + 0.3 * (2 * stored_rows + 6))
     d1_writes = api_requests * 345 / 85
     do_reads = api_requests * 300  # Engineering allowance; not observed usage.
     do_writes = api_requests * do_writes_per_request

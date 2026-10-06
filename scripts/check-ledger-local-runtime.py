@@ -9,6 +9,7 @@ import hashlib
 import io
 import json
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -17,6 +18,9 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from pullwise_server.cloudflare_state_records import encode_record, record_name
+
 WORKER = ROOT / "cloudflare/server"
 TOKEN = "pwk_loopback_runtime_fixture"
 
@@ -36,9 +40,11 @@ def seed_sql():
     scopes = ["profile:read", "projects:read", "categories:read", "categories:write",
               "expenses:read", "expenses:write", "reports:read"]
     sql = [
-        "UPDATE app_state SET payload=" + literal(json.dumps({account["id"]: account})) + " WHERE name='users';",
-        "UPDATE app_state SET payload=" + literal(json.dumps({"runtime-session": {
-            "userId": account["id"], "expiresAt": now + 3600}})) + " WHERE name='sessions';",
+        "INSERT INTO app_state(name,payload,updated_at) VALUES(" + ",".join(literal(value) for value in
+            (record_name("users", account["id"]), encode_record("users", account["id"], account), now)) + ");",
+        "INSERT INTO app_state(name,payload,updated_at) VALUES(" + ",".join(literal(value) for value in
+            (record_name("sessions", "runtime-session"), encode_record("sessions", "runtime-session",
+                {"userId": account["id"], "expiresAt": now + 3600}), now)) + ");",
         "INSERT INTO api_keys(id,user_id,name,key_prefix,key_hash,scopes,restrictions,created_at) VALUES(" +
         ",".join(literal(value) for value in ("runtime-key", account["id"], "Local only", TOKEN[:16],
             hashlib.sha256(TOKEN.encode()).hexdigest(), json.dumps(scopes), '{"shared":true}', now)) + ");",
@@ -61,7 +67,7 @@ def main():
     parser.add_argument("--persist-to", type=Path, required=True)
     args = parser.parse_args()
     config = json.loads((WORKER / "wrangler.jsonc").read_text(encoding="utf-8"))
-    if config.get("routes") or config.get("workers_dev") or any(
+    if config.get("routes") or config.get("workers_dev") or config.get("vars", {}).get("PULLWISE_MODE") != "local" or any(
             db.get("remote") is not False for db in config["d1_databases"]):
         raise SystemExit("Refusing a configuration that is not explicitly local-only")
     with tempfile.TemporaryDirectory() as directory:
@@ -94,7 +100,8 @@ def main():
             content_type = response.headers.get("Content-Type", "")
             return json.loads(raw) if "application/json" in content_type else raw
 
-    assert call("GET", "/health")["ok"]
+    health = call("GET", "/health")
+    assert health["ok"]
     assert call("GET", "/api/v1/me")["id"] == "runtime-owner"
     assert call("GET", "/api/v1/me", cookie=True)["id"] == "runtime-owner"
     rows = list(csv.reader(io.StringIO(call("GET", "/api/v1/expenses/export"))))
@@ -124,6 +131,7 @@ def main():
     summary = call("GET", "/api/v1/reports/summary")
     assert any(group["target"] == "account" and group["amountMinor"] == 25100 for group in summary["groups"])
     print(json.dumps({"passed": True, "local_http_requests": count, "csv_records": 251,
+                      "configured_mode": config["vars"]["PULLWISE_MODE"], "observed_health_mode": health.get("mode"),
                       "remote_d1_rows_read": 0, "remote_d1_rows_written": 0}))
 
 

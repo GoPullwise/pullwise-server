@@ -12,6 +12,7 @@ import test_ledger_routes as route_fixture
 from pullwise_server.cloudflare_github_gateway import GitHubFailure
 from pullwise_server.cloudflare_api_key_write import create_api_key
 from pullwise_server.cloudflare_project_repositories import project_repository_eligibility
+from pullwise_server.cloudflare_state_records import encode_record, record_name
 from test_cloudflare_github_identity_http import D1ShapedSQLite, GitHubStub
 
 
@@ -72,13 +73,13 @@ def update(ledger, project, body, revision=None, headers=None):
 
 def member(ledger, role="admin"):
     with ledger.store.connect() as db:
-        users = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])
-        users["usr_github_88"] = {"id": "usr_github_88", "name": "Bob", "githubId": "88",
+        actor = {"id": "usr_github_88", "name": "Bob", "githubId": "88",
             "githubLogin": "bob", "githubAccessToken": "sealed:member-access-token"}
-        db.execute("UPDATE app_state SET payload=? WHERE name='users'", (json.dumps(users, separators=(",", ":")),))
-        sessions = json.loads(db.execute("SELECT payload FROM app_state WHERE name='sessions'").fetchone()[0])
-        sessions["session-member"] = {"userId": "usr_github_88", "expiresAt": ledger.now + 3600}
-        db.execute("UPDATE app_state SET payload=? WHERE name='sessions'", (json.dumps(sessions),))
+        session = {"userId": "usr_github_88", "expiresAt": ledger.now + 3600}
+        for kind, identifier, value in (("users", "usr_github_88", actor),
+            ("sessions", "session-member", session)):
+            db.execute("INSERT INTO app_state(name,payload,updated_at) VALUES(?,?,?)",
+                (record_name(kind, identifier), encode_record(kind, identifier, value), ledger.now))
         db.execute("""INSERT INTO workspace_members(workspace_id,user_id,role,revision,joined_at,
             updated_at,invited_by_user_id) VALUES('usr_github_77','usr_github_88',?,1,'2026-10-06',
             '2026-10-06','usr_github_77')""", (role,))

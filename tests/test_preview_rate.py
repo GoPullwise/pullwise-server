@@ -172,6 +172,7 @@ def test_authenticated_rate_rejection_remains_429_when_route_catches_provider_er
                 return SimpleNamespace(status=200)
         monkeypatch.setattr(entry.time, "time", lambda: 120)
         monkeypatch.setattr(entry, "initialize_product", noop)
+        monkeypatch.setattr(entry, "migrate_product_state_records", noop)
         monkeypatch.setattr(entry, "NativeD1", lambda _: raw)
         monkeypatch.setattr(entry, "ProductMeteredD1", lambda *args, **kwargs:
             ProductMeteredD1(*args, **kwargs, clock=lambda: 120))

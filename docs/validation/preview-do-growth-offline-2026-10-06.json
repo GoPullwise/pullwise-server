@@ -1,0 +1,144 @@
+{
+  "scope": "Offline in-memory host SQLite page-size simulation; not native DO measurement or actual Preview usage. Exact table DDL extracted unchanged from current source; no triggers executed, no application or D1/network access. Two thousand synthetic API-equivalent records per scenario,12groups each. No source changes or persistent journal manipulation.",
+  "baseline": "Current append-only evidence is numeric SQL rows, not per-row JSON; JSON lengths are serialization sensitivity, not actual stored column data.",
+  "samples": [
+    {
+      "scenario": "month-one-evidence-only",
+      "offlineHostSQLite": "3.42.0",
+      "evidenceRows": 24000,
+      "settlementRows": 0,
+      "newPhysicalBytes": 462848,
+      "evidencePhysicalBytesPerRow": 19.285333333333334,
+      "settlementPhysicalBytesPerRow": 0.0,
+      "physicalBytesPerOperation": 19.285333333333334,
+      "serializedEvidenceBytes": 91,
+      "serializedSettlementBytes": 0,
+      "monthlyBytesAt2M12Groups": 462848000.0,
+      "monthsToDecimal10GBFromEmpty": 21.605365044247787,
+      "hostPageSizeBytes": 4096
+    },
+    {
+      "scenario": "month-one-representative-synthetic-shape",
+      "offlineHostSQLite": "3.42.0",
+      "evidenceRows": 24000,
+      "settlementRows": 24000,
+      "newPhysicalBytes": 729088,
+      "evidencePhysicalBytesPerRow": 19.285333333333334,
+      "settlementPhysicalBytesPerRow": 11.093333333333334,
+      "physicalBytesPerOperation": 30.378666666666668,
+      "serializedEvidenceBytes": 91,
+      "serializedSettlementBytes": 36,
+      "monthlyBytesAt2M12Groups": 729088000.0,
+      "monthsToDecimal10GBFromEmpty": 13.715765449438202,
+      "hostPageSizeBytes": 4096
+    },
+    {
+      "scenario": "month-twelve-representative-synthetic-shape",
+      "offlineHostSQLite": "3.42.0",
+      "evidenceRows": 24000,
+      "settlementRows": 24000,
+      "newPhysicalBytes": 802816,
+      "evidencePhysicalBytesPerRow": 21.333333333333332,
+      "settlementPhysicalBytesPerRow": 12.117333333333333,
+      "physicalBytesPerOperation": 33.45066666666666,
+      "serializedEvidenceBytes": 93,
+      "serializedSettlementBytes": 37,
+      "monthlyBytesAt2M12Groups": 802815999.9999999,
+      "monthsToDecimal10GBFromEmpty": 12.456154336734695,
+      "hostPageSizeBytes": 4096
+    },
+    {
+      "scenario": "month-twelve-larger-count-sensitivity",
+      "offlineHostSQLite": "3.42.0",
+      "evidenceRows": 24000,
+      "settlementRows": 24000,
+      "newPhysicalBytes": 901120,
+      "evidencePhysicalBytesPerRow": 23.381333333333334,
+      "settlementPhysicalBytesPerRow": 14.165333333333333,
+      "physicalBytesPerOperation": 37.54666666666667,
+      "serializedEvidenceBytes": 99,
+      "serializedSettlementBytes": 42,
+      "monthlyBytesAt2M12Groups": 901120000.0,
+      "monthsToDecimal10GBFromEmpty": 11.097301136363637,
+      "hostPageSizeBytes": 4096
+    }
+  ],
+  "conservativePhysicalPairPlanningMargins": [
+    {
+      "bytesPerEvidenceSettlementPair": 64,
+      "monthlyGB": 1.536,
+      "monthsTo10GB": 6.510416666666667
+    },
+    {
+      "bytesPerEvidenceSettlementPair": 96,
+      "monthlyGB": 2.304,
+      "monthsTo10GB": 4.340277777777778
+    },
+    {
+      "bytesPerEvidenceSettlementPair": 128,
+      "monthlyGB": 3.072,
+      "monthsTo10GB": 3.2552083333333335
+    }
+  ],
+  "date": "2026-10-06",
+  "canonicalJournalSha256": "48deb528340ba172c56052b7dd7fa2a56792863ea0a7f2315c9b015b594e500d",
+  "nativeCloudflareStorageMeasurement": false,
+  "cloudflareBillingMeasurement": false,
+  "applicationRequests": 0,
+  "remoteD1Operations": 0,
+  "providerRequests": 0,
+  "sourceChanges": false,
+  "currentJournalModified": false,
+  "currentJournalSizeKnown": false,
+  "preservationRequirements": [
+    "Existing counters and original evidence remain unchanged",
+    "Incomplete and unknown native outcomes remain authoritative",
+    "Financial and billing history remain unchanged",
+    "No pruning, reset, namespace rollover, or new namespace was performed"
+  ],
+  "officialReferences": [
+    {
+      "url": "https://developers.cloudflare.com/changelog/post/2025-04-07-sqlite-in-durable-objects-ga/",
+      "claim": "10GB SQLite database per Durable Object GA"
+    },
+    {
+      "url": "https://developers.cloudflare.com/durable-objects/concepts/what-are-durable-objects/",
+      "claim": "Main body: storage up to10GB; an old1GB pre-GA footnote remains and was not used for the estimate"
+    },
+    {
+      "url": "https://developers.cloudflare.com/durable-objects/platform/pricing/",
+      "claim": "Paid:50million rows written/month included then$1/million;5GB-month included then$0.20/GB-month"
+    },
+    {
+      "url": "https://developers.cloudflare.com/durable-objects/examples/testing-with-durable-objects/",
+      "claim": "sql.databaseSize permits a future finite native size measurement; none was performed here"
+    }
+  ],
+  "assumptions": {
+    "apiRequestsPerMonth": 2000000,
+    "operationGroupsPerApi": 12,
+    "evidenceRowsPerMonth": 24000000,
+    "maximumSettlementRowsPerMonth": 24000000,
+    "settlementCondition": "Only when every returned native meta.total_attempts is exactly integer1; null/unknown/retries do not settle",
+    "capBytesConservativeDecimal": 10000000000,
+    "startingStorageBytes": 0,
+    "monthDaysForPlanning": 30
+  },
+  "doWriteCostDistinction": {
+    "planningBilledWritesPerApi": 80,
+    "monthlyPlanningBilledRowWrites": 160000000,
+    "stable12GroupNativeFixtureBilledWrites": 68,
+    "stable12GroupNewEvidencePlusSettlementRows": 24,
+    "stable12GroupExistingRowUpdates": 44,
+    "note": "Native fixture uses complete synthetic single-attempt metadata. Billed writes includeupdates/triggers/index effects, not80 newly retained rows/API."
+  },
+  "limits": [
+    "Small in-memory host SQLite3.42.0 sample; notCloudflare native databaseSize",
+    "No currentPreview storage size or real traffic/group distribution was read",
+    "ExacttableDDL extracted unchanged; accountingtriggers excluded to isolateappend-onlytable pages",
+    "No nativewritebilling/CPU/DOduration/PITR/hiddenpages or backendpageoverhead measured",
+    "Linear extrapolation assumes12mean groups/API and stablecolumn widths; largergroupmean shortens horizon",
+    "3.3–21.6month range is conditional scenario sensitivity from empty, notguaranteedminimumlifetime",
+    "Otherfixedjournal/ratetables, preexistingdata and failure rows consumeadditionalspace; totalcap is perobject"
+  ]
+}

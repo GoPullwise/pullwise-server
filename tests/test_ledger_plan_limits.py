@@ -8,6 +8,7 @@ import pytest
 from ledger_d1_fixture import D1ShapedSQLite, seed, seed_auth
 from pullwise_server.ledger_plan_policy import default_policy, parse_policy, entitlements
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1, PlanLimitError
+from pullwise_server.cloudflare_state_records import record_name
 
 
 def test_defaults_override_and_max_only_jev():
@@ -40,8 +41,8 @@ def setup(tmp_path):
 
 def write(binding, frozen, fixture, number, *, kind="project", now=None):
     fence = binding.prepare("""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN
-        EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u
-        WHERE a.name='users' AND u.key=? AND u.value=?) THEN 1 ELSE 0 END)""").bind("owner", frozen)
+        EXISTS(SELECT 1 FROM app_state u
+        WHERE u.name=? AND u.payload=?) THEN 1 ELSE 0 END)""").bind(record_name("users", "owner"), frozen)
     if kind == "project":
         change = binding.prepare("""INSERT INTO ledger_projects(id,owner_id,github_repo_id,
             github_full_name,created_at,updated_at) VALUES(?,?,?,?,?,?)""").bind(
@@ -121,10 +122,12 @@ def test_monthly_jev_reservation_is_no_rollover_and_survives_failure(setup):
     with fixture.store._immediate() as db:
         db.executescript((Path(__file__).resolve().parents[1] /
                           "cloudflare/server/migrations/0003_ledger_suggestions.sql").read_text())
-        user = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])["owner"]
+        user = json.loads(db.execute("SELECT payload FROM app_state WHERE name=?",
+                                    (record_name("users", "owner"),)).fetchone()[0])
         user["billing"] = {"plan": "max", "status": "active"}
         frozen = json.dumps(user, separators=(",", ":"))
-        db.execute("UPDATE app_state SET payload=? WHERE name='users'", (json.dumps({"owner": user}),))
+        db.execute("UPDATE app_state SET payload=? WHERE name=?",
+                   (frozen, record_name("users", "owner")))
     policy = default_policy()
     policy["max"]["jevMonthlyBudgetUsd"] = "0.002753"
     limited = PlanLimitedD1(D1ShapedSQLite(fixture.store), policy=policy, now=fixture.now)
@@ -160,6 +163,23 @@ def test_deleted_records_count_and_failed_audit_rolls_back_quota(setup):
         write(limited, frozen.replace('"owner"', '"intruder"'), fixture, 3)
     with fixture.store.connect() as db:
         assert db.execute("SELECT projects,records,writes FROM ledger_plan_usage").fetchone()[:] == (0, 1, 1)
+
+
+def test_paid_snapshot_cannot_authorize_a_different_user_record(setup):
+    fixture, frozen = setup
+    raw = D1ShapedSQLite(fixture.store)
+    limited = PlanLimitedD1(raw, policy=default_policy(), now=fixture.now)
+    fence = limited.prepare("""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN
+        EXISTS(SELECT 1 FROM app_state u WHERE u.name=? AND u.payload=?)
+        THEN 1 ELSE 0 END)""").bind(record_name("users", "another-user"), frozen)
+    change = limited.prepare("""INSERT INTO ledger_projects(id,owner_id,github_repo_id,
+        github_full_name,created_at,updated_at) VALUES('foreign','owner',99,'o/foreign','local','local')""")
+    with pytest.raises(PlanLimitError, match="USAGE_GUARD_UNAVAILABLE"):
+        asyncio.run(limited.batch([fence, change, limited.prepare("DELETE FROM d1_command_guard")]))
+    assert raw.batch_count == 0
+    with fixture.store.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM ledger_projects").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM ledger_plan_usage").fetchone()[0] == 0
 
 
 def test_late_request_cannot_roll_counters_back_to_an_old_window(setup):
@@ -253,10 +273,12 @@ def test_internal_jev_reservation_survives_lowered_business_write_caps(setup):
     with fixture.store._immediate() as db:
         db.executescript((Path(__file__).resolve().parents[1] /
                           "cloudflare/server/migrations/0003_ledger_suggestions.sql").read_text())
-        user = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])["owner"]
+        user = json.loads(db.execute("SELECT payload FROM app_state WHERE name=?",
+                                    (record_name("users", "owner"),)).fetchone()[0])
         user["billing"] = {"plan": "max", "status": "active"}
         frozen = json.dumps(user, separators=(",", ":"))
-        db.execute("UPDATE app_state SET payload=? WHERE name='users'", (json.dumps({"owner": user}),))
+        db.execute("UPDATE app_state SET payload=? WHERE name=?",
+                   (frozen, record_name("users", "owner")))
     policy = default_policy()
     raw = D1ShapedSQLite(fixture.store)
     limited = PlanLimitedD1(raw, policy=policy, now=fixture.now)

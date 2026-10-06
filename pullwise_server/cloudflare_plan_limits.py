@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 from .account_cycle_rules import effective_user_plan
 from .ledger_plan_policy import default_policy, usd_micros, JEV_RESERVATION_MICROUSD
+from .cloudflare_state_records import record_name
 
 
 class PlanLimitError(Exception):
@@ -31,6 +32,25 @@ _ERRORS = {"plan_project_limit": (403, "PROJECT_LIMIT"),
            "plan_jev_budget_limit": (429, "JEV_BUDGET_LIMIT")}
 _MUTATION = re.compile(r"^\s*(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM)\s+"
     r"(ledger_projects|expense_categories|expenses|api_keys|expense_suggestion_budget|expense_suggestion_events|ledger_plan_usage|workspace_members|workspace_invites|workspace_events|ledger_project_repositories)\b", re.I)
+_USER_FENCE = re.compile(r"\bu\.name\s*=\s*\?\s+AND\s+u\.payload\s*=\s*\?", re.I)
+
+
+def _fenced_user(statements):
+    """Only an exact stored-user CAS can supply the commercial owner/plan."""
+    for item in statements:
+        if not re.search(r"\bapp_state\s+u\b", item.sql, re.I):
+            continue
+        for match in _USER_FENCE.finditer(item.sql):
+            index = item.sql[:match.start()].count("?")
+            try:
+                key, snapshot = item.params[index:index + 2]
+                saved = json.loads(snapshot)
+                if (isinstance(saved, dict) and isinstance(saved.get("id"), str)
+                        and key == record_name("users", saved["id"])):
+                    return saved["id"], saved
+            except (TypeError, ValueError, IndexError):
+                continue
+    return None, None
 
 _USAGE_SQL = """INSERT INTO ledger_plan_usage(owner_id,projects,records,month,writes,minute,
     minute_writes,jev_reserved_microusd,project_cap,record_cap,minute_cap,month_cap,jev_cap,
@@ -99,17 +119,7 @@ class PlanLimitedD1:
             return await self.binding.batch(raw)
         # Trusted fences contain the account ID and exact persisted user JSON.
         # Never derive the owner or paid plan from an HTTP input or API-key scope.
-        owner = user = None
-        for item in statements:
-            if "u.value=?" in item.sql and len(item.params) >= 2:
-                index = 4 if item.sql.lstrip().upper().startswith("UPDATE API_KEYS") else 1
-                try:
-                    saved = json.loads(item.params[index])
-                except (IndexError, TypeError, ValueError):
-                    continue
-                if isinstance(saved, dict) and isinstance(saved.get("id"), str):
-                    owner, user = saved["id"], saved
-                    break
+        owner, user = _fenced_user(statements)
         if user is None:
             raise PlanLimitError(503, "USAGE_GUARD_UNAVAILABLE")
         plan = effective_user_plan(user, timestamp=self.now)

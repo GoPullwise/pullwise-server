@@ -1,0 +1,130 @@
+{
+  "date": "2026-10-06",
+  "status": "prepared_not_executed_remotely",
+  "runner": "/workspace/qa-private/remote-members-focused.mjs",
+  "runnerSha256": "43eb714d9c8c23442888a07fb99643ee84e1de3980f89b6a7527ffbaf275acf0",
+  "manifest": {
+    "origin": "https://preview.pull-wise.com",
+    "businessHttpLimit": 110,
+    "networkRequestLimit": 400,
+    "mutationAttemptLimit": 16,
+    "confirmedWriteLimit": 12,
+    "minimumMutationIntervalMs": 10000,
+    "cleanupMutationReserve": 4,
+    "cleanupBusinessHttpReserve": 20,
+    "cleanupDeadlineReserveMs": 120000,
+    "clientRetries": 0,
+    "newProjects": 0,
+    "projectIdReadOnly": "prj_9b24f6b1b7244aaa8a9fc649a8e3dcd6",
+    "maximumExpenses": 1,
+    "maximumCategories": 1,
+    "maximumInvitations": 1,
+    "maximumKeys": 1,
+    "realPayments": false,
+    "modelCalls": false,
+    "screenshots": false,
+    "traces": false,
+    "storageState": false,
+    "credentialPersistence": false,
+    "fixtures": "Only new QA invitation/membership, shared expense, key and optional category",
+    "baselineResultUnchanged": "/workspace/qa-private/remote-projects-two-users-result.json"
+  },
+  "originalBaseline": {
+    "evidence": "projects-two-real-users-baseline-2026-10-06.json",
+    "runId": "2cad33dc290e052a29dc24e9436cfeb0",
+    "passed": false,
+    "preserved": true
+  },
+  "nominalConfirmedMutations": {
+    "existingActiveCategory": 10,
+    "newQaCategoryRequired": 12
+  },
+  "plannedUiChecks": [
+    "Recipient accepts one new Viewer invitation",
+    "Owner explicitly reloads Members before Editor role change",
+    "Editor creates and edits one QA Shared pool expense",
+    "Owner explicitly reloads Members before Admin role change and removal"
+  ],
+  "plannedRestChecks": [
+    "Current Admin may read the already archived QA project without creating another project",
+    "Earlier membership-revision key is denied after role change",
+    "Removal denies both shared workspace session and key while preserving the recipient personal ledger"
+  ],
+  "cleanup": "Only confirmed newly created QA expense, category, key, invitation and membership; read-only recovery precedes cleanup of uncertain outcomes. No unknown creation is replayed.",
+  "localVerification": {
+    "scope": "Built Web in Chromium; all network dispatches fulfilled locally from assets and synthetic DTOs or aborted. Synthetic sessions remain in memory; local mutation pacing was reduced to zero only for this simulation.",
+    "fixtureExpectationsPassed": 4,
+    "remoteRequests": 0,
+    "realAccounts": 0,
+    "realProviderRequests": 0,
+    "cases": [
+      {
+        "scenario": "optional-category",
+        "runnerPassed": true,
+        "expectedFailure": null,
+        "fixtureExpectationPassed": true,
+        "counts": {
+          "businessHttp": 89,
+          "network": 147,
+          "mutationAttempts": 12,
+          "confirmedWrites": 12
+        },
+        "allNewFixturesRemoved": true,
+        "remoteForwards": 0
+      },
+      {
+        "scenario": "committed-lost-acceptance",
+        "runnerPassed": false,
+        "expectedFailure": "invite_accept",
+        "fixtureExpectationPassed": true,
+        "counts": {
+          "businessHttp": 25,
+          "network": 61,
+          "mutationAttempts": 3,
+          "confirmedWrites": 2
+        },
+        "allNewFixturesRemoved": true,
+        "remoteForwards": 0
+      },
+      {
+        "scenario": "committed-lost-expense-patch",
+        "runnerPassed": false,
+        "expectedFailure": "editor_shared_edit",
+        "fixtureExpectationPassed": true,
+        "counts": {
+          "businessHttp": 57,
+          "network": 113,
+          "mutationAttempts": 7,
+          "confirmedWrites": 6
+        },
+        "allNewFixturesRemoved": true,
+        "remoteForwards": 0
+      },
+      {
+        "scenario": "committed-lost-key-create",
+        "runnerPassed": false,
+        "expectedFailure": "team_key_create",
+        "fixtureExpectationPassed": true,
+        "counts": {
+          "businessHttp": 67,
+          "network": 123,
+          "mutationAttempts": 9,
+          "confirmedWrites": 8
+        },
+        "allNewFixturesRemoved": true,
+        "remoteForwards": 0
+      }
+    ]
+  },
+  "prerequisites": [
+    "Root releases only after final preview publication and current native/full-suite verification",
+    "Two fresh distinct actual preview sessions with the expected stable GitHub IDs",
+    "No preexisting recipient membership in the Owner workspace; Owner plan Free or Pro avoids any automatic model call"
+  ],
+  "limitations": [
+    "Prepared runner and synthetic browser fixtures do not claim real-account completion",
+    "The original real Projects/Viewer baseline failure remains false and unchanged",
+    "Admin project access and key invalidation use actual REST reads; ordinary invite, roles and Shared pool expense actions use the UI",
+    "No real payment, live subscription change, model request, remote SQL, screenshots, traces or credential files"
+  ]
+}

@@ -114,12 +114,12 @@ def collect_trace(directory):
 
     asyncio.run(journey())
     with store.connect() as connection:
-        final = {name: len(json.loads(connection.execute(
-            "SELECT payload FROM app_state WHERE name=?", (name,)).fetchone()[0]))
+        final = {name: connection.execute(
+            "SELECT COUNT(*) FROM app_state WHERE name GLOB ?", (f"record:{name}:*",)).fetchone()[0]
             for name in ("users", "sessions", "githubStates")}
     return trace, {"migrations": migrations, "tables": tables, "indexes": indexes,
         "http_cases": 9, "sql_operations": len(trace), "remote_admissible": False,
-        "final_state": final, "provider_mode": "synthetic"}
+        "final_state": final, "state_storage_version": 1, "provider_mode": "synthetic"}
 
 
 def validate_evidence(trace, evidence):

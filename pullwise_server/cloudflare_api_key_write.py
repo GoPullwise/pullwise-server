@@ -20,6 +20,7 @@ from .cloudflare_principal import (
     _principal, _resource_auth_snapshot,
 )
 from .cloudflare_ledger_auth import ledger_principal, ROLE_SCOPES
+from .cloudflare_state_records import record_name
 
 
 def _new_api_token() -> str:
@@ -58,10 +59,12 @@ async def revoke_api_key(*, binding: Any, key_id: str,
     statements = [
         binding.prepare("""UPDATE api_keys SET revoked_at=? WHERE id=? AND user_id=?
             AND revoked_at IS NULL
-            AND EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u
-                WHERE a.name='users' AND u.key=? AND u.value=?)
-            AND EXISTS(SELECT 1 FROM app_state WHERE name='sessions' AND payload=?)""").bind(
-                now, key_id, user["id"], user["id"], proof["user"], proof["sessions"]),
+            AND EXISTS(SELECT 1 FROM app_state WHERE name=? AND payload=?)
+            AND EXISTS(SELECT 1 FROM app_state WHERE name=? AND payload=?
+                AND json_extract(payload,'$.userId')=?
+                AND CAST(json_extract(payload,'$.expiresAt') AS INTEGER)>=?)""").bind(
+                now, key_id, user["id"], record_name("users", user["id"]), proof["user"],
+                record_name("sessions", proof["session_id"]), proof["sessions"], user["id"], now),
         binding.prepare("""INSERT INTO d1_command_guard(ok)
             VALUES(CASE WHEN changes()=1 THEN 1 ELSE 0 END)"""),
         binding.prepare("DELETE FROM d1_command_guard"),

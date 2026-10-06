@@ -9,6 +9,7 @@ from .cloudflare_principal import (
 )
 import json
 import re
+from .cloudflare_state_records import record_name
 
 
 READ_SCOPES = frozenset({"profile:read", "projects:read", "categories:read",
@@ -78,8 +79,8 @@ async def ledger_principal(*, binding: Any, headers: Mapping[str, object],
     user, role, revision, member = actor, "owner", 1, None
     extra = []
     if workspace_id != actor["id"]:
-        extra = [binding.prepare("""SELECT u.value AS snapshot FROM app_state a,
-            json_each(a.payload) u WHERE a.name='users' AND u.key=?""").bind(workspace_id),
+        extra = [binding.prepare("SELECT payload AS snapshot FROM app_state WHERE name=?")
+            .bind(record_name("users", workspace_id)),
             binding.prepare("""SELECT role,revision,removed_at FROM workspace_members
             WHERE workspace_id=? AND user_id=?""").bind(workspace_id, actor["id"])]
         found = await binding.batch(extra)

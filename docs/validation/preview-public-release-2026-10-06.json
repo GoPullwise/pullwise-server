@@ -1,0 +1,183 @@
+{
+  "date": "2026-10-06",
+  "passed": false,
+  "source": "Actual unauthenticated Chromium against deployed Preview, no mocks",
+  "versions": {
+    "server": "7882f562-8c5e-4c5a-a898-d52943dc63e6",
+    "web": "ea62c7a0-37e4-4693-b78a-bbb3c96c53b6",
+    "trafficPercent": 100
+  },
+  "scope": {
+    "networkCap": 60,
+    "apiReadCap": 8,
+    "mutationCap": 0,
+    "clientRetries": 0,
+    "cookiesProvided": false,
+    "screenshots": false,
+    "traces": false,
+    "storageState": false
+  },
+  "counts": {
+    "networkRequests": 22,
+    "apiReads": 5,
+    "mutationsForwarded": 0,
+    "externalOrTelemetryBlocked": 2
+  },
+  "gates": {
+    "productOperationMode": true,
+    "integrityStopClear": true,
+    "historicalCountersRetained": true,
+    "homepage200": true,
+    "assetsMatchLocalBuild": true,
+    "initialHealth200Once": true,
+    "manualRefreshAvailable": true,
+    "manualRefresh200": true,
+    "mobileLayout390": true,
+    "zeroPageErrors": true,
+    "d1WrittenRowsDeltaZero": false
+  },
+  "assets": [
+    {
+      "path": "/assets/index-5eu4-MCJ.css",
+      "status": 200,
+      "sha256": "ad31be41b1f24d387397b51034b2ec689714484ba8d3af02797ca23e13e9daa6",
+      "matchesLocalBuild": true
+    },
+    {
+      "path": "/assets/vendor-CHwUWPSh.js",
+      "status": 200,
+      "sha256": "bb88671736f2acdd1ab57aa4ca82fd7fa055a58dc8bf06a9a3f41f49dcb355e1",
+      "matchesLocalBuild": true
+    },
+    {
+      "path": "/assets/workspace-context-CLsmFTwk.js",
+      "status": 200,
+      "sha256": "5a7a3bb35582e68ab0642cac15a33a3c9c3851bae90ce8c33c29a165fc934e1d",
+      "matchesLocalBuild": true
+    },
+    {
+      "path": "/assets/vendor-react-CIxRT3XZ.js",
+      "status": 200,
+      "sha256": "fabbd4ae4283cbacf940dcd9617fd419292b1372bcd636008b65e97f5a604684",
+      "matchesLocalBuild": true
+    },
+    {
+      "path": "/assets/rolldown-runtime-Bh1tDfsg.js",
+      "status": 200,
+      "sha256": "1b13387cb23dc39bf70e31677c21f6db5cad3377b96f286b6ee444496e5bfea7",
+      "matchesLocalBuild": true
+    },
+    {
+      "path": "/assets/auth-DPtRCS4W.js",
+      "status": 200,
+      "sha256": "7f3d610335c49ac57a40e2d26ef03c533b2cae73476772ef3faf88a303c30890",
+      "matchesLocalBuild": true
+    },
+    {
+      "path": "/assets/pullwise-C0NXlarL.js",
+      "status": 200,
+      "sha256": "0f5487203ed442efebdd7df3d248b508c35b7741ec95b334c4fbeda07e1890dc",
+      "matchesLocalBuild": true
+    },
+    {
+      "path": "/assets/index-HtTttSzC.js",
+      "status": 200,
+      "sha256": "5b4892c31b27e460575f9d41cb5882d8ee57e17f7964ccd3c705370b824b3ca5",
+      "matchesLocalBuild": true
+    },
+    {
+      "path": "/assets/navigation-DjIQ9Bmm.js",
+      "status": 200,
+      "sha256": "68ab9d1356b2e6e4c342574878092c75b6e36dec7ec6e5ccd4c63ef78d33de2f",
+      "matchesLocalBuild": true
+    },
+    {
+      "path": "/assets/public-layout-CmDbffuM.js",
+      "status": 200,
+      "sha256": "f8bdb6cc8aea6eab9d034d126a9c378e52fa9b6860a394790f34f927dc8d889f",
+      "matchesLocalBuild": true
+    },
+    {
+      "path": "/assets/notifications-BAp_EUSH.js",
+      "status": 200,
+      "sha256": "61a03cd66ea1e0347145a5a1aba8f9a6627798a357eef92a8744d9ebc53e9645",
+      "matchesLocalBuild": true
+    },
+    {
+      "path": "/assets/ledger-q3VSO9UY.js",
+      "status": 200,
+      "sha256": "da3104663315a2e49b29d59775309e466511d70b09d0acfd6640d9114af74032",
+      "matchesLocalBuild": true
+    }
+  ],
+  "pageErrors": [],
+  "homepageLayout": {
+    "configuredWidth": 390,
+    "documentWidth": 390,
+    "visualViewportWidth": 390,
+    "coarsePointer": true,
+    "touchPoints": 1
+  },
+  "statusLayout": {
+    "configuredWidth": 390,
+    "documentWidth": 390,
+    "visualViewportWidth": 390,
+    "coarsePointer": true,
+    "touchPoints": 1
+  },
+  "journal": {
+    "before": {
+      "productOperationMode": true,
+      "limits": {
+        "rowsRead": null,
+        "rowsWritten": null
+      },
+      "reserved": {
+        "rowsRead": 38142,
+        "rowsWritten": 839
+      },
+      "observed": {
+        "rowsRead": 26500,
+        "rowsWritten": 441
+      },
+      "schemaReady": true,
+      "schemaVersion": 5,
+      "stopped": null
+    },
+    "after": {
+      "productOperationMode": true,
+      "limits": {
+        "rowsRead": null,
+        "rowsWritten": null
+      },
+      "reserved": {
+        "rowsRead": 38288,
+        "rowsWritten": 844
+      },
+      "observed": {
+        "rowsRead": 26646,
+        "rowsWritten": 444
+      },
+      "schemaReady": true,
+      "schemaVersion": 5,
+      "stopped": null
+    },
+    "delta": {
+      "reservedRowsRead": 146,
+      "reservedRowsWritten": 5,
+      "observedRowsRead": 146,
+      "observedRowsWritten": 3
+    }
+  },
+  "failure": {
+    "stage": "budget_after",
+    "code": "UNEXPECTED_D1_WRITES"
+  },
+  "browserClosed": true,
+  "healthRequests": 2,
+  "completedAt": "2026-10-06T13:58:00.172Z",
+  "limitations": [
+    "Global cumulative D1 write counters increased while this fixture forwarded only5read-onlyAPIcalls and0mutations. Attribution to concurrent traffic versus read-path effects is unresolved; zero-write acceptance is not claimed.",
+    "Exactlyone remote public fixture ran, with no retries, no polling, no cookies, no screenshots and no traces."
+  ]
+}

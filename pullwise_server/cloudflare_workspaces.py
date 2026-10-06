@@ -15,6 +15,7 @@ from .cloudflare_github_identity_http import _random_urlsafe
 from .cloudflare_ledger_auth import ledger_principal, workspace_payload
 from .cloudflare_plan_limits import PlanLimitError
 from .cloudflare_principal import PrincipalAuthError, _cookie_sessions, _header
+from .cloudflare_state_records import record_name
 
 ROLES = {"admin", "editor", "viewer"}
 MAX_MEMBERS = 99  # plus the implicit owner
@@ -132,9 +133,9 @@ async def _list(binding, headers, now):
     # Selectors do not change the identity whose accessible workspaces are listed.
     user, proof, auth, validate = await _auth(binding, headers, now)
     result = await binding.batch([*auth, binding.prepare("""SELECT
-        m.workspace_id,m.role,m.revision,u.value AS snapshot
-        FROM workspace_members m,app_state a,json_each(a.payload) u
-        WHERE a.name='users' AND u.key=m.workspace_id AND m.user_id=?
+        m.workspace_id,m.role,m.revision,a.payload AS snapshot
+        FROM workspace_members m JOIN app_state a ON a.name='record:users:'||m.workspace_id
+        WHERE m.user_id=?
         AND m.removed_at IS NULL ORDER BY m.workspace_id LIMIT 100""").bind(user["id"])])
     validate([part.results for part in result[:len(auth)]])
     _cookie_only(headers, proof)
@@ -152,9 +153,9 @@ async def _list(binding, headers, now):
 
 async def _members(binding, headers, body, now, workspace_id, user_id, method):
     user, proof, auth, validate = await _auth(binding, headers, now, workspace_id)
-    sql = """SELECT m.*,u.value AS snapshot FROM workspace_members m,
-        app_state a,json_each(a.payload) u WHERE a.name='users' AND u.key=m.user_id
-        AND m.workspace_id=? AND m.removed_at IS NULL"""
+    sql = """SELECT m.*,a.payload AS snapshot FROM workspace_members m
+        JOIN app_state a ON a.name='record:users:'||m.user_id
+        WHERE m.workspace_id=? AND m.removed_at IS NULL"""
     values = [workspace_id]
     sql += " AND m.user_id=?" if user_id else " ORDER BY m.user_id LIMIT 100"
     if user_id:
@@ -312,8 +313,8 @@ async def _accept(binding, headers, body, now, method):
     workspace_id, inviter_id = invite["workspace_id"], invite["created_by_user_id"]
     # Revalidate the actor alongside all preview/accept resource data.
     current_actor, current_proof, auth, validate = await _auth(binding, headers, now)
-    found = await binding.batch([*auth, binding.prepare("""SELECT u.value AS snapshot FROM app_state a,
-            json_each(a.payload) u WHERE a.name='users' AND u.key=?""").bind(workspace_id),
+    found = await binding.batch([*auth, binding.prepare(
+        "SELECT payload AS snapshot FROM app_state WHERE name=?").bind(record_name("users", workspace_id)),
         binding.prepare("SELECT role,revision,removed_at FROM workspace_members WHERE workspace_id=? AND user_id=?")
             .bind(workspace_id, inviter_id),
         binding.prepare("SELECT * FROM workspace_members WHERE workspace_id=? AND user_id=?")
@@ -360,14 +361,13 @@ async def _accept(binding, headers, body, now, method):
     if invite["revision"] == MAX_REVISION:
         return _error(409, "REVISION_EXHAUSTED")
     _, timestamp, write_guard = _helpers()
-    checks = ["""EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u
-        WHERE a.name='users' AND u.key=? AND u.value=?)""",
+    checks = ["EXISTS(SELECT 1 FROM app_state u WHERE u.name=? AND u.payload=?)",
         """EXISTS(SELECT 1 FROM workspace_invites WHERE id=? AND workspace_id=? AND token_hash=?
           AND github_recipient_id=? AND role=? AND created_by_user_id=? AND created_by_revision=? AND revision=?
           AND status='pending' AND expires_at>=?)""",
         "(SELECT COUNT(*) FROM workspace_members WHERE workspace_id=? AND removed_at IS NULL)<?",
         "(SELECT COUNT(*) FROM workspace_members WHERE user_id=? AND removed_at IS NULL)<?"]
-    values = [workspace_id, owners[0]["snapshot"], invite["id"], workspace_id, token_hash,
+    values = [record_name("users", workspace_id), owners[0]["snapshot"], invite["id"], workspace_id, token_hash,
         invite["github_recipient_id"], invite["role"], inviter_id, invite["created_by_revision"], invite["revision"], now,
         workspace_id, MAX_MEMBERS, actor["id"], MAX_MEMBERS]
     if inviter_id != workspace_id:

@@ -75,6 +75,13 @@ and avoiding repeated full-table cardinality scans, without hard daily/monthly
 row caps. Rate counters use bounded hashed DO subjects and return recoverable
 429 responses; they add no D1 writes. Remote acceptance stays low frequency.
 Keep remote validation finite and record its row reservations and actual results.
+The capacity repair replaces shared account/session/billing JSON maps with
+exact `record:<kind>:<id>` rows in the existing `app_state` table. A journaled
+one-shot atomic cutover preserves all legacy facts and counters; unknown or
+incomplete outcomes cannot replay. User records have a typed 512 KiB bound,
+small records and HTTP ingress retain 8 KiB, and ordinary mutations refresh
+numeric cardinalities without loading every user's payload. Native capacity
+and restart acceptance is required before publishing this follow-up.
 Publication is separate from authenticated runtime/provider acceptance. See the
 [deployment guide](cloudflare/server/README.md) and current acceptance record for
 release commands and remaining gates.

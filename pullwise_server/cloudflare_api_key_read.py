@@ -6,7 +6,6 @@ from typing import Any, Mapping
 from .api_key_dto_rules import api_key_public_payload
 from .cloudflare_principal import (
     PrincipalAuthError, _bearer, _cookie_sessions, _header,
-    _principal, _resource_auth_snapshot,
 )
 from .cloudflare_ledger_auth import ledger_principal
 

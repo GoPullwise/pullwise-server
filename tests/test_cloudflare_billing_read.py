@@ -6,8 +6,15 @@ from pullwise_server.cloudflare_http_contract import handle_http_request
 from pullwise_server.billing_projection import billing_account_dto
 from pullwise_server.account_cycle_rules import effective_user_plan
 from ledger_d1_fixture import D1ShapedSQLite
-from ledger_d1_fixture import TOKEN, seed_auth as _seed_auth
+from ledger_d1_fixture import TOKEN, seed_auth as legacy_seed_auth
 from ledger_d1_fixture import seed
+from state_record_fixtures import normalize_legacy_state
+
+
+def _seed_auth(fixture):
+    legacy_seed_auth(fixture)
+    with fixture.store._immediate() as db:
+        normalize_legacy_state(db, now=fixture.now)
 
 
 def seed_public_catalog(fixture):
@@ -50,7 +57,7 @@ def test_billing_cookie_revocation_before_read_batch_hides_account(tmp_path):
 
     def revoke_before_snapshot():
         with fixture.store._immediate() as db:
-            db.execute("UPDATE app_state SET payload='{}' WHERE name='sessions'")
+            db.execute("DELETE FROM app_state WHERE name='record:sessions:session-local'")
 
     binding.before_batch = revoke_before_snapshot
     status, payload = get(binding, {"Cookie": "pw_session=session-local"}, fixture.now)
@@ -113,7 +120,7 @@ def test_public_plan_drops_account_if_cookie_revoked_before_combined_batch(tmp_p
 
     def revoke_before_snapshot():
         with fixture.store._immediate() as db:
-            db.execute("UPDATE app_state SET payload='{}' WHERE name='sessions'")
+            db.execute("DELETE FROM app_state WHERE name='record:sessions:session-local'")
 
     binding.before_batch = revoke_before_snapshot
 

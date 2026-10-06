@@ -21,11 +21,15 @@ import signal
 import shlex
 import socket
 import subprocess
+import sys
 import time
 from urllib.error import HTTPError
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from pullwise_server.cloudflare_state_records import encode_record, record_name
+
 WORKER = ROOT / "cloudflare/server"
 OWNER, MEMBER = "usr_github_710001", "usr_github_710002"
 PRODUCTS = {"pro": {"month": "prod_pro_month", "year": "prod_pro_year"},
@@ -208,9 +212,11 @@ def seed_sql(now):
     }
     sessions = {"local-owner-session": {"userId": OWNER, "expiresAt": now + 3600},
                 "local-member-session": {"userId": MEMBER, "expiresAt": now + 3600}}
-    return "\n".join("UPDATE app_state SET payload=" + literal(json.dumps(value,
-        separators=(",", ":"))) + ",updated_at=" + str(now) + " WHERE name=" + literal(name) + ";"
-        for name, value in (("users", users), ("sessions", sessions)))
+    return "\n".join("INSERT INTO app_state(name,payload,updated_at) VALUES(" +
+        ",".join(literal(value) for value in
+            (record_name(kind, identifier), encode_record(kind, identifier, value), now)) + ");"
+        for kind, records in (("users", users), ("sessions", sessions))
+        for identifier, value in records.items())
 
 
 def prepare(directory):
@@ -257,6 +263,7 @@ def main():
     raw_config["vars"]["PULLWISE_ALLOWED_ORIGINS"] = f"http://127.0.0.1:{args.port}"
     assert not raw_config.get("routes") and not raw_config.get("workers_dev")
     assert all(db.get("remote") is False for db in raw_config["d1_databases"])
+    assert raw_config["vars"].get("PULLWISE_MODE") == "local"
     config.write_text(json.dumps(raw_config, indent=2) + "\n")
     if args.resume_at_billing:
         shutil.copy2(WORKER / "src/entry.py", directory / "src/application_entry.py")
@@ -306,6 +313,7 @@ def main():
     count, checks, responses = 0, [], []
     process = None
     evidence = {"passed": False, "localOnly": True, "nativePythonFFI": True,
+        "configuredMode": raw_config["vars"]["PULLWISE_MODE"],
         "syntheticProvenance": True, "syntheticAccounts": 2, "realAccounts": 0,
         "remoteRequests": 0, "remoteD1RowsRead": 0, "remoteD1RowsWritten": 0,
         "realProviderRequests": 0, "realPayments": 0, "clientRetries": 0,
@@ -386,7 +394,9 @@ def main():
             else:
                 raise AssertionError("Native Worker did not bind within 120 seconds")
             if args.bounded_csv_only:
-                assert call("GET", "/health")["ok"]
+                health = call("GET", "/health")
+                assert health["ok"]
+                evidence["observedHealthMode"] = health.get("mode")
                 exported = call("GET", "/api/v1/expenses/export?target=shared", headers={"X-Native-Fixture-Bounded-Export": "1"})
                 rows = list(csv.reader(io.StringIO(exported)))
                 assert len(rows) == 252 and len(exported.encode("utf-8")) > 1024 * 1024
@@ -397,7 +407,9 @@ def main():
                 checks.append("Canonical bounded CSV byte spool exceeds old 1 MiB cap, paginates 251 native records, and preserves exact UTF-8/formula escaping")
                 return
             if not args.resume_at_billing:
-                assert call("GET", "/health")["ok"]
+                health = call("GET", "/health")
+                assert health["ok"]
+                evidence["observedHealthMode"] = health.get("mode")
                 assert call("POST", "/_fixture/account-init", {}, actor=None)["initialized"] == 2
                 assert call("GET", "/_fixture/bytes", actor=None) == "汉字🙂"
                 checks.append("native Response(bytes) preserves multibyte UTF-8")

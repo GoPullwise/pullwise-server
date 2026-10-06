@@ -93,3 +93,55 @@ npx prettier --check src/lib/trusted-redirects.js src/lib/trusted-redirects.test
 Worker module synchronization and `--check` pass. The full repository/native
 acceptance and preview publication evidence belongs to the release record, not
 to this local payment audit.
+
+## Per-record storage repair
+
+The previous global `users`, `billingEvents` and `billingPendingUpdates` JSON rows
+each shared an 8 KiB ceiling. Pure synthetic reducer serialization reproduced
+overflow with 12 subscription history entries (8,397 bytes in the users map),
+58 audit events (8,295 bytes), or 15 pending updates (8,686 bytes). These were
+storage-shape failures, not sensible product request restrictions.
+
+Account/payment commands now use exact `record:users:<owner>` rows (512 KiB per
+user) and independent `record:billingEvents:<event>` /
+`record:billingPendingUpdates:<event>` rows (8 KiB each). Ordinary HTTP ingress
+remains 8 KiB. Billing reads never perform implicit migration or scan all account
+payloads into Python. Owner discovery returns at most two metadata matches;
+settlement repeats its uniqueness fence in the atomic transaction. Reconciliation
+loads only matching pending event IDs with an explicit 1..16 limit. Unknown-owner
+pending updates retain the existing 1,000-record bound.
+
+Immutable `billing_webhook_receipts` remain replay authority. The exact account
+snapshot, owner revision, normalized receipt and optional parked record are
+guarded together before account/audit/entitlement changes and receipt settlement.
+An unrelated account, audit event or pending update no longer invalidates a
+whole-map snapshot. Existing receipt hashes, updates, state, account authority
+and expense facts are preserved by the explicit cutover. A deliberately
+unsupported legacy audit event without a signed receipt is retained; a new signed
+delivery with that ID fails closed with its receipt pending, preserving the
+account and audit rather than fabricating proof that the legacy event was paid.
+
+The expanded payment/account group passes **97 tests and 11 subtests** on
+Python 3.10.12, including seven new storage regressions: actual 100-entry billing
+history plus 1,000 cached repositories, more than 58 unrelated audit events,
+1,000 pending records and duplicate admission, receipt replay after removing its
+audit cache, bounded ordered reconciliation, ambiguous-owner creation between
+lookup and commit, unrelated simultaneous mutations, and receiptless legacy
+authority rejection. Signed paid → unpaid → old-paid replay preserves Free access,
+and retained credentials/repositories and history limits remain intact.
+Including `tests/test_worker_application_security.py`, the same group passes
+139 tests and 11 subtests; caller-validation and provider-failure HTTP semantics
+remain distinct after the storage change.
+
+```sh
+.venv/bin/python -m pytest -q \
+  tests/test_cloudflare_billing_mutations.py tests/test_billing_lifecycle.py \
+  tests/test_billing_record_storage.py tests/test_cloudflare_account_adapter.py \
+  tests/test_cloudflare_creem_handler.py tests/test_cloudflare_billing_read.py \
+  tests/test_billing_account_rules.py tests/test_creem_event_rules.py \
+  tests/test_cloudflare_creem_gateway.py tests/test_cloudflare_billing_catalog_write.py
+```
+
+Module synchronization and its `--check` pass for this repair. These are isolated
+local tests; native cutover/capacity and eventual preview publication are tracked
+in their separate release evidence. No real payment/provider request is made.

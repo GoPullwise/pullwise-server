@@ -8,7 +8,10 @@ import pytest
 from pathlib import Path
 from types import SimpleNamespace
 
-from pullwise_server.cloudflare_github_identity_http import handle_identity_request
+from pullwise_server.cloudflare_github_identity_http import (
+    _repo_items, _user, _write_user, handle_identity_request,
+)
+from pullwise_server.cloudflare_state_records import record_name
 
 
 class ClosingConnection(sqlite3.Connection):
@@ -135,9 +138,10 @@ def test_login_state_cookie_and_callback_replay(tmp_path):
         {"state": "used-state", "code": "synthetic-code"})
     assert status == 400
     with fixture.store.connect() as db:
-        users = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])
+        user = json.loads(db.execute("SELECT payload FROM app_state WHERE name=?",
+                                    (record_name("users", "usr_github_77"),)).fetchone()[0])
         authority = db.execute("SELECT owner_id FROM account_entitlement_authority").fetchone()
-    assert users["usr_github_77"]["githubAccessToken"] == "sealed:synthetic-access-token"
+    assert user["githubAccessToken"] == "sealed:synthetic-access-token"
     assert authority["owner_id"] == "usr_github_77"
 
 
@@ -172,7 +176,7 @@ def test_oauth_failure_query_preserves_workspace_invitation_fragment(tmp_path, w
     assert call(binding, gateway, fixture.now + 2, "GET", "/auth/github/callback", params)[0] == 400
     with fixture.store.connect() as db:
         assert db.execute("SELECT COUNT(*) FROM account_entitlement_authority").fetchone()[0] == 0
-        assert db.execute("SELECT payload FROM app_state WHERE name IN ('users','sessions')").fetchall() == []
+        assert db.execute("SELECT payload FROM app_state WHERE name LIKE 'record:users:%' OR name LIKE 'record:sessions:%'").fetchall() == []
 
 
 def test_installation_binding_and_lost_access_hides_repository_metadata(tmp_path):
@@ -225,13 +229,15 @@ def test_preinstalled_authorized_repositories_are_visible_without_setup_callback
         db.execute("""CREATE TABLE api_keys(id TEXT PRIMARY KEY,user_id TEXT,name TEXT,
             key_prefix TEXT,key_hash TEXT UNIQUE,scopes TEXT,expires_at INTEGER,
             restrictions TEXT,created_at INTEGER,last_used_at INTEGER,revoked_at INTEGER)""")
-        before = db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0]
+        before = db.execute("SELECT payload FROM app_state WHERE name=?",
+                            (record_name("users", "usr_github_77"),)).fetchone()[0]
     status, payload, _ = call(binding, gateway, fixture.now + 2, "GET",
         "/api/v1/repositories", headers={"Cookie": cookie})
     assert status == 200 and payload["githubAccess"] == "authorized"
     assert payload["items"][0]["githubRepoId"] == 202
     with fixture.store.connect() as db:
-        assert db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0] == before
+        assert db.execute("SELECT payload FROM app_state WHERE name=?",
+                          (record_name("users", "usr_github_77"),)).fetchone()[0] == before
 
 
 def test_explicit_sync_uses_live_github_access_and_requires_trusted_cookie_origin(tmp_path):
@@ -292,6 +298,126 @@ def test_repository_sync_does_not_change_user_or_session_state(tmp_path):
     assert status == 200 and len(payload["items"]) == 1
     with fixture.store.connect() as db:
         assert [tuple(row) for row in db.execute("SELECT * FROM app_state ORDER BY name")] == before
+
+
+def test_account_record_preserves_full_repository_cache_billing_history_and_opaque_token(tmp_path):
+    from pullwise_server.billing_account_rules import (
+        append_billing_subscription_event, upsert_billing_subscription_record,
+    )
+    fixture, _, _ = seed(tmp_path / "large-account.db")
+    binding = D1ShapedSQLite(fixture.store)
+    user = {"id": "usr_github_77", "githubId": "77", "githubLogin": "alice",
+            "githubAccessToken": "sealed:synthetic-access-token", "createdAt": fixture.now}
+    account = {"id": 77, "login": "a" * 100, "type": "Organization"}
+    cache = _repo_items([{"id": index + 1, "full_name": "a" * 100 + "/" + "r" * 100}
+                         for index in range(1000)], 501, account)
+    user["githubRepositoryAccess"] = {"status": "authorized", "repositoryItems": cache}
+    for index in range(100):
+        update = {"provider": "creem", "subscriptionId": f"synthetic-subscription-{index % 25}",
+                  "customerId": "synthetic-customer", "customerEmail": "synthetic@example.invalid",
+                  "eventId": f"synthetic-event-{index}", "eventType": "subscription.updated",
+                  "eventCreated": fixture.now + index, "status": "active", "plan": "pro",
+                  "interval": "month", "currentPeriodStart": fixture.now,
+                  "currentPeriodEnd": fixture.now + 86400}
+        upsert_billing_subscription_record(user, update, processed_at=fixture.now + index)
+        append_billing_subscription_event(user, update, update, processed_at=fixture.now + index)
+    asyncio.run(_write_user(binding, user, fixture.now, expected_user={}))
+    status, _, _ = login(binding, GitHubStub(), fixture.now + 100)
+    assert status == 302
+    current = asyncio.run(_user(binding, user["id"]))
+    assert current["githubRepositoryAccess"] == user["githubRepositoryAccess"]
+    assert current["billingSubscriptions"] == user["billingSubscriptions"]
+    assert current["billingSubscriptionEvents"] == user["billingSubscriptionEvents"]
+    assert current["githubAccessToken"] == "sealed:synthetic-access-token"
+    assert len(current["billingSubscriptionEvents"]) == 100
+    with fixture.store.connect() as db:
+        raw = db.execute("SELECT payload FROM app_state WHERE name=?",
+                         (record_name("users", user["id"]),)).fetchone()[0]
+        assert 8192 < len(raw.encode("utf-8")) <= 512 * 1024
+        assert db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone() is None
+
+
+def test_user_record_byte_bound_rejects_oversize_before_write(tmp_path):
+    fixture, _, _ = seed(tmp_path / "oversize-account.db")
+    binding = D1ShapedSQLite(fixture.store)
+    user = {"id": "usr_github_77", "githubAccessToken": "sealed:synthetic-access-token"}
+    asyncio.run(_write_user(binding, user, fixture.now, expected_user={}))
+    with fixture.store.connect() as db:
+        before = list(db.iterdump())
+    with pytest.raises(ValueError, match="byte bound"):
+        asyncio.run(_write_user(binding, {**user, "retained": "界" * 180000}, fixture.now + 1,
+                                expected_user=user))
+    with fixture.store.connect() as db:
+        assert list(db.iterdump()) == before
+
+
+@pytest.mark.parametrize("same_account", [False, True])
+def test_user_write_cas_isolated_to_own_account_and_rejects_concurrent_own_change(tmp_path, same_account):
+    fixture, _, _ = seed(tmp_path / "concurrent-account.db")
+    binding = D1ShapedSQLite(fixture.store)
+    user = {"id": "usr_github_77", "name": "Original"}
+    other = {"id": "usr_github_88", "name": "Other"}
+    asyncio.run(_write_user(binding, user, fixture.now, expected_user={}))
+    asyncio.run(_write_user(binding, other, fixture.now, expected_user={}))
+    target = user if same_account else other
+    concurrent = {**target, "name": "Concurrent"}
+    class Concurrent(D1ShapedSQLite):
+        async def batch(self, statements):
+            with self.store.connect() as db:
+                db.execute("UPDATE app_state SET payload=? WHERE name=?",
+                           (json.dumps(concurrent), record_name("users", target["id"])))
+            return await super().batch(statements)
+    write = _write_user(Concurrent(fixture.store), {**user, "name": "Updated"}, fixture.now + 1,
+                       expected_user=user)
+    if same_account:
+        with pytest.raises(sqlite3.IntegrityError):
+            asyncio.run(write)
+    else:
+        asyncio.run(write)
+    assert asyncio.run(_user(binding, target["id"])) == concurrent
+    assert asyncio.run(_user(binding, user["id"]))["name"] == ("Concurrent" if same_account else "Updated")
+    with fixture.store.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM d1_command_guard").fetchone()[0] == 0
+
+
+def test_explicit_legacy_cutover_preserves_identity_without_implicit_read_writes(tmp_path):
+    from state_record_fixtures import normalize_legacy_state
+    fixture, _, _ = seed(tmp_path / "legacy-account.db")
+    user = {"id": "usr_github_77", "githubId": "77", "githubLogin": "alice", "name": "Alice",
+            "providers": ["github"], "githubAccessToken": "sealed:synthetic-access-token"}
+    session = {"id": "ses-synthetic", "userId": user["id"], "expiresAt": fixture.now + 600}
+    with fixture.store.connect() as db:
+        for name, value in (("users", {user["id"]: user}), ("sessions", {session["id"]: session})):
+            db.execute("INSERT INTO app_state(name,payload,updated_at) VALUES(?,?,?)",
+                       (name, json.dumps(value), fixture.now))
+        before = list(db.iterdump())
+    class ReadOnly(D1ShapedSQLite):
+        def __init__(self, store):
+            super().__init__(store)
+            self.actors = []
+
+        def observe_authenticated_actor(self, actor_id):
+            self.actors.append(actor_id)
+
+        def prepare(self, sql):
+            assert sql.lstrip().upper().startswith("SELECT"), sql
+            return super().prepare(sql)
+    binding = ReadOnly(fixture.store)
+    headers = {"Cookie": "pw_session=" + "x" * 4097 + "; pw_session=" + session["id"]}
+    assert call(binding, GitHubStub(), fixture.now, "GET", "/auth/session", headers=headers)[1]["authenticated"] is False
+    assert binding.actors == []
+    with fixture.store.connect() as db:
+        assert list(db.iterdump()) == before
+        assert normalize_legacy_state(db, now=fixture.now) == 2
+    with fixture.store.connect() as db:
+        assert normalize_legacy_state(db, now=fixture.now) == 0
+    with fixture.store.connect() as db:
+        after = list(db.iterdump())
+    assert call(binding, GitHubStub(), fixture.now, "GET", "/auth/session", headers=headers)[1]["authenticated"] is True
+    assert binding.actors == [user["id"]]
+    assert asyncio.run(_user(binding, user["id"])) == user
+    with fixture.store.connect() as db:
+        assert list(db.iterdump()) == after
 
 
 class GitHubIdentityHttpTests(unittest.TestCase):

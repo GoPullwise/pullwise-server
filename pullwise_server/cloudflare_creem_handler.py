@@ -1,32 +1,14 @@
 """Trusted async Creem request composition; HTTP routing and secrets stay external."""
 from __future__ import annotations
 
-import json
 from typing import Any
 
-from . import billing_account_rules, creem_event_rules
-from .cloudflare_account_adapter import D1AccountTransactions
+from . import creem_event_rules
+from .cloudflare_account_adapter import D1AccountTransactions, billing_owner_for_update
 from .cloudflare_webhook_receipts import D1WebhookReceipts
+from .cloudflare_state_records import read_record
 
 MAX_CREEM_WEBHOOK_BYTES = 64 * 1024
-
-
-async def _owner_for_update(binding: Any, update: dict) -> str | None:
-    row = await binding.prepare("SELECT payload FROM app_state WHERE name='users'").first()
-    users = json.loads(row["payload"]) if row else None
-    if not isinstance(users, dict):
-        raise ValueError("persisted account state is missing")
-    direct_id = billing_account_rules.billing_update_text(update.get("userId"))
-    if direct_id in users:
-        account = users[direct_id]
-        if not isinstance(account, dict) or account.get("id") != direct_id:
-            raise ValueError("persisted billing owner is invalid")
-    matches = [owner_id for owner_id, account in users.items()
-        if isinstance(account, dict) and account.get("id") == owner_id
-        and billing_account_rules.billing_update_matches_user(update, account)]
-    if len(matches) > 1:
-        raise ValueError("billing owner is ambiguous")
-    return matches[0] if matches else None
 
 
 async def _refresh_dirty_owner(binding: Any, *, owner_id: str, now: int) -> None:
@@ -58,11 +40,15 @@ async def accept_signed_creem_webhook(*, binding: Any, raw_body: bytes,
         WHERE event_id=?""").bind(event_id).first()
     if not receipt:
         raise RuntimeError("accepted Creem receipt is missing")
-    owner_id = await _owner_for_update(binding, update)
     if receipt["state"] == "applied":
+        event = await read_record(binding, "billingEvents", event_id)
+        owner_id = event.get("ownerId") if event else None
+        if owner_id is None:
+            owner_id = await billing_owner_for_update(binding, update)
         if owner_id:
             await _refresh_dirty_owner(binding, owner_id=owner_id, now=now)
         return {"received": True, "state": "duplicate", "eventId": event_id}
+    owner_id = await billing_owner_for_update(binding, update)
     account = D1AccountTransactions(binding)
     if owner_id is None:
         await account.park_webhook_receipt(receipt_event_id=event_id, now=now)

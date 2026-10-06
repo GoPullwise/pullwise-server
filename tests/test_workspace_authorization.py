@@ -13,6 +13,7 @@ from pullwise_server.cloudflare_plan_limits import PlanLimitedD1
 from pullwise_server.cloudflare_principal import PrincipalAuthError
 from pullwise_server.cloudflare_api_key_read import list_api_keys
 from pullwise_server.cloudflare_api_key_write import create_api_key, revoke_api_key
+from pullwise_server.cloudflare_state_records import encode_record, record_name
 
 
 @pytest.fixture
@@ -23,15 +24,17 @@ def workspace_db(tmp_path):
     with fixture.store.connect() as db:
         for name in ("0003_ledger_suggestions.sql", "0004_ledger_plan_usage.sql", "0005_workspaces_repositories.sql"):
             db.executescript((migrations / name).read_text())
-        users = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])
         sessions = {"session-local": {"userId": "owner", "expiresAt": fixture.now + 3600}}
         for index, role in enumerate(("admin", "editor", "viewer"), 1):
-            users[role] = {"id": role, "name": role, "githubId": str(index), "createdAt": fixture.now}
+            user = {"id": role, "name": role, "githubId": str(index), "createdAt": fixture.now}
+            db.execute("INSERT OR REPLACE INTO app_state(name,payload,updated_at) VALUES(?,?,?)",
+                (record_name("users", role), encode_record("users", role, user), fixture.now))
             sessions[role] = {"userId": role, "expiresAt": fixture.now + 3600}
             db.execute("""INSERT INTO workspace_members VALUES(?,?,?,1,?,?,NULL,?)""",
                        ("owner", role, role, "2026-10-06", "2026-10-06", "owner"))
-        db.execute("UPDATE app_state SET payload=? WHERE name='users'", (json.dumps(users, separators=(",", ":")),))
-        db.execute("UPDATE app_state SET payload=? WHERE name='sessions'", (json.dumps(sessions, separators=(",", ":")),))
+        for identifier, session in sessions.items():
+            db.execute("INSERT OR REPLACE INTO app_state(name,payload,updated_at) VALUES(?,?,?)",
+                (record_name("sessions", identifier), encode_record("sessions", identifier, session), fixture.now))
     return fixture, D1ShapedSQLite(fixture.store)
 
 
@@ -131,11 +134,14 @@ def test_write_batch_cannot_use_stale_authority(workspace_db, changed):
         if changed == "member":
             db.execute("UPDATE workspace_members SET removed_at='now',revision=2 WHERE workspace_id='owner' AND user_id='admin'")
         elif changed == "session":
-            db.execute("UPDATE app_state SET payload='{}' WHERE name='sessions'")
+            db.execute("DELETE FROM app_state WHERE name=?", (record_name("sessions", "admin"),))
         else:
-            users = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])
-            users["owner" if changed == "owner" else "admin"]["name"] = "changed"
-            db.execute("UPDATE app_state SET payload=? WHERE name='users'", (json.dumps(users, separators=(",", ":")),))
+            identifier = "owner" if changed == "owner" else "admin"
+            user = json.loads(db.execute("SELECT payload FROM app_state WHERE name=?",
+                (record_name("users", identifier),)).fetchone()[0])
+            user["name"] = "changed"
+            db.execute("UPDATE app_state SET payload=? WHERE name=?",
+                (encode_record("users", identifier, user), record_name("users", identifier)))
     commands = [_write_guard(binding, proof, "owner", fixture.now),
                 binding.prepare("INSERT INTO expense_categories VALUES('cat_guard','owner','Guard',NULL,NULL,1,'now','now')"),
                 binding.prepare("DELETE FROM d1_command_guard")]

@@ -11,6 +11,7 @@ from ledger_d1_fixture import D1ShapedSQLite, seed, seed_auth
 from pullwise_server.account_cycle_rules import effective_user_plan
 from pullwise_server.cloudflare_billing_mutations import handle_billing_mutation
 from pullwise_server.cloudflare_creem_handler import accept_signed_creem_webhook
+from state_record_fixtures import normalize_legacy_state
 
 
 PRODUCTS = {"pro": {"month": "prod-pro", "year": "prod-pro-year"},
@@ -32,7 +33,7 @@ class Provider:
 
 def account(fixture):
     with closing(fixture.store.connect()) as db:
-        return json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])["owner"]
+        return json.loads(db.execute("SELECT payload FROM app_state WHERE name='record:users:owner'").fetchone()[0])
 
 
 def mutation(fixture, binding, provider, path, body):
@@ -63,7 +64,8 @@ def free_fixture(tmp_path):
     seed_auth(fixture)
     user = {**json.loads(frozen), "billing": {"plan": "free", "status": "none"}}
     with fixture.store._immediate() as db:
-        db.execute("UPDATE app_state SET payload=? WHERE name='users'", (json.dumps({"owner": user}),))
+        normalize_legacy_state(db, now=fixture.now)
+        db.execute("UPDATE app_state SET payload=? WHERE name='record:users:owner'", (json.dumps(user),))
         db.execute("UPDATE account_entitlement_authority SET plan='free' WHERE owner_id='owner'")
         db.execute("INSERT INTO expense_categories VALUES(?,?,?,?,?,?,?,?)",
             ("cat_local", "owner", "Hosting", None, None, 1, "2026-10-06", "2026-10-06"))

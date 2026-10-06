@@ -36,6 +36,18 @@ acceptance requires the accounts' actual preview sessions, never fabricated
 sessions from GitHub connector profiles. Test payment facts locally with signed
 synthetic webhooks; do not make real charges or change live subscriptions.
 
+The follow-up capacity repair uses exact `record:<kind>:<identity>` rows in the
+existing `app_state` table. Preserve legacy user/session/token/billing fields,
+finance history, webhook receipts, account revisions and all original journal
+counters. Copy legal legacy facts with one reviewed atomic cutover under the
+existing coordinator and persist its state-storage marker; no namespace or
+database replacement, implicit GET migration, general reset or migration retry.
+Trusted user-record SQL snapshots may use a typed 512 KiB envelope to retain
+1,000 repos and 100 billing events; ordinary HTTP ingress remains 8 KiB.
+Application reads use exact owner/record keys, and cardinality checks keep
+bounded numeric facts rather than loading all account payloads on each write.
+Native migration, restart, accounting and capacity checks precede publication.
+
 Latest scope: the original release goals have their own dated evidence; the
 multi-repository/Organization/shared-ledger version is now implemented and
 released to preview with its own native/browser/publication evidence. Treat
@@ -127,7 +139,8 @@ historical product plans to gate work.
 - Store expense audit/idempotency JSON as compact UTF-8. Only scalar INSERT
   expense_events.before_json/after_json and expense_create_idempotency.response_json
   accept a 16 KiB JSON-object envelope: 8 KiB ingress plus bounded DTO metadata
-  and at most 30 categories' assistance. Other text/app_state bounds stay 8 KiB;
+  and at most 30 categories' assistance. Other text and small typed state records
+  retain 8 KiB bounds; exact user snapshots have the reviewed 512 KiB exception;
   reject malformed/non-finite/non-object JSON and retain row/index/global caps.
 - Active preview config is allowed only with its original DB/hosts, existing
   ValidationBudget class and test Creem origin. This supersedes the old blanket

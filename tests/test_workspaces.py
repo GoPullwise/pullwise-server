@@ -11,6 +11,7 @@ from ledger_d1_fixture import D1ShapedSQLite, Store
 from pullwise_server.cloudflare_github_gateway import GitHubFailure
 from pullwise_server.cloudflare_ledger_api import handle_ledger_request
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1
+from pullwise_server.cloudflare_state_records import encode_record, record_name
 
 ROOT = Path(__file__).resolve().parents[1]
 NOW = 1_800_000_000
@@ -61,9 +62,10 @@ def app(tmp_path):
             for number in range(1, 7)}
         sessions = {f"session-{number}": {"userId": f"usr_github_{number}", "expiresAt": NOW + 1000}
                     for number in range(1, 7)}
-        for name, value in (("users", users), ("sessions", sessions)):
-            db.execute("UPDATE app_state SET payload=?,updated_at=? WHERE name=?",
-                       (json.dumps(value, separators=(",", ":")), NOW, name))
+        for kind, records in (("users", users), ("sessions", sessions)):
+            for identifier, value in records.items():
+                db.execute("INSERT INTO app_state(name,payload,updated_at) VALUES(?,?,?)",
+                    (record_name(kind, identifier), encode_record(kind, identifier, value), NOW))
         for number, role in ((2, "admin"), (3, "editor"), (4, "viewer")):
             db.execute("INSERT INTO workspace_members VALUES(?,?,?,1,'joined','updated',NULL,?)",
                        (OWNER, f"usr_github_{number}", role, OWNER))
@@ -106,6 +108,55 @@ def test_workspace_list_ignores_selector_and_exposes_only_joined_ledgers(app):
         ("usr_github_4", "owner"), (OWNER, "viewer")}
     assert all("token" not in json.dumps(item) for item in page["items"])
     assert count(app, "ledger_plan_usage") == count(app, "workspace_events") == 0
+
+
+def test_named_user_records_scale_without_global_json_maps_or_get_writes(app):
+    with app[0]._immediate() as db:
+        for number in range(100, 300):
+            identifier = "usr_github_" + str(number)
+            db.execute("INSERT INTO app_state(name,payload,updated_at) VALUES(?,?,?)",
+                (record_name("users", identifier), encode_record("users", identifier,
+                    {"id": identifier, "name": "Scale fixture " + str(number), "githubId": str(number)}), NOW))
+        total = db.execute("SELECT SUM(length(payload)) FROM app_state WHERE name GLOB 'record:users:*'").fetchone()[0]
+        assert total > 8192
+    with app[0].connect() as db:
+        before = list(db.iterdump())
+    used, original = [], app[1].prepare
+    def observe(sql):
+        used.append(sql)
+        return original(sql)
+    app[1].prepare = observe
+    status, ledgers = app[3]("GET", "/api/v1/workspaces", actor=4)
+    assert status == 200 and {item["id"] for item in ledgers["items"]} == {"usr_github_4", OWNER}
+    status, members = app[3]("GET", path("members"), actor=4)
+    assert status == 200 and len(members["items"]) == 4
+    assert not any("json_each" in sql or "name='users'" in sql or "name='sessions'" in sql for sql in used)
+    with app[0].connect() as db:
+        assert list(db.iterdump()) == before
+        joins = [sql for sql in used if "JOIN app_state" in sql]
+        assert len(joins) == 2
+        for sql in joins:
+            parameters = ("usr_github_4",) if "WHERE m.user_id=?" in sql else (OWNER,)
+            plan = [row[3] for row in db.execute("EXPLAIN QUERY PLAN " + sql, parameters)]
+            assert any("SEARCH a USING INDEX sqlite_autoindex_app_state_1 (name=?)" in step for step in plan)
+
+
+def test_large_retained_owner_record_keeps_invitation_fences_and_payer(app):
+    with app[0]._immediate() as db:
+        saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name=?",
+            (record_name("users", OWNER),)).fetchone()[0])
+        saved["retainedAccountHistory"] = "synthetic retained field " * 1000
+        encoded = encode_record("users", OWNER, saved)
+        assert len(encoded.encode("utf-8")) > 8192
+        db.execute("UPDATE app_state SET payload=? WHERE name=?", (encoded, record_name("users", OWNER)))
+    issued = invite(app, plan=True)
+    status, joined = accept(app, issued, plan=True)
+    assert status == 200 and joined["workspace"]["id"] == OWNER
+    status, recovered = accept(app, issued, method="preview", plan=True)
+    assert status == 200 and recovered["workspace"]["role"] == "viewer"
+    with app[0].connect() as db:
+        assert [tuple(row) for row in db.execute("SELECT owner_id,writes FROM ledger_plan_usage")] == [(OWNER, 2)]
+        assert db.execute("SELECT payload FROM app_state WHERE name=?", (record_name("users", OWNER),)).fetchone()[0] == encoded
 
 
 def test_members_viewer_can_read_but_not_govern(app):
@@ -345,6 +396,22 @@ def test_acceptance_revocation_race_has_no_membership_or_audit(app):
     assert count(app, "ledger_plan_usage") == 0
 
 
+def test_acceptance_rechecks_exact_owner_record_before_grant(app):
+    issued = invite(app)
+    def change_owner(db):
+        row = db.execute("SELECT payload FROM app_state WHERE name=?", (record_name("users", OWNER),)).fetchone()
+        owner = json.loads(row[0])
+        owner["name"] = "Owner changed after acceptance read"
+        db.execute("UPDATE app_state SET payload=? WHERE name=?",
+            (encode_record("users", OWNER, owner), record_name("users", OWNER)))
+    app[1].race = (lambda statements: any("INSERT INTO d1_command_guard" in item.sql for item in statements), change_owner)
+    assert accept(app, issued, plan=True) == (503, {"error": {"code": "WORKSPACE_WRITE_UNAVAILABLE"}})
+    assert count(app, "workspace_members") == 3 and count(app, "workspace_events") == 1
+    assert count(app, "ledger_plan_usage") == 0
+    with app[0].connect() as db:
+        assert db.execute("SELECT status FROM workspace_invites").fetchone()[0] == "pending"
+
+
 def test_acceptance_member_limit_denies_before_write(app):
     issued = invite(app)
     with app[0]._immediate() as db:
@@ -412,7 +479,7 @@ def test_emergency_revocation_retains_current_session_atomic_fence(app):
     with app[0]._immediate() as db:
         db.execute("UPDATE ledger_plan_usage SET writes=10000")
     app[1].race = (lambda statements: any("INSERT INTO d1_command_guard" in item.sql for item in statements),
-        lambda db: db.execute("UPDATE app_state SET payload='{}' WHERE name='sessions'"))
+        lambda db: db.execute("DELETE FROM app_state WHERE name=?", (record_name("sessions", "session-1"),)))
     assert app[3]("DELETE", path(identifier=issued["id"]), headers={"If-Match": '"1"'}, plan=True)[0] == 503
     with app[0].connect() as db:
         assert db.execute("SELECT status FROM workspace_invites").fetchone()[0] == "pending"

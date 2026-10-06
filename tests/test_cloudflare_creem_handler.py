@@ -11,7 +11,15 @@ import pytest
 from pullwise_server.cloudflare_creem_handler import accept_signed_creem_webhook
 from pullwise_server.cloudflare_account_adapter import D1AccountTransactions
 from ledger_d1_fixture import D1ShapedSQLite
-from ledger_d1_fixture import seed
+from ledger_d1_fixture import seed as legacy_seed
+from state_record_fixtures import normalize_legacy_state
+
+
+def seed(path):
+    fixture, authority, frozen = legacy_seed(path)
+    with fixture.store._immediate() as db:
+        normalize_legacy_state(db, now=fixture.now)
+    return fixture, authority, frozen
 
 
 PRODUCTS = {"pro": {"month": "prod-pro"}, "max": {"month": "prod-max"}}
@@ -35,8 +43,8 @@ def test_signed_paid_upgrade_settles_and_refreshes_existing_bucket(tmp_path):
     assert asyncio.run(accept_signed_creem_webhook(**args)) == {
         "received": True, "state": "applied", "eventId": "evt-upgrade"}
     with closing(fixture.store.connect()) as db:
-        user = json.loads(db.execute("SELECT value FROM app_state,json_each(payload) "
-            "WHERE name='users' AND key='owner'").fetchone()[0])
+        user = json.loads(db.execute("SELECT payload FROM app_state "
+            "WHERE name='record:users:owner'").fetchone()[0])
         assert user["billing"]["plan"] == "max"
         assert user["githubAccessToken"] == json.loads(frozen)["githubAccessToken"]
         assert tuple(db.execute("SELECT revision,dirty,plan FROM account_entitlement_authority").fetchone()) == (3, 0, "max")
@@ -57,9 +65,9 @@ def test_signed_event_without_owner_is_durably_parked(tmp_path):
     assert result == {"received": True, "state": "pending", "eventId": "evt-early"}
     with closing(fixture.store.connect()) as db:
         assert db.execute("SELECT state FROM billing_webhook_receipts WHERE event_id='evt-early'").fetchone()[0] == "pending"
-        assert len(json.loads(db.execute("SELECT payload FROM app_state WHERE name='billingPendingUpdates'").fetchone()[0])) == 1
-        assert db.execute("SELECT value FROM app_state,json_each(payload) "
-            "WHERE name='users' AND key='owner'").fetchone()[0] == frozen
+        assert db.execute("SELECT COUNT(*) FROM app_state WHERE name GLOB 'record:billingPendingUpdates:*'").fetchone()[0] == 1
+        assert db.execute("SELECT payload FROM app_state "
+            "WHERE name='record:users:owner'").fetchone()[0] == frozen
         assert db.execute("SELECT revision FROM account_entitlement_authority").fetchone()[0] == 1
 
 
@@ -123,8 +131,8 @@ def test_ambiguous_customer_binding_does_not_charge_an_arbitrary_owner(tmp_path)
         **json.loads(frozen)["billing"], "customerId": "shared-customer"}}
     second = {"id": "another", "billing": {"customerId": "shared-customer"}}
     with fixture.store._immediate() as db:
-        db.execute("UPDATE app_state SET payload=? WHERE name='users'",
-            (json.dumps({"owner": first, "another": second}),))
+        db.execute("UPDATE app_state SET payload=? WHERE name='record:users:owner'", (json.dumps(first),))
+        db.execute("INSERT INTO app_state VALUES('record:users:another',?,?)", (json.dumps(second), fixture.now))
     raw = b'{"id":"evt-ambiguous","eventType":"subscription.canceled","object":{"id":"new-sub","customer":{"id":"shared-customer"}}}'
     with pytest.raises(ValueError, match="ambiguous"):
         asyncio.run(accept_signed_creem_webhook(binding=binding,
@@ -134,15 +142,14 @@ def test_ambiguous_customer_binding_does_not_charge_an_arbitrary_owner(tmp_path)
         assert db.execute("SELECT state FROM billing_webhook_receipts "
             "WHERE event_id='evt-ambiguous'").fetchone()[0] == "pending"
         assert db.execute("SELECT revision FROM account_entitlement_authority").fetchone()[0] == 1
-        assert db.execute("SELECT payload FROM app_state WHERE name='billingEvents'").fetchone()[0] == '{"event_fixture":{"status":"processed"}}'
+        assert db.execute("SELECT payload FROM app_state WHERE name='record:billingEvents:event_fixture'").fetchone()[0] == '{"status":"processed"}'
 
 
 def test_metadata_owner_cannot_override_a_subscription_bound_to_another_account(tmp_path):
     fixture, _, frozen = seed(tmp_path / "domain.db")
     binding = D1ShapedSQLite(fixture.store)
     with fixture.store._immediate() as db:
-        db.execute("UPDATE app_state SET payload=? WHERE name='users'",
-            (json.dumps({"owner": json.loads(frozen), "another": {"id": "another"}}),))
+        db.execute("INSERT INTO app_state VALUES('record:users:another',?,?)", (json.dumps({"id": "another"}), fixture.now))
     asyncio.run(D1AccountTransactions(binding).initialize_account(owner_id="another", now=fixture.now))
     raw = b'{"id":"evt-conflicting-owner","eventType":"subscription.canceled","object":{"id":"sub_fixture","metadata":{"userId":"another"}}}'
     with pytest.raises(ValueError, match="ambiguous"):
@@ -150,6 +157,7 @@ def test_metadata_owner_cannot_override_a_subscription_bound_to_another_account(
             raw_body=raw, signature=_signed(raw), secret="synthetic-secret",
             configured_products=PRODUCTS, now=fixture.now))
     with closing(fixture.store.connect()) as db:
-        users = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])
+        users = {row[0].split(':', 2)[2]: json.loads(row[1]) for row in db.execute(
+            "SELECT name,payload FROM app_state WHERE name GLOB 'record:users:*'")}
         assert users["owner"] == json.loads(frozen)
         assert users["another"] == {"id": "another"}

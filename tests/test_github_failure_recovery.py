@@ -15,6 +15,30 @@ from test_cloudflare_github_identity_http import D1ShapedSQLite, GitHubStub, cal
 from test_worker_cost_pause import load_entry
 
 
+def test_exactly_one_thousand_repositories_complete_without_extra_provider_request():
+    gateway = WorkerGitHubGateway(SimpleNamespace())
+    responses = [{"total_count": 1000, "repositories": [
+        {"id": page * 100 + index + 1, "full_name": f"synthetic/repo-{page * 100 + index + 1}"}
+        for index in range(100)]} for page in range(10)]
+    with patch.object(gateway, "_json", AsyncMock(side_effect=responses)) as provider:
+        result = asyncio.run(gateway.repositories("synthetic-private-token", 501))
+    assert len(result) == 1000 and result[-1]["id"] == 1000
+    assert provider.await_count == 10
+    assert provider.call_args.args[0].endswith("per_page=100&page=10")
+
+
+@pytest.mark.parametrize("total_count", [None, 999, 1001, "1000", True])
+def test_full_tenth_page_never_silently_truncates_unproven_or_excessive_grants(total_count):
+    from pullwise_server.cloudflare_github_gateway import GitHubFailure
+    gateway = WorkerGitHubGateway(SimpleNamespace())
+    response = {"total_count": total_count, "repositories": [{"id": 1}] * 100}
+    with patch.object(gateway, "_json", AsyncMock(return_value=response)) as provider, \
+            pytest.raises(GitHubFailure) as failure:
+        asyncio.run(gateway.repositories("synthetic-private-token", 501))
+    assert failure.value.code == "GITHUB_RESPONSE_INVALID"
+    assert provider.await_count == 10
+
+
 @pytest.mark.parametrize('status,headers,body,code', [
     (401, {}, 'synthetic-private-provider-body', 'GITHUB_REAUTHORIZATION_REQUIRED'),
     (403, {}, '{}', 'GITHUB_PERMISSION_DENIED'),

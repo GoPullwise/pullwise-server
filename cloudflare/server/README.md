@@ -73,6 +73,19 @@ commercial Free/paid allowances still apply. A verified cached cardinality
 snapshot removes repeated table-count scans on healthy reads; all mutations
 continue to verify and persist their new counts. The user's roughly USD 200/month
 total Cloudflare target does not introduce a hard day/month row budget.
+The capacity follow-up stores users, sessions, OAuth states and billing
+event/pending facts at exact `record:<kind>:<id>` keys in the existing
+`app_state` table. The canonical schema/fingerprint stays version 5. Under the
+same coordinator lock, one bounded atomic batch copies legal legacy facts and
+empties their former containers, retaining all account/session fields, receipts,
+revisions and journal counters. A completed `stateStorageVersion: 1` status
+prevents replay; partial/unknown outcomes stay blocked. Typed user snapshots
+allow 512 KiB for retained repository/billing history; small records and HTTP
+ingress remain 8 KiB. Account/auth readers use exact primary keys. Successful
+mutations refresh numeric physical/kind counts, while strict typed writes and
+cutover establish the record payload invariant. Direct console/import writes
+bypassing these paths are unsupported. Finite native cutover, restart and
+capacity acceptance precedes publication of this follow-up.
 Production retains `PULLWISE_D1_ACCESS_ENABLED=0`: requests receive
 503 `D1_ACCESS_PAUSED` before DB/provider access. Missing/invalid switch values
 also fail closed. This switch is a pause, not a metered quota.

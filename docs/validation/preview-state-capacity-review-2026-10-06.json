@@ -1,0 +1,79 @@
+{
+  "reviewOnly": true,
+  "localOnly": true,
+  "remoteRequests": 0,
+  "httpRequests": 0,
+  "d1Operations": 0,
+  "customerDataUsed": false,
+  "globalPayloadBoundBytes": 8192,
+  "syntheticFixtures": true,
+  "sizesAreUtf8CompactJson": true,
+  "followUpRepair": {
+    "status": "local_source_repair_implemented",
+    "published": false,
+    "baselineResultsPreserved": true,
+    "storage": "existing app_state record:<kind>:<id> primary keys",
+    "schemaVersionUnchanged": 5,
+    "userRecordBoundBytes": 524288,
+    "smallRecordAndHttpIngressBoundBytes": 8192,
+    "recordPageBoundBytes": 8388608,
+    "migration": "one explicit atomic legacy copy/cutover with all-observed-row CAS and same-journal marker",
+    "semanticClosure": "empty fresh init, strict legacy decoding and strict typed full-record writes; no arbitrary normalized imports",
+    "finalNativeAndPublicationEvidenceRequired": true
+  },
+  "results": {
+    "ordinaryUsersGlobalMap": {
+      "lastAcceptedCount": 20,
+      "lastAcceptedBytes": 7921,
+      "firstRejectedCount": 21,
+      "firstRejectedBytes": 8317,
+      "syntheticShapeOnly": true
+    },
+    "allowedMaximumProfilesGlobalMap": {
+      "lastAcceptedCount": 4,
+      "lastAcceptedBytes": 6881,
+      "firstRejectedCount": 5,
+      "firstRejectedBytes": 8601,
+      "syntheticShapeOnly": true
+    },
+    "sessionsGlobalMap": {
+      "lastAcceptedCount": 44,
+      "lastAcceptedBytes": 8097,
+      "firstRejectedCount": 45,
+      "firstRejectedBytes": 8281,
+      "syntheticShapeOnly": true
+    },
+    "unconsumedOAuthStatesGlobalMap": {
+      "lastAcceptedCount": 40,
+      "lastAcceptedBytes": 8041,
+      "firstRejectedCount": 41,
+      "firstRejectedBytes": 8242,
+      "syntheticShapeOnly": true
+    },
+    "singleUserRepositoryItems": {
+      "lastAcceptedCount": 46,
+      "lastAcceptedBytes": 8085,
+      "firstRejectedCount": 47,
+      "firstRejectedBytes": 8246,
+      "syntheticShapeOnly": true
+    },
+    "singleUser1000RepositoryBytes": 161679,
+    "localSqliteJsonSetBoundary": {
+      "sqlEngine": "CPython sqlite3, not native D1",
+      "maxParameterBytes": 932,
+      "parametersAcceptedBeforeDispatch": true,
+      "mutatedRows": 1,
+      "beforeGlobalBytes": 7921,
+      "afterGlobalBytes": 8480,
+      "refreshValidationError": "PREVIEW_DATA_BOUND"
+    }
+  },
+  "scope": "Identity/session capacity and local JSON-set behavior; not a customer-data or invoice measurement",
+  "sourceSha256": {
+    "cloudflare_preview_budget.py": "11b013f3c775bfd89ad11627e89e11223c052e8c6dc473caa35b4b18aaf8382f",
+    "cloudflare_github_identity_http.py": "d923d639ccd4fe950401aee4a0080f9f9c38c130680571ff6229c02f2c5630e0",
+    "cloudflare_session_adapter.py": "efea7e9aa5818c5e358dc7a8d8ba9701b1c4f4d6990eae14504b14fdde277750",
+    "cloudflare_oauth_state_adapter.py": "451118cfdef6508295f52a543396efcc5767d9723e03251b291c168aff2bc696",
+    "cloudflare_d1_mapping.py": "47a7685079dd33b763e4da7238750af6cab3b03a237617cd925740dd0c44f2a5"
+  }
+}

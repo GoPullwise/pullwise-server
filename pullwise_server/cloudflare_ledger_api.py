@@ -14,6 +14,7 @@ from .cloudflare_github_gateway import GitHubFailure
 from .cloudflare_principal import PrincipalAuthError, _header
 from .ledger_money_totals import AGGREGATE_SQL, aggregate_minor, public_minor
 from .json_input import validate_json_unicode
+from .cloudflare_state_records import record_name
 from .cloudflare_project_repositories import (
     MAX_REPOSITORIES, bound_repository_dto, live_repository_access, project_input,
     repository_snapshot_values,
@@ -98,15 +99,12 @@ def _write_guard(binding: Any, proof: dict, owner_id: str, now: int):
     """A failed credential/user fence aborts the D1 transaction."""
     actor_id = proof.get("actor_user_id", owner_id)
     owner_snapshot = proof.get("owner_user", proof["user"])
-    user_check = """EXISTS(SELECT 1 FROM app_state a,json_each(a.payload) u
-        WHERE a.name='users' AND u.key=? AND u.value=?)"""
+    user_check = "EXISTS(SELECT 1 FROM app_state u WHERE u.name=? AND u.payload=?)"
     checks = [user_check]
-    values = [owner_id, owner_snapshot]
+    values = [record_name("users", owner_id), owner_snapshot]
     if actor_id != owner_id:
-        actor_path = '$."' + actor_id.replace('"', '\\"') + '"'
-        checks.append("""EXISTS(SELECT 1 FROM app_state WHERE name='users'
-            AND json_extract(payload,?)=json(?))""")
-        values.extend([actor_path, proof["user"]])
+        checks.append(user_check)
+        values.extend([record_name("users", actor_id), proof["user"]])
         checks.append("""EXISTS(SELECT 1 FROM workspace_members
             WHERE workspace_id=? AND user_id=? AND role=? AND revision=? AND removed_at IS NULL)""")
         values.extend([owner_id, actor_id, proof["workspace_role"], proof["workspace_revision"]])
@@ -118,12 +116,11 @@ def _write_guard(binding: Any, proof: dict, owner_id: str, now: int):
         token_hash = hashlib.sha256(proof["token"].encode()).hexdigest()
         values.extend([token_hash, actor_id, key["scopes"], key["restrictions"], now])
     else:
-        checks.append("""EXISTS(SELECT 1 FROM app_state WHERE name='sessions'
-          AND payload=? AND json_extract(payload, ?) = ?
-          AND CAST(json_extract(payload, ?) AS INTEGER)>=?)""")
+        checks.append("""EXISTS(SELECT 1 FROM app_state WHERE name=?
+          AND payload=? AND json_extract(payload, '$.userId') = ?
+          AND CAST(json_extract(payload, '$.expiresAt') AS INTEGER)>=?)""")
         session_id = proof["session_id"]
-        path = '$."' + session_id.replace('"', '\\"') + '"'
-        values.extend([proof["sessions"], path + ".userId", actor_id, path + ".expiresAt", now])
+        values.extend([record_name("sessions", session_id), proof["sessions"], actor_id, now])
     sql = "INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN " + " AND ".join(checks) + " THEN 1 ELSE 0 END)"
     return binding.prepare(sql).bind(*values)
 

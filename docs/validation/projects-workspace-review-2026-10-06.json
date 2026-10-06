@@ -32,5 +32,23 @@
     "Two distinct current preview Cookie sessions authenticated as distinct stable GitHub User IDs",
     "Invitation issuance resolves the second account's actual GitHub login; invitation acceptance uses that account's own preview session",
     "Shared project expense creation/target moves require the second actor's own current GitHub App access to at least one bound repository; finance-only historical/shared-pool reads do not borrow Owner credentials"
-  ]
+  ],
+  "individualRecordRevalidation": {
+    "date": "2026-10-06",
+    "passed": true,
+    "command": ".venv/bin/python -m pytest tests/test_ledger_input_bounds.py tests/test_workspaces.py tests/test_workspace_authorization.py tests/test_project_repositories.py tests/test_ledger_automatic_assistance.py -q --tb=short",
+    "testsPassed": 204,
+    "elapsedSeconds": 5.96,
+    "staticContractCheck": "scripts/check-ledger-s01.py --allow-placeholders passed",
+    "verifiedScenarios": [
+      "Workspace Owner/member joins and invitation acceptance read exact record:users:<id> primary keys; all current actor/session and membership authority fences remain required.",
+      "Two hundred independent synthetic user records exceed the former aggregate 8 KiB map envelope while joined workspace/member reads remain correct, use indexed app_state primary-key lookups and leave the database unchanged.",
+      "A retained Owner record larger than 8 KiB preserves invitation issue/accept/recovery behavior and charges both successful governance writes to the immutable ledger Owner rather than the recipient.",
+      "A change to the exact Owner record between invitation read and acceptance batch rolls back membership, invitation consumption, workspace audit and commercial usage atomically.",
+      "Normalized user/session fixtures preserve actual actor GitHub repository grants, role and API-key invalidation, financial history, malformed-input denial, and Free/Pro/expired-Max no-model behavior."
+    ],
+    "remoteRequests": 0,
+    "providerRequests": 0,
+    "fixtureProvenance": "Synthetic accounts, sessions, GitHub responses and model providers only; this revalidation does not claim deployed migration, real-account or Cloudflare-native acceptance."
+  }
 }

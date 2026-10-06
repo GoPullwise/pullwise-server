@@ -450,6 +450,21 @@ class BudgetJournal:
             state["schema_ready"] = True
         self._save(state)
 
+    def begin_state_record_migration(self, *, now):
+        state = self.snapshot()
+        if (not self.product_operations or not state.get("schema_ready")
+                or state.get("state_storage_version") is not None
+                or state["cases"].get("product-state-record-v1", 0)
+                or state.get("state_record_migration") is not None):
+            raise BudgetError("STATE_STORAGE_MIGRATION_UNAVAILABLE")
+        ticket = self.begin_product(now=now)
+        state = self.check(ticket, now=now)
+        state["cases"]["product-state-record-v1"] = 1
+        state["state_record_migration"] = {"version": 1, "request": ticket, "complete": False}
+        state["product_data_verified"] = False
+        self._save(state)
+        return ticket
+
     def settle_product_reads(self, ticket, operation, reserved, *, now):
         state = self.check(ticket, now=now)
         archived = self._product_evidence() if self.product_operations else []

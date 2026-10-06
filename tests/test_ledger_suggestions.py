@@ -7,7 +7,9 @@ from pathlib import Path
 
 from pullwise_server.cloudflare_ledger_api import handle_ledger_request
 from pullwise_server.cloudflare_ledger_suggestions import _draft
+from pullwise_server.cloudflare_state_records import encode_record, record_name
 from test_cloudflare_github_identity_http import D1ShapedSQLite, GitHubStub, login, seed
+from state_record_fixtures import normalize_legacy_state
 
 
 class LedgerSuggestionTests(unittest.TestCase):
@@ -30,15 +32,18 @@ class LedgerSuggestionTests(unittest.TestCase):
             db.execute("""CREATE TABLE api_keys(id TEXT PRIMARY KEY,user_id TEXT,name TEXT,
                 key_prefix TEXT,key_hash TEXT UNIQUE,scopes TEXT,expires_at INTEGER,
                 restrictions TEXT,created_at INTEGER,last_used_at INTEGER,revoked_at INTEGER)""")
+            normalize_legacy_state(db, now=self.now)
         self.binding = D1ShapedSQLite(self.store)
         _, _, headers = login(self.binding, GitHubStub(), self.now)
         self.headers = {"Cookie": headers["Set-Cookie"].split(";", 1)[0],
                         "Origin": "https://app.example.test"}
         with self.store.connect() as db:
-            users = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])
-            for user in users.values():
-                user["billing"] = {"plan": "max", "status": "active", "currentPeriodEnd": self.now + 86400}
-            db.execute("UPDATE app_state SET payload=? WHERE name='users'", (json.dumps(users),))
+            owner_id = "usr_github_77"
+            name = record_name("users", owner_id)
+            user = json.loads(db.execute("SELECT payload FROM app_state WHERE name=?", (name,)).fetchone()[0])
+            user["billing"] = {"plan": "max", "status": "active", "currentPeriodEnd": self.now + 86400}
+            db.execute("UPDATE app_state SET payload=? WHERE name=?",
+                       (encode_record("users", owner_id, user), name))
 
     def tearDown(self):
         self.directory.cleanup()

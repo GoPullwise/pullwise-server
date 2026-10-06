@@ -10,10 +10,17 @@ from pullwise_server.cloudflare_account_adapter import D1AccountTransactions
 
 
 from ledger_d1_fixture import D1ShapedSQLite, seed
+from state_record_fixtures import normalize_legacy_state
+
+
+def normalize(fixture):
+    with fixture.store._immediate() as db:
+        normalize_legacy_state(db, now=fixture.now)
 
 
 def test_async_account_adapter_dirties_and_refreshes_persisted_owner(tmp_path):
     fixture, _, frozen = seed(tmp_path / "domain.db")
+    normalize(fixture)
     binding = D1ShapedSQLite(fixture.store)
     adapter = D1AccountTransactions(binding)
     changed = json.dumps({**json.loads(frozen), "githubLogin": "changed"}, separators=(",", ":"))
@@ -29,13 +36,14 @@ def test_async_account_adapter_dirties_and_refreshes_persisted_owner(tmp_path):
 
 def test_async_account_adapter_rejects_change_between_read_and_batch(tmp_path):
     fixture, _, frozen = seed(tmp_path / "domain.db")
+    normalize(fixture)
     binding = D1ShapedSQLite(fixture.store)
     adapter = D1AccountTransactions(binding)
     changed = json.dumps({**json.loads(frozen), "githubLogin": "changed"}, separators=(",", ":"))
 
     def concurrent_change():
         with fixture.store._immediate() as connection:
-            connection.execute("UPDATE app_state SET payload='{}' WHERE name='users'")
+            connection.execute("UPDATE app_state SET payload='{}' WHERE name='record:users:owner'")
 
     binding.before_batch = concurrent_change
     with pytest.raises(sqlite3.IntegrityError):
@@ -45,19 +53,17 @@ def test_async_account_adapter_rejects_change_between_read_and_batch(tmp_path):
         assert tuple(connection.execute("SELECT revision,dirty FROM account_entitlement_authority").fetchone()) == (1, 0)
 
 
-def test_async_pending_reconciliation_uses_current_durable_snapshots(tmp_path):
+def test_async_account_event_publishes_independent_record_atomically(tmp_path):
     fixture, _, frozen = seed(tmp_path / "domain.db")
+    normalize(fixture)
     binding = D1ShapedSQLite(fixture.store)
     adapter = D1AccountTransactions(binding)
-    pending = '[{"eventId":"later","customerId":"customer"}]'
-    asyncio.run(adapter.stage_pending_billing_updates(next_pending_json=pending, now=fixture.now))
     updated = json.dumps({**json.loads(frozen), "githubLogin": "known"}, separators=(",", ":"))
-    events = '{"event_fixture":{"status":"processed"},"later":{"applied":true}}'
-    asyncio.run(adapter.stage_billing_reconciliation(owner_id="owner", expected_revision=1,
-        next_account_json=updated, next_events_json=events,
-        next_pending_json='[]', now=fixture.now))
+    asyncio.run(adapter.stage_account_event(owner_id="owner", expected_revision=1,
+        next_account_json=updated, event_id="later", event_record_json='{"applied":true}', now=fixture.now))
     with closing(fixture.store.connect()) as connection:
         assert tuple(connection.execute("SELECT revision,dirty FROM account_entitlement_authority").fetchone()) == (2, 1)
-        assert connection.execute("SELECT payload FROM app_state WHERE name='billingEvents'").fetchone()[0] == events
+        assert connection.execute("SELECT payload FROM app_state WHERE name='record:billingEvents:later'").fetchone()[0] == '{"applied":true,"ownerId":"owner"}'
+        assert connection.execute("SELECT payload FROM app_state WHERE name='record:billingEvents:event_fixture'").fetchone()[0] == '{"status":"processed"}'
         assert connection.execute("SELECT payload FROM app_state WHERE name='billingPendingUpdates'").fetchone()[0] == '[]'
-    assert binding.batch_count == 2
+    assert binding.batch_count == 1

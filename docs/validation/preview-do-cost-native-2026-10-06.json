@@ -1,0 +1,242 @@
+{
+  "passed": true,
+  "localOnly": true,
+  "nativePythonFFI": true,
+  "nativeDurableObjectSQLite": true,
+  "remoteRequests": 0,
+  "remoteD1Operations": 0,
+  "realProviderRequests": 0,
+  "clientRetries": 0,
+  "canonicalJournalSha256": "5000256500b8704a596c5746340f195f3e9589d8e6f0d5892bc091e9b2b9dbeb",
+  "cases": [
+    {
+      "passed": true,
+      "firstConstructorOverhead": {
+        "rowsRead": 15,
+        "rowsWritten": 23,
+        "sqlStatements": 20
+      },
+      "fixtureScaffoldExcluded": {
+        "rowsRead": 6,
+        "rowsWritten": 3,
+        "sqlStatements": 6
+      },
+      "transactions": [
+        {
+          "name": "first-3-groups",
+          "operationGroups": 3,
+          "syntheticWriteGroups": 0,
+          "stages": {
+            "ingress": {
+              "rowsRead": 8,
+              "rowsWritten": 7,
+              "sqlStatements": 7
+            },
+            "authenticatedActor": {
+              "rowsRead": 2,
+              "rowsWritten": 3,
+              "sqlStatements": 3
+            },
+            "begin": {
+              "rowsRead": 2,
+              "rowsWritten": 1,
+              "sqlStatements": 2
+            },
+            "operationAccounting": {
+              "rowsRead": 30,
+              "rowsWritten": 15,
+              "sqlStatements": 21
+            },
+            "finish": {
+              "rowsRead": 2,
+              "rowsWritten": 1,
+              "sqlStatements": 2
+            }
+          },
+          "rowsRead": 44,
+          "rowsWritten": 27,
+          "sqlStatements": 35
+        }
+      ],
+      "d1Operations": 0,
+      "providerRequests": 0,
+      "fixtureRouteAlias": "product",
+      "case": "first-read-shape"
+    },
+    {
+      "passed": true,
+      "transactions": [
+        {
+          "name": "stable-3-groups",
+          "operationGroups": 3,
+          "syntheticWriteGroups": 0,
+          "stages": {
+            "ingress": {
+              "rowsRead": 7,
+              "rowsWritten": 2,
+              "sqlStatements": 4
+            },
+            "authenticatedActor": {
+              "rowsRead": 3,
+              "rowsWritten": 1,
+              "sqlStatements": 3
+            },
+            "begin": {
+              "rowsRead": 2,
+              "rowsWritten": 1,
+              "sqlStatements": 2
+            },
+            "operationAccounting": {
+              "rowsRead": 30,
+              "rowsWritten": 15,
+              "sqlStatements": 21
+            },
+            "finish": {
+              "rowsRead": 2,
+              "rowsWritten": 1,
+              "sqlStatements": 2
+            }
+          },
+          "rowsRead": 44,
+          "rowsWritten": 20,
+          "sqlStatements": 32
+        }
+      ],
+      "d1Operations": 0,
+      "providerRequests": 0,
+      "fixtureRouteAlias": "bounded",
+      "case": "stable-read-shape"
+    },
+    {
+      "passed": true,
+      "reconstructedConstructorOverhead": {
+        "rowsRead": 6,
+        "rowsWritten": 0,
+        "sqlStatements": 17
+      },
+      "transactions": [
+        {
+          "name": "stable-12-groups",
+          "operationGroups": 12,
+          "syntheticWriteGroups": 3,
+          "stages": {
+            "ingress": {
+              "rowsRead": 7,
+              "rowsWritten": 2,
+              "sqlStatements": 4
+            },
+            "authenticatedActor": {
+              "rowsRead": 2,
+              "rowsWritten": 3,
+              "sqlStatements": 3
+            },
+            "begin": {
+              "rowsRead": 2,
+              "rowsWritten": 1,
+              "sqlStatements": 2
+            },
+            "operationAccounting": {
+              "rowsRead": 126,
+              "rowsWritten": 63,
+              "sqlStatements": 90
+            },
+            "finish": {
+              "rowsRead": 2,
+              "rowsWritten": 1,
+              "sqlStatements": 2
+            }
+          },
+          "rowsRead": 139,
+          "rowsWritten": 70,
+          "sqlStatements": 101
+        },
+        {
+          "name": "reconstructed-12-groups",
+          "operationGroups": 12,
+          "syntheticWriteGroups": 3,
+          "stages": {
+            "ingress": {
+              "rowsRead": 7,
+              "rowsWritten": 2,
+              "sqlStatements": 4
+            },
+            "authenticatedActor": {
+              "rowsRead": 3,
+              "rowsWritten": 1,
+              "sqlStatements": 3
+            },
+            "begin": {
+              "rowsRead": 2,
+              "rowsWritten": 1,
+              "sqlStatements": 2
+            },
+            "operationAccounting": {
+              "rowsRead": 126,
+              "rowsWritten": 63,
+              "sqlStatements": 90
+            },
+            "finish": {
+              "rowsRead": 2,
+              "rowsWritten": 1,
+              "sqlStatements": 2
+            }
+          },
+          "rowsRead": 140,
+          "rowsWritten": 68,
+          "sqlStatements": 101
+        }
+      ],
+      "d1Operations": 0,
+      "providerRequests": 0,
+      "countersSurviveReconstruction": true,
+      "fixtureRouteAlias": "legacy",
+      "case": "write-shapes-and-reconstruction"
+    }
+  ],
+  "localHttpRequestsCompleted": 3,
+  "localHttpCap": 3,
+  "runtimeStopped": true,
+  "measurementKind": "native-do-sql-cursor-accounting-microbenchmark",
+  "localD1Operations": 0,
+  "applicationD1MetricsMeasured": false,
+  "customerDataUsed": false,
+  "nativeCursorProperties": [
+    "rowsRead",
+    "rowsWritten"
+  ],
+  "measuredStages": [
+    "ingress",
+    "authenticatedActor",
+    "begin",
+    "operationAccounting",
+    "finish"
+  ],
+  "nativeEffectsIncluded": [
+    "DO SQLite row changes",
+    "native trigger effects",
+    "native index maintenance"
+  ],
+  "syntheticD1Metadata": {
+    "perGroupReservedReads": 20,
+    "perGroupObservedReads": 2,
+    "perWriteGroupReservedWrites": 9,
+    "perWriteGroupObservedWrites": 3,
+    "completeSingleAttemptResults": true,
+    "purpose": "Exercise canonical DO accounting without any D1 dispatch"
+  },
+  "fixtureEntrySha256": "94ed1989bc2d873afba0a5a19020e6a77712086b7b12f71d3ba57bdefa8e2262",
+  "canonicalSourceSha256": {
+    "cloudflare_validation_budget.py": "5000256500b8704a596c5746340f195f3e9589d8e6f0d5892bc091e9b2b9dbeb",
+    "cloudflare_preview_rate.py": "1d2f6446f73e72d4cf96c8d7576d527ea1ca5f4b7cc4b392d6991dc395151993",
+    "cloudflare_preview_budget.py": "11b013f3c775bfd89ad11627e89e11223c052e8c6dc473caa35b4b18aaf8382f"
+  },
+  "scopeLimits": [
+    "Four synthetic transactions; not an online API traffic sample or route maximum",
+    "First DO constructor and fixture scaffold reported separately",
+    "Reconstruction calls canonical constructors on unchanged native SQLite storage; not a process restart",
+    "Normal ProductMeteredD1 check/snapshot reads outside listed stages excluded",
+    "Minute rollover/expired-subject deletion and large journal storage not sampled",
+    "Application D1, provider latency, Worker CPU, DO duration and invoice not measured",
+    "80 DO writes/API remains a planning parameter; 120 sensitivity remains applicable"
+  ]
+}

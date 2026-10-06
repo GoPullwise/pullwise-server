@@ -118,6 +118,11 @@ class WorkerGitHubGateway:
             items.extend(batch)
             if len(batch) < 100:
                 return items
+            # A full final page can be a complete 1,000-repository grant. Both
+            # GitHub endpoints expose total_count; accept that exact boundary
+            # without an eleventh request or silently truncating larger grants.
+            if page == 10 and type(result.get("total_count")) is int and result["total_count"] == len(items):
+                return items
         raise GitHubFailure("GITHUB_RESPONSE_INVALID")
 
     async def installations(self, token: str) -> list[dict]:

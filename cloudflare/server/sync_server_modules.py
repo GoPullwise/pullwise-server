@@ -39,6 +39,7 @@ MODULES = (
     "cloudflare_principal",
     "cloudflare_project_repositories",
     "cloudflare_session_adapter",
+    "cloudflare_state_records",
     "cloudflare_webhook_receipts",
     "cloudflare_workspaces",
     "cloudflare_validation_budget",

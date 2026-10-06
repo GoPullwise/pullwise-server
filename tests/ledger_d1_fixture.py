@@ -7,6 +7,8 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from state_record_fixtures import normalize_legacy_state
+from pullwise_server.cloudflare_state_records import record_name, encode_record
 
 TOKEN = "pwk_synthetic_ledger_profile"
 
@@ -91,15 +93,16 @@ def seed(path, *, now=1_800_000_000):
                    ('{"event_fixture":{"status":"processed"}}', now))
         db.execute("INSERT INTO account_entitlement_authority VALUES(?,?,?,?,?,?,?)",
                    ("owner", 1, "pro", "2026-09", now - 864000, now + 864000, 0))
+        normalize_legacy_state(db, now=now)
     return SimpleNamespace(store=store, now=now), None, frozen
 
 
 def seed_auth(fixture, *, scopes=("profile:read",),
               session_expires=None, key_expires=None, restrictions="{}"):
     with fixture.store._immediate() as db:
-        db.execute("UPDATE app_state SET payload=?,updated_at=? WHERE name='sessions'",
-            (json.dumps({"session-local": {"userId": "owner",
-                "expiresAt": fixture.now + 3600 if session_expires is None else session_expires}}), fixture.now))
+        db.execute("INSERT OR REPLACE INTO app_state(name,payload,updated_at) VALUES(?,?,?)",
+            (record_name("sessions", "session-local"), encode_record("sessions", "session-local",
+                {"userId": "owner", "expiresAt": fixture.now + 3600 if session_expires is None else session_expires}), fixture.now))
         db.execute("INSERT INTO api_keys VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             ("key-local", "owner", "Synthetic", TOKEN[:16],
              hashlib.sha256(TOKEN.encode()).hexdigest(), json.dumps(scopes),

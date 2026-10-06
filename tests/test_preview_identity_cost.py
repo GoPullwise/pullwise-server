@@ -47,4 +47,5 @@ def test_identity_trace_replays_fresh_schema_and_keeps_providers_synthetic(tmp_p
     assert manifest["http_cases"] == 9
     assert manifest["remote_admissible"] is False
     assert manifest["final_state"] == {"users": 1, "sessions": 0, "githubStates": 0}
+    assert manifest["state_storage_version"] == 1
     assert len(trace) < 100

@@ -18,6 +18,7 @@ from .cloudflare_account_adapter import D1AccountTransactions
 from .cloudflare_principal import _cookie_sessions, _header, _observe_authenticated_actor
 from .cloudflare_ledger_auth import ledger_principal
 from .cloudflare_principal import PrincipalAuthError
+from .cloudflare_state_records import encode_record, read_record, read_record_json, record_name
 
 SESSION_AGE = 7 * 86400
 
@@ -70,24 +71,22 @@ def _session_cookie(session_id: str, *, clear: bool = False, same_site: str = "L
     return f"pw_session={value}; Path=/; HttpOnly; Secure; SameSite={same_site}; Max-Age={age}"
 
 
-async def _state_row(binding: Any, name: str):
-    return await binding.prepare("SELECT payload FROM app_state WHERE name=?").bind(name).first()
-
-
 async def _user(binding: Any, owner_id: str) -> dict | None:
-    row = await _state_row(binding, "users")
-    users = json.loads(row["payload"]) if row else {}
-    user = users.get(owner_id) if isinstance(users, dict) else None
+    if not isinstance(owner_id, str) or not owner_id:
+        return None
+    user = await read_record(binding, "users", owner_id)
     return user if isinstance(user, dict) and user.get("id") == owner_id else None
 
 
 async def _session_user(binding: Any, headers: Mapping[str, object], now: int):
     if _header(headers, "Authorization") or _header(headers, "X-Pullwise-Api-Key"):
         return None, None
-    sessions_row = await _state_row(binding, "sessions")
-    sessions = json.loads(sessions_row["payload"]) if sessions_row else {}
     for session_id in _cookie_sessions(headers):
-        session = sessions.get(session_id) if isinstance(sessions, dict) else None
+        try:
+            record_name("sessions", session_id)
+        except (ValueError, UnicodeError):
+            continue
+        session = await read_record(binding, "sessions", session_id)
         if (isinstance(session, dict) and type(session.get("expiresAt")) is int
                 and session["expiresAt"] > now):
             user = await _user(binding, str(session.get("userId") or ""))
@@ -98,20 +97,22 @@ async def _session_user(binding: Any, headers: Mapping[str, object], now: int):
 
 
 async def _write_user(binding: Any, user: dict, now: int, expected_user: dict | None = None) -> None:
-    row = await _state_row(binding, "users")
-    users = json.loads(row["payload"]) if row else {}
-    if not isinstance(users, dict):
-        raise ValueError("invalid users state")
-    if expected_user is not None and users.get(user["id"], {}) != expected_user:
+    owner_id = user["id"]
+    name = record_name("users", owner_id)
+    snapshot = await read_record_json(binding, "users", owner_id)
+    current = json.loads(snapshot) if snapshot is not None else {}
+    if not isinstance(current, dict):
+        raise ValueError("invalid user state")
+    if expected_user is not None and current != expected_user:
         raise ValueError("ACCOUNT_CHANGED")
-    next_payload = json.dumps({**users, user["id"]: user}, separators=(",", ":"), ensure_ascii=False)
-    if row:
+    next_payload = encode_record("users", owner_id, user)
+    if snapshot is not None:
         command = binding.prepare("""UPDATE app_state SET payload=?,updated_at=?
-            WHERE name='users' AND payload=?""").bind(next_payload, now, row["payload"])
+            WHERE name=? AND payload=?""").bind(next_payload, now, name, snapshot)
     else:
         command = binding.prepare("""INSERT INTO app_state(name,payload,updated_at)
-            SELECT 'users',?,? WHERE NOT EXISTS(SELECT 1 FROM app_state WHERE name='users')""").bind(
-                next_payload, now)
+            SELECT ?,?,? WHERE NOT EXISTS(SELECT 1 FROM app_state WHERE name=?)""").bind(
+                name, next_payload, now, name)
     await binding.batch([command,
         binding.prepare("INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN changes()=1 THEN 1 ELSE 0 END)"),
         binding.prepare("DELETE FROM d1_command_guard")])

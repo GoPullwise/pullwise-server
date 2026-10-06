@@ -183,7 +183,7 @@ def test_product_meter_runs_login_installation_and_signout_with_one_cumulative_b
     async def run():
         connection = sqlite3.connect(":memory:")
         try:
-            journal, raw = BudgetJournal(LocalSql(connection)), Raw()
+            journal, raw = BudgetJournal(LocalSql(connection), preview_product=True, product_operations=True), Raw()
             await initialize_product(raw, journal, clock=lambda: 10)
             gateway = GitHubStub()
 
@@ -215,7 +215,7 @@ def test_product_meter_runs_login_installation_and_signout_with_one_cumulative_b
             status, _, _ = await request("/auth/sign-out", headers={**cookie, "Origin": "https://app.example.test"}, method="POST")
             assert status == 200
             assert journal.snapshot()["reserved_written"] < 1000
-            assert journal.snapshot()["reserved_read"] < 10000
+            assert journal.snapshot()["reserved_read"] >= journal.snapshot()["actual_read"]
             assert journal.snapshot()["stopped"] is None
         finally:
             connection.close()

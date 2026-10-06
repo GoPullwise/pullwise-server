@@ -45,13 +45,13 @@ class BillingMutationTests(unittest.TestCase):
                      "githubAccessToken": "sealed", "billing": {"plan": "free"}}
         self._save_user()
         with self.store.connect() as db:
-            db.execute("INSERT INTO app_state VALUES('sessions', ?, ?)",
-                       (json.dumps({"ses-1": {"id": "ses-1", "userId": "owner", "expiresAt": self.now + 1000}}), self.now))
+            db.execute("INSERT INTO app_state VALUES('record:sessions:ses-1', ?, ?)",
+                       (json.dumps({"id": "ses-1", "userId": "owner", "expiresAt": self.now + 1000}), self.now))
 
     def _save_user(self):
         with self.store.connect() as db:
-            db.execute("INSERT OR REPLACE INTO app_state VALUES('users', ?, ?)",
-                       (json.dumps({"owner": self.user}), self.now))
+            db.execute("INSERT OR REPLACE INTO app_state VALUES('record:users:owner', ?, ?)",
+                       (json.dumps(self.user), self.now))
 
     def call(self, path, body, headers=None):
         return asyncio.run(handle_billing_mutation(
@@ -66,7 +66,7 @@ class BillingMutationTests(unittest.TestCase):
         self.assertEqual(payload["url"], "https://checkout.creem.io/ch_1")
         self.assertEqual(self.gateway.calls[0][1]["metadata"]["userId"], "owner")
         with self.store.connect() as db:
-            saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])["owner"]
+            saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name='record:users:owner'").fetchone()[0])
         self.assertEqual(saved["billing"]["plan"], "free")
         self.assertEqual(saved["billingCheckout"]["id"], "ch_1")
         status, _ = self.call("/billing/checkout-sessions", {"plan": "pro"}, {"Authorization": "Bearer pwk_bad"})
@@ -94,7 +94,7 @@ class BillingMutationTests(unittest.TestCase):
             with self.subTest(url=url), self.assertRaises(ValueError):
                 self.call("/billing/checkout-sessions", {"plan": "pro"})
             with self.store.connect() as db:
-                saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])["owner"]
+                saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name='record:users:owner'").fetchone()[0])
             self.assertNotIn("billingCheckout", saved)
             self.assertEqual(saved["billing"]["plan"], "free")
 
@@ -125,7 +125,7 @@ class BillingMutationTests(unittest.TestCase):
             with self.subTest(path=path), self.assertRaisesRegex(ValueError, "not confirmed"):
                 self.call(path, {})
             with self.store.connect() as db:
-                saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])["owner"]
+                saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name='record:users:owner'").fetchone()[0])
             self.assertEqual(saved["billing"], self.user["billing"])
 
     def test_repeated_cancel_and_resume_are_idempotent_and_resume_clears_cancellation(self):
@@ -138,7 +138,7 @@ class BillingMutationTests(unittest.TestCase):
         self.assertTrue(self.call("/billing/resume-subscription", {})[1]["alreadyActive"])
         self.assertEqual(len(self.gateway.calls), 2)
         with self.store.connect() as db:
-            saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])["owner"]
+            saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name='record:users:owner'").fetchone()[0])
         self.assertEqual(saved["billing"]["interval"], "year")
         self.assertFalse(saved["billing"]["cancelAtPeriodEnd"])
         self.assertIsNone(saved["billing"]["canceledAt"])
@@ -150,7 +150,7 @@ class BillingMutationTests(unittest.TestCase):
         with self.assertRaises(TimeoutError):
             self.call("/billing/checkout-sessions", {"plan": "max", "interval": "year"})
         with self.store.connect() as db:
-            saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])["owner"]
+            saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name='record:users:owner'").fetchone()[0])
         self.assertEqual(saved, self.user)
 
     def test_origin_and_invalid_plan_do_not_call_provider(self):
@@ -171,7 +171,7 @@ class BillingMutationTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(payload["pending"])
         with self.store.connect() as db:
-            saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])["owner"]
+            saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name='record:users:owner'").fetchone()[0])
         self.assertEqual(saved["billing"]["plan"], "pro")
         self.assertEqual(saved["billingChange"]["plan"], "max")
         status, repeated = self.call("/billing/change-interval", {"plan": "max", "interval": "month"})
@@ -214,7 +214,7 @@ class BillingMutationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "identity mismatch"):
             self.call("/billing/change-interval", {"plan": "max", "interval": "year"})
         with self.store.connect() as db:
-            saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])["owner"]
+            saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name='record:users:owner'").fetchone()[0])
         self.assertEqual(saved["billing"]["plan"], "pro")
         self.assertEqual(saved["billingChange"]["interval"], "year")
         self.assertTrue(self.call("/billing/change-interval", {"plan": "max", "interval": "year"})[1]["pending"])
@@ -248,7 +248,7 @@ class BillingMutationTests(unittest.TestCase):
         with self.assertRaises(CreemRequestRejected):
             self.call("/billing/change-interval", {"plan": "max", "interval": "month"})
         with self.store.connect() as db:
-            saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])["owner"]
+            saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name='record:users:owner'").fetchone()[0])
         self.assertNotIn("billingChange", saved)
         self.assertEqual(saved["billing"]["plan"], "pro")
 

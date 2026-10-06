@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 from typing import Any, Mapping
+from .cloudflare_state_records import read_record, record_name
 
 SESSION_COOKIE = "pw_session"
 API_KEY_PREFIX = "pwk_"
@@ -47,8 +48,10 @@ def _cookie_sessions(headers: Mapping[str, object]) -> list[str]:
         name, separator, value = entry.partition("=")
         if separator and name.strip() == SESSION_COOKIE:
             candidate = value.strip().strip('"')
-            if candidate:
+            if candidate and candidate not in sessions:
                 sessions.append(candidate)
+                if len(sessions) > 8:
+                    raise PrincipalAuthError(400, "AMBIGUOUS_AUTH", "Too many session credentials.")
     return sessions
 
 
@@ -63,11 +66,7 @@ def _timestamp(value: object) -> int | None:
 
 
 async def _user(binding: Any, owner_id: str) -> dict | None:
-    row = await binding.prepare("""SELECT u.value AS snapshot FROM app_state a,
-        json_each(a.payload) u WHERE a.name='users' AND u.key=?""").bind(owner_id).first()
-    if not row:
-        return None
-    user = json.loads(row["snapshot"])
+    user = await read_record(binding, "users", owner_id)
     return user if isinstance(user, dict) and user.get("id") == owner_id else None
 
 
@@ -115,23 +114,24 @@ async def _principal(binding: Any, headers: Mapping[str, object],
         _observe_authenticated_actor(binding, user["id"])
         return user, restrictions
     if session_ids:
-        row = await binding.prepare("SELECT payload FROM app_state WHERE name='sessions'").first()
-        sessions = json.loads(row["payload"]) if row else None
-        if isinstance(sessions, dict):
-            for session_id in session_ids:
-                session = sessions.get(session_id)
-                if not isinstance(session, dict):
-                    continue
-                expires_at = _timestamp(session.get("expiresAt"))
-                owner_id = session.get("userId")
-                if expires_at is None or expires_at < now or not isinstance(owner_id, str):
-                    continue
-                user = await _user(binding, owner_id)
-                if (user is not None and not (
-                        "github" in (user.get("providers") or [])
-                        and not user.get("githubAccessToken"))):
-                    _observe_authenticated_actor(binding, user["id"])
-                    return user, {}
+        for session_id in session_ids:
+            try:
+                record_name("sessions", session_id)
+            except (ValueError, UnicodeError):
+                continue
+            session = await read_record(binding, "sessions", session_id)
+            if not isinstance(session, dict):
+                continue
+            expires_at = _timestamp(session.get("expiresAt"))
+            owner_id = session.get("userId")
+            if expires_at is None or expires_at < now or not isinstance(owner_id, str):
+                continue
+            user = await _user(binding, owner_id)
+            if (user is not None and not (
+                    "github" in (user.get("providers") or [])
+                    and not user.get("githubAccessToken"))):
+                _observe_authenticated_actor(binding, user["id"])
+                return user, {}
     raise PrincipalAuthError(401, "UNAUTHENTICATED", "A session or API key is required.")
 
 
@@ -144,13 +144,22 @@ def _resource_auth_snapshot(binding: Any, headers: Mapping[str, object],
     sessions = ([bearer] if bearer and not bearer.startswith(API_KEY_PREFIX)
                 else _cookie_sessions(headers))
     owner_id = user["id"]
+    named_sessions = []
+    for candidate in sessions:
+        try:
+            named_sessions.append(record_name("sessions", candidate))
+        except (ValueError, UnicodeError):
+            continue
+    if not named_sessions:
+        named_sessions = [record_name("sessions", "_no_session_")]
     statements = [
         binding.prepare("""SELECT user_id,scopes,expires_at,restrictions,revoked_at
             FROM api_keys WHERE key_hash=?""").bind(
                 hashlib.sha256(token.encode("utf-8")).hexdigest() if token else ""),
-        binding.prepare("SELECT payload FROM app_state WHERE name='sessions'"),
-        binding.prepare("""SELECT u.value AS snapshot FROM app_state a,
-            json_each(a.payload) u WHERE a.name='users' AND u.key=?""").bind(owner_id),
+        binding.prepare("SELECT name,payload FROM app_state WHERE name IN (" +
+                        ",".join("?" for _ in named_sessions) + ")").bind(*named_sessions),
+        binding.prepare("SELECT u.payload AS snapshot FROM app_state u WHERE u.name=?").bind(
+            record_name("users", owner_id)),
     ]
 
     def validate(rows: list) -> None:
@@ -179,15 +188,19 @@ def _resource_auth_snapshot(binding: Any, headers: Mapping[str, object],
             if proof is not None:
                 proof.update(key=record, sessions=None, user=user_rows[0]["snapshot"], token=token)
             return
-        saved_sessions = json.loads(session_rows[0]["payload"]) if len(session_rows) == 1 else None
-        if isinstance(saved_sessions, dict):
+        saved_sessions = {row["name"]: row["payload"] for row in session_rows}
+        if saved_sessions:
             for session_id in sessions:
-                session = saved_sessions.get(session_id)
+                try:
+                    payload = saved_sessions.get(record_name("sessions", session_id))
+                except (ValueError, UnicodeError):
+                    continue
+                session = json.loads(payload) if payload is not None else None
                 if (isinstance(session, dict) and session.get("userId") == owner_id
                         and (expiry := _timestamp(session.get("expiresAt"))) is not None
                         and expiry >= now):
                     if proof is not None:
-                        proof.update(key=None, sessions=session_rows[0]["payload"],
+                        proof.update(key=None, sessions=payload,
                                      user=user_rows[0]["snapshot"], token=None,
                                      session_id=session_id)
                     return

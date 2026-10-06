@@ -9,6 +9,7 @@ import pytest
 from pullwise_server.cloudflare_api_key_write import create_api_key
 from pullwise_server.cloudflare_ledger_api import handle_ledger_request
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1
+from pullwise_server.cloudflare_state_records import encode_record, record_name
 from pullwise_server.ledger_plan_policy import default_policy
 import test_ledger_suggestions as suggestion_fixture
 from test_cloudflare_github_identity_http import GitHubStub
@@ -106,10 +107,12 @@ def test_expense_write_key_gets_assistance_without_separate_model_scope(ledger):
 def test_unpaid_tiers_never_call_model_and_require_category(ledger, plan):
     chosen = category(ledger)
     with ledger.store.connect() as db:
-        users = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])
-        for user in users.values():
-            user["billing"]["plan"] = plan
-        db.execute("UPDATE app_state SET payload=? WHERE name='users'", (json.dumps(users),))
+        owner_id = "usr_github_77"
+        name = record_name("users", owner_id)
+        user = json.loads(db.execute("SELECT payload FROM app_state WHERE name=?", (name,)).fetchone()[0])
+        user["billing"]["plan"] = plan
+        db.execute("UPDATE app_state SET payload=? WHERE name=?",
+                   (encode_record("users", owner_id, user), name))
     provider = Provider()
     assert call(ledger, expense(chosen), provider)[0] == 201
     status, failure = call(ledger, expense(), provider, key="missing-category")
@@ -207,10 +210,12 @@ def test_invalid_access_never_calls_provider(ledger):
 def test_expired_max_has_no_automatic_model_access(ledger):
     chosen = category(ledger)
     with ledger.store.connect() as db:
-        users = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])
-        for user in users.values():
-            user["billing"]["currentPeriodEnd"] = ledger.now - 1
-        db.execute("UPDATE app_state SET payload=? WHERE name='users'", (json.dumps(users),))
+        owner_id = "usr_github_77"
+        name = record_name("users", owner_id)
+        user = json.loads(db.execute("SELECT payload FROM app_state WHERE name=?", (name,)).fetchone()[0])
+        user["billing"]["currentPeriodEnd"] = ledger.now - 1
+        db.execute("UPDATE app_state SET payload=? WHERE name=?",
+                   (encode_record("users", owner_id, user), name))
     provider = Provider()
     assert call(ledger, expense(chosen), provider)[0] == 201
     assert call(ledger, expense(), provider, key="automatic-category")[1]["error"]["code"] == "CATEGORY_REQUIRED"

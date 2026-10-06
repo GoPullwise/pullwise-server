@@ -12,6 +12,8 @@ import pytest
 
 from test_cloudflare_github_identity_http import D1ShapedSQLite, Store
 from test_worker_application_security import Response, request
+from state_record_fixtures import normalize_legacy_state
+from pullwise_server.cloudflare_state_records import record_name, encode_record
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -63,6 +65,7 @@ def runtime(tmp_path, monkeypatch):
             amount_minor,currency,purpose,created_at,updated_at)
             VALUES('exp_other','other','shared','cat_other','2026-09-27',999,'USD',
                 'Other private record','local','local')""")
+        normalize_legacy_state(db, now=NOW)
     worker = entry.Default()
     worker.env = NoPreviewEnvironment(PULLWISE_MODE="production", PULLWISE_D1_ACCESS_ENABLED="1",
         PULLWISE_APP_URL=ORIGIN, PULLWISE_ALLOWED_ORIGINS=ORIGIN, DB=D1ShapedSQLite(store),
@@ -157,9 +160,10 @@ def test_production_provider_failure_does_not_expose_preview_diagnostics(runtime
             failure.args = ("private-provider-response-secret",)
             raise failure
     with runtime.store.connect() as db:
-        users = json.loads(db.execute("SELECT payload FROM app_state WHERE name='users'").fetchone()[0])
-        users["owner"]["githubAccessToken"] = "synthetic-sealed-token"
-        db.execute("UPDATE app_state SET payload=? WHERE name='users'", (json.dumps(users),))
+        name = record_name("users", "owner")
+        user = json.loads(db.execute("SELECT payload FROM app_state WHERE name=?", (name,)).fetchone()[0])
+        user["githubAccessToken"] = "synthetic-sealed-token"
+        db.execute("UPDATE app_state SET payload=? WHERE name=?", (encode_record("users", "owner", user), name))
     monkeypatch.setattr(runtime.entry, "WorkerGitHubGateway", FailedGitHub)
     response = call(runtime, "/api/v1/repositories", headers=cookie())
     assert response.status == 503 and response.payload == {"error": {"code": "GITHUB_UNAVAILABLE"}}

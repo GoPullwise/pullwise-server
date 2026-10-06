@@ -81,11 +81,55 @@ row; the internal audit RPC returns at most 128 new rows and a truncation flag,
 while all earlier history remains stored. This prevents ordinary operation from
 rewriting an indefinitely growing evidence array on every SQL group.
 
+### Bounded account records and one-shot cutover
+
+The capacity follow-up replaces the five global JSON containers with existing
+`app_state` primary keys `record:users:<id>`, `record:sessions:<id>`,
+`record:githubStates:<id>`, `record:billingEvents:<id>` and
+`record:billingPendingUpdates:<eventId>`. It adds no table/index/DDL or schema
+fingerprint change. Exact-record reads and CAS fences preserve unrelated-account
+independence and owner/actor/session authorization. User records allow at most
+512 KiB of strictly validated UTF-8 JSON, retaining bounded 1,000-repository and
+100-billing-event histories; other records and HTTP ingress retain 8 KiB.
+Only an exact matching typed user key authorizes the larger SQL snapshot.
+Statement/batch parameter payloads and enumerated record pages stay within
+8 MiB; pages contain at most 16 large users or 1,000 small records. Session/OAuth
+issuance may atomically remove at most eight expired records with exact CAS;
+it never prunes payment receipt/history facts or uses background polling.
+
+The preview coordinator explicitly runs `product-state-record-v1` once under
+its existing lock, before admitting ordinary product requests. Utility GET
+readers never migrate implicitly. The compiler strictly decodes every legacy
+field from at most six 8 KiB rows and rejects pre-existing normalized records,
+duplicates, non-finite numbers, invalid Unicode, kind/identity mismatch and
+unknown nonempty sources. One guarded atomic batch copies accepted records and
+empties their legacy containers. Every observed row, including a preserved
+unknown-empty row, has an exact snapshot CAS in the initial guard. Receipt,
+account-authority, workspace and finance tables are untouched. Native accounting
+and all reservations/counters remain in the same journal; a completed storage
+version marker prevents replay after restart. A conflicting, partial, unknown,
+previously stopped or interrupted migration cannot resume or reset itself.
+
+First cutover/unverified validation aggregates structural kind, identity, byte
+and cardinality checks. It is not universal semantic revalidation of arbitrary
+normalized SQL imports: supported semantic validity comes from empty fresh
+initialization, strict legacy cutover and strict typed full-record mutations.
+No active writer can replace a global map or insert an untyped record. Under
+the existing exclusive-preview-write premise, successful mutations then refresh
+only numeric physical/kind counts; completed reads/restarts reuse persisted
+verification. Console/import/other-Worker writes are unsupported until an
+operator separately establishes their schema, semantic and cardinality proof.
+The [baseline capacity review](preview-state-capacity-review-2026-10-06.md)
+preserves the former shared-map failure; local/native capacity and restart
+acceptance is required before this follow-up is published.
+
 `GET /_preview/budget` remains DO-only and exposes numeric cumulative usage,
 `productOperationMode: true`, unenforced lifetime `limits` as null and the
 historical numeric ceilings separately. It exposes no account data, parameters,
 tokens or provider payloads. Publication checks may compare counters across the
 transition, rather than treating the old ceilings as the current product gate.
+The numeric `stateStorageVersion` distinguishes completed per-record storage
+from the historical global-map source.
 
 Oversized SQL parameters are rejected before that SQL group's dispatch as an
 ordinary invalid-input request, without stopping all users. Preview CSV exports

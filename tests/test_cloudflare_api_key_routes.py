@@ -8,9 +8,17 @@ from pullwise_server.api_key_dto_rules import (
     api_key_public_payload, requested_api_key_scopes,
     parse_api_key_restrictions,
 )
+from pullwise_server.cloudflare_state_records import record_name
 from ledger_d1_fixture import D1ShapedSQLite
-from ledger_d1_fixture import TOKEN, seed_auth as _seed_auth
+from ledger_d1_fixture import TOKEN, seed_auth as _fixture_seed_auth
 from ledger_d1_fixture import seed
+from state_record_fixtures import normalize_legacy_state
+
+
+def _seed_auth(fixture):
+    _fixture_seed_auth(fixture)
+    with fixture.store._immediate() as db:
+        normalize_legacy_state(db)
 
 
 def test_api_key_projection_redacts_secret_and_normalizes_fields():
@@ -109,7 +117,8 @@ def test_api_key_list_rechecks_cookie_in_the_same_batch(tmp_path):
 
     def revoke_before_batch():
         with fixture.store._immediate() as db:
-            db.execute("UPDATE app_state SET payload='{}' WHERE name='sessions'")
+            db.execute("DELETE FROM app_state WHERE name=?",
+                       (record_name("sessions", "session-local"),))
 
     binding.before_batch = revoke_before_batch
     status, payload = get(binding, {"Cookie": "pw_session=session-local"}, fixture.now)
@@ -147,7 +156,8 @@ def test_api_key_delete_rolls_back_if_session_changes_before_write(tmp_path):
         batches += 1
         if batches == 2:
             with fixture.store._immediate() as db:
-                db.execute("UPDATE app_state SET payload='{}' WHERE name='sessions'")
+                db.execute("DELETE FROM app_state WHERE name=?",
+                           (record_name("sessions", "session-local"),))
 
     binding.before_batch = revoke_before_write
 
@@ -219,7 +229,8 @@ def test_key_creation_rolls_back_if_session_changes_before_write(tmp_path):
         batches += 1
         if batches == 2:
             with fixture.store._immediate() as db:
-                db.execute("UPDATE app_state SET payload='{}' WHERE name='sessions'")
+                db.execute("DELETE FROM app_state WHERE name=?",
+                           (record_name("sessions", "session-local"),))
 
     binding.before_batch = revoke_before_write
     body = b'{"scopes":["expenses:read"]}'
@@ -275,3 +286,117 @@ def test_every_cookie_key_write_checks_origin_before_body_or_d1(tmp_path, method
         trusted_origins={"https://app.example"}))
     assert status == 403 and payload["error"]["code"] == "UNTRUSTED_ORIGIN"
     assert binding.batch_count == 0
+
+
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/api-keys"), ("POST", "/api-keys"), ("DELETE", "/api-keys/key-local"),
+])
+def test_key_routes_ignore_other_accounts_changed_during_authorization(tmp_path, method, path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture)
+    binding = D1ShapedSQLite(fixture.store)
+
+    def change_other_records():
+        with fixture.store._immediate() as db:
+            for kind, identifier, payload in (
+                ("users", "other", {"id": "other", "name": f"Changed {binding.batch_count}"}),
+                ("sessions", "other-session", {"userId": "other",
+                    "expiresAt": fixture.now + 100 + binding.batch_count}),
+            ):
+                db.execute("""INSERT INTO app_state(name,payload,updated_at) VALUES(?,?,?)
+                    ON CONFLICT(name) DO UPDATE SET payload=excluded.payload,
+                    updated_at=excluded.updated_at""", (record_name(kind, identifier),
+                        json.dumps(payload, separators=(",", ":")), fixture.now))
+
+    binding.before_batch = change_other_records
+    body = b'{"scopes":["expenses:read"]}'
+
+    async def read_body():
+        assert method == "POST", "read-only and DELETE routes must not read a body"
+        return body
+
+    status, payload = asyncio.run(handle_http_request(method=method, path=path,
+        headers={"Cookie": "pw_session=session-local", "Origin": "https://app.example",
+                 "Content-Length": str(len(body))}, read_body=read_body,
+        binding=binding, creem_secret="", configured_products={}, now=fixture.now,
+        trusted_origins={"https://app.example"}))
+    assert status == (201 if method == "POST" else 200)
+    if method == "GET":
+        assert [item["id"] for item in payload["items"]] == ["key-local"]
+    elif method == "DELETE":
+        assert payload == {"ok": True, "id": "key-local", "revoked": True}
+    else:
+        assert payload["userId"] == "owner" and payload["key"].startswith("pwk_")
+
+
+@pytest.mark.parametrize("method,path,expected_status,expected_code", [
+    ("POST", "/api-keys", 503, "SERVER_UNAVAILABLE"),
+    ("DELETE", "/api-keys/key-local", 409, "AUTHORIZATION_CHANGED"),
+])
+def test_key_mutations_roll_back_if_own_account_changes_before_write(
+        tmp_path, method, path, expected_status, expected_code):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture)
+    binding = D1ShapedSQLite(fixture.store)
+    batches = 0
+
+    def change_own_record_before_write():
+        nonlocal batches
+        batches += 1
+        if batches == 2:
+            with fixture.store._immediate() as db:
+                db.execute("UPDATE app_state SET payload=json_set(payload,'$.name','Changed') WHERE name=?",
+                           (record_name("users", "owner"),))
+
+    binding.before_batch = change_own_record_before_write
+    body = b'{"scopes":["expenses:read"]}'
+
+    async def read_body():
+        assert method == "POST"
+        return body
+
+    status, payload = asyncio.run(handle_http_request(method=method, path=path,
+        headers={"Cookie": "pw_session=session-local", "Origin": "https://app.example",
+                 "Content-Length": str(len(body))}, read_body=read_body,
+        binding=binding, creem_secret="", configured_products={}, now=fixture.now,
+        trusted_origins={"https://app.example"}))
+    assert status == expected_status and payload["error"]["code"] == expected_code
+    with fixture.store._immediate() as db:
+        assert [tuple(row) for row in db.execute("SELECT id,revoked_at FROM api_keys")] == [("key-local", None)]
+        assert db.execute("SELECT COUNT(*) FROM d1_command_guard").fetchone()[0] == 0
+
+
+def test_key_revocation_cannot_revoke_another_accounts_key(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture)
+    binding = D1ShapedSQLite(fixture.store)
+    with fixture.store._immediate() as db:
+        db.execute("""INSERT INTO api_keys VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                   ("key-other", "other", "Other", "pwk_other", "other-hash",
+                    '["profile:read"]', None, "{}", fixture.now, None, None))
+
+    async def no_body():
+        raise AssertionError("DELETE must not read body")
+
+    status, payload = asyncio.run(handle_http_request(method="DELETE", path="/api-keys/key-other",
+        headers={"Cookie": "pw_session=session-local", "Origin": "https://app.example"},
+        read_body=no_body, binding=binding, creem_secret="", configured_products={},
+        now=fixture.now, trusted_origins={"https://app.example"}))
+    assert status == 404 and payload["error"]["code"] == "NOT_FOUND"
+    with fixture.store._immediate() as db:
+        assert db.execute("SELECT revoked_at FROM api_keys WHERE id='key-other'").fetchone()[0] is None
+
+
+def test_key_revocation_uses_valid_cookie_among_multiple_session_candidates(tmp_path):
+    fixture, _, _ = seed(tmp_path / "domain.db")
+    _seed_auth(fixture)
+    binding = D1ShapedSQLite(fixture.store)
+
+    async def no_body():
+        raise AssertionError("DELETE must not read body")
+
+    status, payload = asyncio.run(handle_http_request(method="DELETE", path="/api-keys/key-local",
+        headers={"Cookie": "pw_session=missing; pw_session=session-local", "Origin": "https://app.example"},
+        read_body=no_body, binding=binding, creem_secret="", configured_products={},
+        now=fixture.now, trusted_origins={"https://app.example"}))
+    assert status == 200 and payload["revoked"] is True

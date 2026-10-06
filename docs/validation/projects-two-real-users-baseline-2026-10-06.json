@@ -1,0 +1,138 @@
+{
+  "passed": false,
+  "source": "real preview Cookie accounts, ephemeral Chromium contexts",
+  "runId": "2cad33dc290e052a29dc24e9436cfeb0",
+  "manifest": {
+    "origin": "https://preview.pull-wise.com",
+    "businessHttpLimit": 150,
+    "networkRequestLimit": 700,
+    "mutationAttemptLimit": 20,
+    "confirmedWriteLimit": 20,
+    "minimumMutationIntervalMs": 10000,
+    "clientRetries": 0,
+    "screenshots": false,
+    "traces": false,
+    "storageState": false,
+    "credentialPersistence": false,
+    "realPayments": false,
+    "modelCalls": false,
+    "fixtureNamespace": "PW QA <runId-prefix>",
+    "methods": [
+      "GET",
+      "POST",
+      "PATCH",
+      "DELETE"
+    ],
+    "businessPaths": [
+      "/api/auth/session",
+      "/api/api/v1/me",
+      "/api/api/v1/workspaces",
+      "/api/api/v1/repositories",
+      "/api/api/v1/projects",
+      "/api/api/v1/categories",
+      "/api/api/v1/expenses",
+      "/api/api/v1/reports",
+      "/api/api/v1/workspace-invitations/preview",
+      "/api/api/v1/workspace-invitations/accept",
+      "/api/api-keys"
+    ],
+    "cleanup": "Only confirmed new QA fixtures: remove expenses, archive QA category/project, revoke QA key/invite, remove newly joined member."
+  },
+  "checks": [
+    {
+      "name": "two_distinct_real_sessions",
+      "passed": true,
+      "accounts": 2
+    },
+    {
+      "name": "organization_filter_ui",
+      "passed": true
+    },
+    {
+      "name": "project_create_ui",
+      "passed": true,
+      "repositoryCount": 2
+    },
+    {
+      "name": "project_expense_create_ui",
+      "passed": true
+    },
+    {
+      "name": "project_reports_tab_ui",
+      "passed": true
+    },
+    {
+      "name": "project_report_and_csv_actual_response",
+      "passed": true,
+      "csvMethod": "UI export href fetched in browser memory; no download file saved"
+    },
+    {
+      "name": "project_description_archive_historical_edit_reactivate_ui",
+      "passed": true
+    },
+    {
+      "name": "project_list_search_ui",
+      "passed": true
+    },
+    {
+      "name": "invitation_create_and_accept_two_real_users_ui",
+      "passed": true
+    },
+    {
+      "name": "viewer_finance_read_and_hidden_controls_plus_actual_403",
+      "passed": true
+    }
+  ],
+  "limitations": [
+    "Stopped at the first failed prerequisite or assertion; no mutation retried.",
+    "Remote checks omit duplicate stale/archive writes, invitation-recovery replay, role downgrade, and Admin write replay to stay within 20 paced mutation attempts. Those edge cases have independent local/native evidence; Admin access is a read-only REST assertion.",
+    "Archived QA project and soft-deleted QA expenses retain ordinary accounting history/capacity; no raw SQL or business-history rewrites were used."
+  ],
+  "cleanup": [
+    {
+      "name": "soft_delete_qa_expense",
+      "status": "complete"
+    },
+    {
+      "name": "remove_qa_membership",
+      "status": "complete"
+    },
+    {
+      "name": "archive_qa_project",
+      "status": "complete"
+    },
+    {
+      "name": "archive_qa_category",
+      "status": "complete"
+    }
+  ],
+  "counts": {
+    "businessHttp": 107,
+    "network": 169,
+    "mutationAttempts": 13,
+    "confirmedWrites": 12,
+    "deniedRequests": 0
+  },
+  "credentialPersistence": false,
+  "rawFinancialEvidence": false,
+  "fixtureIds": {
+    "project": "prj_9b24f6b1b7244aaa8a9fc649a8e3dcd6",
+    "invitation": "win_cf8f4fe6e4f24c8198c5ad8f9f7bcb10"
+  },
+  "ownerAccount": "sanchai20",
+  "failure": {
+    "stage": "editor_shared_create_edit",
+    "code": "QA_UI_OR_TRANSPORT_FAILURE"
+  },
+  "cleanupComplete": true,
+  "clientRetries": 0,
+  "executionVersion": {
+    "server": "7882f562-8c5e-4c5a-a898-d52943dc63e6",
+    "web": "ea62c7a0-37e4-4693-b78a-bbb3c96c53b6"
+  },
+  "followUpDiagnosis": {
+    "scope": "Source-based runner diagnosis; no additional remote calls",
+    "cause": "Owner Members page was retained after invitation creation. Recipient acceptance happened in a separate context. changeRole used the cached page without manual Reload, so newly joined member role controls were unavailable. No Editor PATCH was dispatched.",
+    "repair": "Use explicit manual owner Reload and wait for its members response before role/removal controls; remaining role flow has a separate finite runner."
+  }
+}
