@@ -51,8 +51,15 @@ Owner 身份由原账本所有者确定，不可通过成员 API 更换或移除
 
 ## 多仓库与 Organization
 
-每个项目显式关联 1–30 个不同的已授权 GitHub repository ID，可填写
-可选的项目 `name`、`description` 和 `githubOrganizationId`。稳定 numeric
+项目可以独立于 GitHub 创建：填写非空项目名称，可选描述，不关联任何
+仓库或 Organization。独立项目的兼容 GitHub ID/名称字段为真实 NULL，
+仓库数组为空，`githubAccess=not_linked`；未归档时按账本角色、Key 范围
+和 Owner 套餐正常新增或移入支出、查看报表及导出，不查询 GitHub。
+GitHub 登录身份与仓库安装授权是不同要求；本次不取消账户登录。
+
+可选关联 1–30 个不同的已授权 GitHub repository ID；关联时项目 `name`
+保持兼容可选，`description` 和 `githubOrganizationId` 仍可选。组织关联
+必须伴随非空仓库集合，不能只关联组织。稳定 numeric
 repository/Organization ID 是外部身份，名称只用于展示。仓库可以来自
 调用者有权限的个人或 Organization 安装；Organization 关联是显式元数据，
 不自动选择全部仓库或纳入以后新增的仓库。
@@ -63,6 +70,11 @@ repository/Organization ID 是外部身份，名称只用于展示。仓库可�
 一起原子提交。旧 `githubRepoId` 单仓库创建入参继续兼容，与新
 `githubRepoIds` 不能同时提交。
 
+创建时省略仓库字段或传 `githubRepoIds: []` 表示独立项目，名称不能只
+含空白。修改时省略仓库字段保留原关联；明确传空数组则解除全部仓库并
+清除组织关联，最终名称必须非空，可在同一 PATCH 提供名称。后续可重新
+关联仓库，项目、支出、revision 和历史金额不会被复制或另建项目替代。
+
 同一账本内，一个仓库最多关联一个项目，包括已归档项目；不同账本的
 关联互不影响。`GET /repositories` 返回 `isBound`，Web 创建选择器排除
 已被绑定的候选仓库，不能把绑定仓库误报成没有 GitHub 权限。更改项目
@@ -71,10 +83,13 @@ repository/Organization ID 是外部身份，名称只用于展示。仓库可�
 
 成员失去部分仓库权限时，仅显示该成员仍有权限的 GitHub 详情；失权或
 未知仓库的受保护名称、installation/account/Organization 元数据被隐藏。
-按角色查看、修改、移除和导出既有财务记录仍可使用。新增项目支出或将
+按角色查看、修改、移除和导出既有财务记录仍可使用。对仓库关联项目，新增支出或将
 支出移入新项目目标，需要该项目未归档且至少一个当前关联仓库仍获该成员
 授权；GitHub 未知结果不能当作授权通过。所有关联都失权时不会抹去历史
 金额，也不会把项目变成空账目。
+失权、未知结果或空的可见授权列表不能自动把仓库关联项目变成独立项目；
+独立项目写入的原子目标检查同时要求 active、项目 revision、NULL anchor
+和没有任何绑定，防止并发关联变化绕过 GitHub 授权。
 
 ## API 与自动化边界
 

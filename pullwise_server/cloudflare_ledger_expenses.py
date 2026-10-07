@@ -154,6 +154,13 @@ async def _valid_target(binding, user, restrictions, data, gateway, writing, evi
 
 
 def _target_guard(binding, owner_id, evidence):
+    if evidence["githubRepoId"] is None:
+        return binding.prepare("""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN
+            EXISTS(SELECT 1 FROM ledger_projects WHERE owner_id=? AND id=? AND revision=?
+                AND status='active' AND github_repo_id IS NULL)
+            AND NOT EXISTS(SELECT 1 FROM ledger_project_repositories WHERE owner_id=? AND project_id=?)
+            THEN 1 ELSE 0 END)""").bind(owner_id, evidence["projectId"], evidence["revision"],
+                                          owner_id, evidence["projectId"])
     return binding.prepare("""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN
         EXISTS(SELECT 1 FROM ledger_projects WHERE owner_id=? AND id=? AND revision=? AND status='active')
         AND EXISTS(SELECT 1 FROM ledger_project_repositories WHERE owner_id=? AND project_id=? AND github_repo_id=?)

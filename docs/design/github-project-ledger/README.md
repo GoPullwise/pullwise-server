@@ -1,6 +1,6 @@
 # Pullwise 转型设计：GitHub 项目支出记账
 
-状态：当前产品设计，更新于 2026-10-06。本文描述产品契约和实施边界，运行验收状态见两端验证记录。本文中的“项目”是有稳定 project ID、显式关联 1–30 个 GitHub repositories 的记账项目；Organization 是可选关联，不是 GitHub Projects 看板。前端 `pullwise-web` 与后端 `pullwise-server` 仍为独立部署单元。
+状态：当前产品设计，更新于 2026-10-07。本文描述产品契约和实施边界，运行验收状态见两端验证记录。本文中的“项目”是有稳定 project ID 的记账项目，可以没有 GitHub 关联；也可显式关联 1–30 个已授权 repositories，并可选关联 Organization，不是 GitHub Projects 看板。前端 `pullwise-web` 与后端 `pullwise-server` 仍为独立部署单元。
 
 当前实施状态（2026-10-06）：多人账本、角色邀请、多仓库和 Organization 的 Server/Web 已实现、验证并发布 Preview，原数据库已在同一累计预算下升级到 v5。新角色通过真实本地 Worker 与模拟账号浏览器验证；本次线上访客验收不冒充双真实账号邀请测试。完整规则见[本版需求与迁移状态](../../planning/project-repositories.md)。原版本的验收已另行记录，不能作为本版权限或升级验收。
 
@@ -8,7 +8,7 @@
 
 ## 1. 产品目标与边界
 
-用户沿用现有 GitHub 登录与 GitHub App 仓库授权，选择 1–30 个有权限的仓库建立项目，可填写项目名称、描述及 Organization 关联，按发生日期和自定义类别记录支出。每条支出记录包含金额、货币、用途、类别、备注；可选数量和单位，用于表达工时、调用量等。成员按所选账本的角色查看项目、类别、日期明细和合计，Owner/Admin/Editor 可**修改或移除已录入的支出记录**。
+用户沿用现有 GitHub 登录，填写非空项目名称即可建立独立项目，描述选填；不要求安装 GitHub App、仓库权限或 Organization 关联。需要时可显式选择 1–30 个有权限的仓库并可选关联 Organization，关联项目可以使用仓库名称展示。项目按发生日期和自定义类别记录支出。每条支出记录包含金额、货币、用途、类别、备注；可选数量和单位，用于表达工时、调用量等。成员按所选账本的角色查看项目、类别、日期明细和合计，Owner/Admin/Editor 可**修改或移除已录入的支出记录**。
 
 账本/workspace ID 沿用现有 `owner_id`。个人账本保留隐式 Owner；显式邀请 Admin/Editor/Viewer 后分享同一账本所有当前和未来财务数据，邀请创建与接受均提示此范围，不复制或重写历史。邀请绑定稳定 GitHub user ID、24 小时有效、token 只返回一次且只存 hash。GitHub Organization 成员资格不授予账本角色。Owner/Admin 管理项目与类别，Owner 管理 Admin，Admin 只管理 Editor/Viewer，Viewer 只读。账本配额、套餐与模型预算统一归 Owner；成员个人订阅和账本独立。
 
@@ -44,15 +44,15 @@ flowchart LR
 
 - Web 只调用 Server REST API；浏览器不持有 GitHub App 私钥、Creem 密钥、Jev 密钥或 API Key。沿用 `worker.js` 的同源代理与 `/api` 前缀剥离规则，Cookie 登录通过 `/api/auth/*`；脚本可直连 Server `/api/v1/*`，使用 `Authorization: Bearer pwk_…`。
 - Server 负责认证、workspace 成员角色、GitHub 仓库资格、输入校验、D1 事务、金额汇总、平台支付和可选建议。所有记账读写在服务端校验所选账本 `owner_id` 和真实 actor 的当前凭证及 membership revision，不能信任客户端传来的 owner。Cookie 默认个人账本，可用 `X-Pullwise-Workspace` 显式选择；账本共享不改变平台账单的个人身份。
-- GitHub 稳定 numeric repository/Organization ID 是外部身份；更名只影响展示。创建和关联变更逐仓库校验实际 actor 的 App user token，不能借用 Owner 凭证。每个仓库在同一账本最多关联一个项目，包括已归档项目；发现列表返回 `isBound`。部分失权时隐藏该仓库受保护的 GitHub 详情，历史财务记录按账本角色仍可使用；新增或移入项目目标须项目未归档且至少一个关联仓库当前对 actor 授权。未知授权结果失败关闭，不能当作“项目金额为零”。
+- GitHub 稳定 numeric repository/Organization ID 是外部身份；更名只影响展示。创建或修改非空仓库关联时逐仓库校验实际 actor 的 App user token，不能借用 Owner 凭证。每个仓库在同一账本最多关联一个项目，包括已归档项目；发现列表返回 `isBound`。独立项目为真实 NULL anchor、空绑定和 `not_linked` 状态，按账本权限正常记账且不请求 GitHub。对关联项目，部分失权时隐藏该仓库受保护的 GitHub 详情，历史财务记录按账本角色仍可使用；新增或移入须项目未归档且至少一个关联仓库当前对 actor 授权。未知授权结果失败关闭，不能自动变成独立项目或当作“项目金额为零”。
 - D1 使用专门的关系表和索引，不把新增支出作为整个账户 JSON 快照读写。账单表与支出表物理隔离。对一个用户读/写一个资源时，在同一请求的授权检查与数据操作中维持一致快照/事务语义。
 
 ## 4. 数据模型和计算规则
 
 | 表/对象 | 主要字段及约束 |
 | --- | --- |
-| `ledger_projects` | 保留 `id`, `owner_id`, 原 `github_repo_id`/`github_full_name` 兼容字段、`description`, `status`, `revision`, timestamps；0005 追加可选 `name` 与 `github_organization_id`；描述由用户维护，不覆盖 GitHub description |
-| `ledger_project_repositories` | `owner_id`, `project_id`, `github_repo_id`, GitHub 展示快照及 installation/account 元数据；`PRIMARY KEY(project_id, github_repo_id)`、`UNIQUE(owner_id, github_repo_id)`；同一项目 1–30 个显式关联 |
+| `ledger_projects` | 保留 `id`, `owner_id`, 原兼容字段、`description`, `status`, `revision`, timestamps；0005 追加 `name` 与 `github_organization_id`；0006 允许真实 nullable `github_repo_id`/`github_full_name`，独立项目名称非空且无组织；描述由用户维护，不覆盖 GitHub description |
+| `ledger_project_repositories` | `owner_id`, `project_id`, `github_repo_id`, GitHub 展示快照及 installation/account 元数据；`PRIMARY KEY(project_id, github_repo_id)`、`UNIQUE(owner_id, github_repo_id)`；同一项目 0–30 个显式关联 |
 | `workspace_members` | `workspace_id`, `user_id`, `role` (`admin`/`editor`/`viewer`), `revision`, 加入/更新/移除时间；`PRIMARY KEY(workspace_id, user_id)`；Owner 为隐式身份 |
 | `workspace_invites` / `workspace_events` | 固定接收人的 GitHub ID、邀请 hash、角色、期限、状态、revision 与邀请者权限版本；成员/邀请审计记录 workspace 和真实操作成员 |
 | `expense_categories` | `id`, `owner_id`, `name`, `color?`, `archived_at`；同账户有效名称唯一；公共池和项目共用账户类别，避免同名类别拆散统计 |
@@ -81,7 +81,7 @@ flowchart LR
 | `POST /api/v1/workspace-invitations/preview`、`/accept` | 固定接收人预览/单次接受，body 为 token | Cookie Session |
 | `GET /api/v1/repositories` | 当前可授权仓库的分页列表 | `projects:read` |
 | `GET /api/v1/projects`、`GET /api/v1/projects/{id}` | 我的项目及描述、GitHub 状态、逐币总额摘要 | `projects:read` |
-| `POST /api/v1/projects`、`PATCH /api/v1/projects/{id}` | `githubRepoIds` 显式多仓库创建/关联；可选 `name`、`description`、`githubOrganizationId`，修改或归档需 `If-Match` | `projects:write`，且 Owner/Admin |
+| `POST /api/v1/projects`、`PATCH /api/v1/projects/{id}` | 非空 `name` 创建独立项目，GitHub 关联选填；`githubRepoIds` 显式选择多仓库或用空数组解除关联；描述选填，组织只随非空仓库关联；修改或归档需 `If-Match` | `projects:write`，且 Owner/Admin |
 | `GET/POST /api/v1/categories`、`PATCH/DELETE /api/v1/categories/{id}` | 自定义类别与归档 | `categories:read/write` |
 | `GET/POST /api/v1/expenses`、`GET/PATCH/DELETE /api/v1/expenses/{id}` | 项目或公共池记录；PATCH 修改已记支出，DELETE 移除并从统计排除；列表支持 `target`, `projectId`, `categoryId`, `from`, `to`, `currency`, cursor、limit 过滤 | `expenses:read/write` |
 | `GET /api/v1/expenses/export` | 按同一过滤语义导出所选账本许可的支出，流式 CSV 并防止公式注入；原生下载用 `workspaceId` query | `expenses:read` |
@@ -96,7 +96,7 @@ workspace-scoped Key 绑定 `workspaceId` 与当前 `workspaceMemberRevision`；
 
 ## 6. 前端体验
 
-1. 首页、登录和引导：说明 GitHub 项目记账、公共支出池与独立平台支付；登录后可切换个人/已加入账本。Owner/Admin 从实际 actor 的已授权仓库中多选 1–30 个，可填写项目名称、描述和 Organization 关联。未授权/授权失效分别显示操作指引。
+1. 首页、登录和引导：说明项目记账、公共支出池与独立平台支付；登录后可切换个人/已加入账本。Owner/Admin 默认填写项目名称和可选描述即可创建，GitHub 关联为按需展开选项；不展开时不枚举仓库。需要关联时从实际 actor 的已授权仓库中多选 1–30 个，可选 Organization。未授权/授权失效指引仅影响关联能力，不阻挡独立项目。
 2. 项目总览：卡片或列表显示仓库名称、用户描述、选定区间的逐币支出；进入项目可查看日期趋势、类别分布、可筛选的支出表与新增/编辑表单。每条已记支出提供“修改”“移除”；移除需确认，成功后当前明细与各图表同步刷新，失败时保持原值并显示错误。
 3. 公共支出池：在导航中与项目并列，使用相同记账表单和报表，但没有项目归属选择后的隐式复制。账户总览分开展示项目与公共池，跨项目 agent 账单只出现一次。
 4. 类别管理：新增、改名、归档；表单可从账户类别选择。日期、用途、金额、货币为必填；Free/Pro 和编辑操作须指定类别，Max 新增可由后台可靠分类；备注、数量、单位可选；支持明确的空态、校验错误和保存冲突提示。

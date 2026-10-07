@@ -26,7 +26,7 @@ from pullwise_server.cloudflare_jev_gateway import WorkerJevGateway
 from pullwise_server.cloudflare_ledger_reports import CsvExport
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1, PlanLimitError
 from pullwise_server.ledger_plan_policy import parse_policy
-from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initialize_product, reconcile_schema_reads, upgrade_product_schema, migrate_product_state_records
+from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initialize_product, reconcile_schema_reads, upgrade_product_schema, upgrade_product_schema_v6, migrate_product_state_records
 from pullwise_server.cloudflare_preview_rate import PreviewRateLimiter, PreviewRateLimit, request_channel
 from pullwise_server.cloudflare_native_d1 import NativeD1
 from pullwise_server.json_input import validate_json_unicode
@@ -471,6 +471,9 @@ class ValidationBudget(DurableObject):
                         if (str(getattr(self.env, "PULLWISE_PREVIEW_SCHEMA_UPGRADE_ENABLED", "0")) == "1"
                                 and journal.snapshot().get("schema_ready")):
                             await upgrade_product_schema(native, journal)
+                        if (str(getattr(self.env, "PULLWISE_PREVIEW_SCHEMA_V6_UPGRADE_ENABLED", "0")) == "1"
+                                and journal.snapshot().get("schema_ready")):
+                            await upgrade_product_schema_v6(native, journal)
                         await initialize_product(native, journal)
                         await migrate_product_state_records(native, journal)
                         ticket = journal.begin_product(now=time.time())

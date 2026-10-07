@@ -17,7 +17,7 @@ from .json_input import validate_json_unicode
 from .cloudflare_state_records import record_name
 from .cloudflare_project_repositories import (
     MAX_REPOSITORIES, bound_repository_dto, live_repository_access, project_input,
-    repository_snapshot_values,
+    repository_snapshot_values, standalone_project,
 )
 
 
@@ -67,12 +67,13 @@ def _revision(headers: Mapping[str, object]):
 def _project(row: dict, allowed_repos: dict[int, dict], totals: list[dict], github_access="lost",
              bindings: list[dict] | None = None, organizations: list[dict] | None = None):
     repo_id = row["github_repo_id"]
+    standalone = standalone_project(row, bindings or [])
     ids = [item["github_repo_id"] for item in (bindings or [])]
-    ids = [repo_id, *sorted(value for value in ids if value != repo_id)]
+    ids = ([repo_id] if repo_id is not None else []) + sorted(value for value in ids if value != repo_id)
     repositories = [bound_repository_dto(value, allowed_repos, github_access) for value in ids]
     authorized = sum(item["githubAccess"] == "authorized" for item in repositories)
-    state = "authorized" if authorized == len(ids) else "partial" if authorized else github_access
-    organization_id = row.get("github_organization_id")
+    state = "not_linked" if standalone else "authorized" if authorized == len(ids) else "partial" if authorized else github_access
+    organization_id = None if standalone else row.get("github_organization_id")
     organization = next((item for item in organizations or [] if item["id"] == organization_id), None)
     live_anchor = allowed_repos.get(repo_id)
     return {"id": row["id"], "name": row.get("name", ""), "githubRepoId": repo_id,
@@ -84,7 +85,7 @@ def _project(row: dict, allowed_repos: dict[int, dict], totals: list[dict], gith
                 if organization_id is not None else None,
             "description": row["description"],
             "status": row["status"], "githubAccess": state,
-            "canCreateExpense": row["status"] == "active" and authorized > 0,
+            "canCreateExpense": row["status"] == "active" and (standalone or authorized > 0),
             "revision": row["revision"], "totals": [{"currency": total["currency"],
                 "amountMinor": total["amountMinor"] if "amountMinor" in total
                 else public_minor(aggregate_minor(total))} for total in totals]}
@@ -258,6 +259,8 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
             selected = project_input(body, creating=method == "POST")
         except ValueError:
             return _error(422, "INVALID_INPUT")
+        if "name" in body:
+            body = {**body, "name": body["name"].strip()}
     if method == "GET":
         if item_id:
             user, _, auth, validate = await ledger_principal(binding=binding, headers=headers,
@@ -272,7 +275,8 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
             project_rows, totals, bindings = [part.results for part in rows[len(auth):]]
             if not project_rows:
                 return _error(404, "NOT_FOUND")
-            repos, state, organizations = await _project_repos(user, gateway)
+            repos, state, organizations = ({}, "not_linked", []) if standalone_project(
+                project_rows[0], bindings) else await _project_repos(user, gateway)
             return 200, _project(project_rows[0], repos, totals, state, bindings, organizations)
         try:
             limit, cursor = _page_inputs(params)
@@ -316,7 +320,8 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
         by_binding = {}
         for row in bindings:
             by_binding.setdefault(row["project_id"], []).append(row)
-        repos, state, organizations = await _project_repos(user, gateway)
+        repos, state, organizations = ({}, "not_linked", []) if all(standalone_project(
+            row, by_binding.get(row["id"], [])) for row in page) else await _project_repos(user, gateway)
         return 200, {"items": [_project(row, repos, by_project.get(row["id"], []), state,
             by_binding.get(row["id"], []), organizations) for row in page],
                      "nextCursor": page[-1]["id"] if len(projects) > limit else None}
@@ -337,36 +342,44 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
             return _error(422, "INVALID_INPUT")
         if expected != existing["revision"]:
             return _error(412, "PRECONDITION_FAILED")
+    resulting_standalone = selected == [] or (selected is None and existing
+        and standalone_project(existing, current_bindings))
+    if resulting_standalone:
+        name = body.get("name", existing.get("name", "") if existing else "").strip()
+        if not name or len(name) > 120 or body.get("githubOrganizationId") is not None:
+            return _error(422, "INVALID_INPUT")
+        body = {**body, "name": name}
     project_id = "prj_" + uuid.uuid4().hex if method == "POST" else item_id
     if method == "POST" and not target_allowed(restrictions, "project", project_id):
         return _error(403, "TARGET_FORBIDDEN")
-    if selected is not None and await _repository_conflict(binding, user["id"], selected, item_id):
+    if selected and await _repository_conflict(binding, user["id"], selected, item_id):
         return _error(409, "PROJECT_CONFLICT")
     status = body.get("status", existing["status"] if existing else "active")
     access = None
-    if (selected is not None or "githubOrganizationId" in body
-            or (existing and status == "active" and existing["status"] == "archived")):
+    if (selected or body.get("githubOrganizationId") is not None
+            or (existing and status == "active" and existing["status"] == "archived" and not resulting_standalone)):
         access = await live_repository_access(user, gateway)
     repos = {item["githubRepoId"]: item for item in access["items"]} if access else {}
     organizations = access.get("organizations", []) if access else []
-    organization_id = body.get("githubOrganizationId", existing.get("github_organization_id") if existing else None)
+    organization_id = None if resulting_standalone else body.get("githubOrganizationId",
+        existing.get("github_organization_id") if existing else None)
     if ("githubOrganizationId" in body and organization_id is not None
             and not any(item["id"] == organization_id for item in organizations)):
         return _error(403, "GITHUB_ORGANIZATION_ACCESS_REQUIRED")
     if selected is not None:
         if any(repo_id not in repos for repo_id in selected):
             return _error(403, "GITHUB_ACCESS_REQUIRED")
-    elif existing and status == "active" and existing["status"] == "archived":
+    elif existing and status == "active" and existing["status"] == "archived" and not resulting_standalone:
         if not any(row["github_repo_id"] in repos for row in current_bindings):
             return _error(403, "GITHUB_ACCESS_REQUIRED")
     stamp = _timestamp(now)
     if method == "POST":
-        repo_id = selected[0]
+        repo_id = selected[0] if selected else None
         commands = [_write_guard(binding, proof, user["id"], now),
             binding.prepare("""INSERT INTO ledger_projects(id,owner_id,github_repo_id,
                 github_full_name,description,status,revision,created_at,updated_at,name,github_organization_id)
                 VALUES(?,?,?,?,?,'active',1,?,?,?,?)""").bind(project_id, user["id"], repo_id,
-                    repos[repo_id]["fullName"], body.get("description", ""), stamp, stamp,
+                    repos[repo_id]["fullName"] if repo_id is not None else None, body.get("description", ""), stamp, stamp,
                     body.get("name", ""), organization_id),
             *_insert_repository_bindings(binding, user["id"], project_id, selected, repos, stamp),
             binding.prepare("DELETE FROM d1_command_guard")]
@@ -380,8 +393,8 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
             "name": body.get("name", ""), "github_organization_id": organization_id,
             "description": body.get("description", ""), "status": "active", "revision": 1}, repos, [],
             bindings=[{"github_repo_id": value} for value in selected], organizations=organizations)
-    repo_id = selected[0] if selected is not None else existing["github_repo_id"]
-    full_name = repos[repo_id]["fullName"] if selected is not None else existing["github_full_name"]
+    repo_id = (selected[0] if selected else None) if selected is not None else existing["github_repo_id"]
+    full_name = (repos[repo_id]["fullName"] if repo_id is not None else None) if selected is not None else existing["github_full_name"]
     commands = [_write_guard(binding, proof, user["id"], now),
         binding.prepare("""UPDATE ledger_projects SET name=?,github_organization_id=?,
             github_repo_id=?,github_full_name=?,description=?,status=?,revision=revision+1,
@@ -404,14 +417,15 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
     except PlanLimitError as error:
         return error.response()
     except Exception:
-        if selected is not None and await _repository_conflict(binding, user["id"], selected, item_id):
+        if selected and await _repository_conflict(binding, user["id"], selected, item_id):
             return _error(409, "PROJECT_CONFLICT")
         return _error(412, "PRECONDITION_FAILED")
     updated = {**existing, "description": body.get("description", existing["description"]),
         "name": body.get("name", existing["name"]), "github_organization_id": organization_id,
         "github_repo_id": repo_id, "status": status, "revision": expected + 1}
     bindings = [{"github_repo_id": value} for value in selected] if selected is not None else current_bindings
-    repos, state, organizations = await _project_repos(user, gateway)
+    repos, state, organizations = ({}, "not_linked", []) if standalone_project(
+        updated, bindings) else await _project_repos(user, gateway)
     return 200, _project(updated, repos, result[-1].results, state, bindings, organizations)
 
 

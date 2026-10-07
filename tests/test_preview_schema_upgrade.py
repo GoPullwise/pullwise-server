@@ -14,6 +14,7 @@ from test_d1_validation_budget import LocalSql
 from pullwise_server.cloudflare_preview_schema import (
     SCHEMA_SQL, SCHEMA_OBJECTS, SCHEMA_VERSION, SCHEMA_FINGERPRINT,
     LEGACY_SCHEMA_SQL, LEGACY_SCHEMA_OBJECTS, LEGACY_INDEX_COUNTS, INDEX_COUNTS,
+    V5_SCHEMA_FINGERPRINT,
 )
 from pullwise_server.cloudflare_preview_budget import (
     ProductMeteredD1, initialize_product, upgrade_product_schema,
@@ -101,8 +102,8 @@ def test_populated_v4_upgrades_once_without_resetting_history_or_budget(legacy):
     raw = SQLiteD1(db, journal)
     run_upgrade(raw, journal)
     state = journal.snapshot()
-    assert state["schema_version"] == SCHEMA_VERSION
-    assert state["schema_fingerprint"] == SCHEMA_FINGERPRINT
+    assert state["schema_version"] == 5
+    assert state["schema_fingerprint"] == V5_SCHEMA_FINGERPRINT
     assert state["schema_upgrade"]["complete"] is True
     assert state["scope"] == before["scope"]
     assert state["requests"] == before["requests"] + 1
@@ -323,7 +324,7 @@ def test_fresh_schema_is_versioned_and_matches_all_canonical_migrations():
         journal = BudgetJournal(LocalSql(storage), preview_product=True)
         raw = SQLiteD1(db, journal)
         asyncio.run(initialize_product(raw, journal, clock=lambda: 10))
-        assert journal.snapshot()["schema_version"] == 5
+        assert journal.snapshot()["schema_version"] == SCHEMA_VERSION
         assert journal.snapshot()["schema_fingerprint"] == SCHEMA_FINGERPRINT
         objects = tuple((row[0], row[1], row[2], " ".join(row[3].split()) if row[3] else None)
             for row in db.execute("SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name"))

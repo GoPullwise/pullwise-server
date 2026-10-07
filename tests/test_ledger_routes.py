@@ -6,6 +6,7 @@ from pathlib import Path
 
 from pullwise_server.cloudflare_ledger_api import handle_ledger_request
 from pullwise_server.cloudflare_api_key_write import create_api_key
+from pullwise_server.cloudflare_preview_schema import UPGRADE_V6_SQL
 from test_cloudflare_github_identity_http import D1ShapedSQLite, GitHubStub, call, login, seed
 from urllib.parse import parse_qs, urlsplit
 
@@ -22,6 +23,10 @@ class LedgerRoutesTests(unittest.TestCase):
                 key_prefix TEXT,key_hash TEXT UNIQUE,scopes TEXT,expires_at INTEGER,
                 restrictions TEXT,created_at INTEGER,last_used_at INTEGER,revoked_at INTEGER)""")
             db.executescript((migration.parent / "0005_workspaces_repositories.sql").read_text())
+            db.commit()
+            db.execute("BEGIN")
+            for sql in UPGRADE_V6_SQL:
+                db.execute(sql)
         self.binding = D1ShapedSQLite(self.store)
         _, _, headers = login(self.binding, GitHubStub(), self.now)
         self.headers = {"Cookie": headers["Set-Cookie"].split(";", 1)[0],

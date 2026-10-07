@@ -33,7 +33,7 @@ def repository_ids(body: dict, *, required: bool = False) -> list[int] | None:
         if required:
             raise ValueError("repositories required")
         return None
-    if (not isinstance(values, list) or not 1 <= len(values) <= MAX_REPOSITORIES
+    if (not isinstance(values, list) or not 0 <= len(values) <= MAX_REPOSITORIES
             or any(type(value) is not int or not 1 <= value <= MAX_GITHUB_ID for value in values)
             or len(set(values)) != len(values)):
         raise ValueError("invalid repositories")
@@ -46,7 +46,8 @@ def project_input(body: object, *, creating: bool) -> list[int] | None:
                             "githubOrganizationId", *({"status"} if not creating else set())}):
         raise ValueError("invalid fields")
     for field, maximum in (("name", 120), ("description", 2000)):
-        if field in body and (not isinstance(body[field], str) or len(body[field]) > maximum):
+        if field in body and (not isinstance(body[field], str)
+                or len(body[field].strip() if field == "name" else body[field]) > maximum):
             raise ValueError("invalid text")
     if "status" in body and (not isinstance(body["status"], str)
                              or body["status"] not in {"active", "archived"}):
@@ -55,7 +56,20 @@ def project_input(body: object, *, creating: bool) -> list[int] | None:
     if organization is not None and (type(organization) is not int
                                     or not 1 <= organization <= MAX_GITHUB_ID):
         raise ValueError("invalid organization")
-    return repository_ids(body, required=creating)
+    selected = repository_ids(body)
+    if creating and selected is None:
+        selected = []
+    if selected == []:
+        if organization is not None:
+            raise ValueError("standalone organization")
+        if creating and not body.get("name", "").strip():
+            raise ValueError("standalone name required")
+    return selected
+
+
+def standalone_project(project: dict, repositories: list[dict]) -> bool:
+    """An explicit empty association never substitutes for a lost GitHub grant."""
+    return "github_repo_id" in project and project["github_repo_id"] is None and not repositories
 
 
 def repository_snapshot_values(item: dict) -> tuple:
@@ -81,13 +95,17 @@ async def project_repository_eligibility(binding: Any, user: dict, project_id: s
     Unknown provider outcomes propagate, so a new target fails closed.
     """
     parts = await binding.batch([
-        binding.prepare("""SELECT revision,status FROM ledger_projects
+        binding.prepare("""SELECT revision,status,github_repo_id FROM ledger_projects
             WHERE owner_id=? AND id=?""").bind(user["id"], project_id),
         binding.prepare("""SELECT github_repo_id FROM ledger_project_repositories
             WHERE owner_id=? AND project_id=? ORDER BY github_repo_id LIMIT 30""").bind(
                 user["id"], project_id)])
     projects, repositories = (part.results for part in parts)
     if not projects or projects[0]["status"] != "active":
+        return None
+    if standalone_project(projects[0], repositories):
+        return {"revision": projects[0]["revision"], "githubRepoId": None}
+    if not repositories:
         return None
     live = await live_repository_access(user, gateway)
     authorized = {item["githubRepoId"] for item in live["items"]}

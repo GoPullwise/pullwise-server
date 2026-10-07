@@ -12,6 +12,7 @@
     "PULLWISE_D1_ACCESS_ENABLED": "1",
     "PULLWISE_PREVIEW_PRODUCT_ENABLED": "1",
     "PULLWISE_PREVIEW_SCHEMA_UPGRADE_ENABLED": "1",
+    "PULLWISE_PREVIEW_SCHEMA_V6_UPGRADE_ENABLED": "1",
     "PULLWISE_MODE": "preview",
     "PULLWISE_APP_URL": "https://preview.pull-wise.com",
     "PULLWISE_GITHUB_CALLBACK_URL": "https://preview.pull-wise.com/api/auth/github/callback",

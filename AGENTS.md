@@ -1,5 +1,19 @@
 # Pullwise Server
 
+## Standalone projects follow-up (2026-10-07)
+
+Projects may be created with a nonblank name and no GitHub repository or
+Organization association. This supersedes the historical minimum-one-repository
+product rule below. Use real nullable GitHub anchors and empty binding arrays,
+never fabricated repository IDs. Standalone reads, writes and reactivation do
+not require repository installation or provider calls; linked projects retain
+actual-actor GitHub authorization and lost-access protection. Explicit attach
+or detach preserves project ID, expense history, role/key/CAS fences and plan
+limits. Preview schema upgrades must preserve the existing database, singleton
+journal, completed prior upgrade markers and cumulative accounting. Prove the
+finite v5-to-v6 migration locally before one preview upgrade; no production D1
+activation, remote synthetic accounts or high-frequency testing.
+
 ## Current task authority (2026-10-06)
 
 Latest user follow-up authorizes complete Projects acceptance, two real GitHub

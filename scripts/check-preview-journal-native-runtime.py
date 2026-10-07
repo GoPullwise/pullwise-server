@@ -49,7 +49,7 @@ class FixtureJournal(DurableObject):
         if name == "cardinality":
             journal = BudgetJournal(sql, preview_product=True, product_operations=True)
             ticket = journal.begin_product(now=1000)
-            # The local D1 has just applied all five canonical migrations.
+            # The local D1 has just applied all canonical migrations.
             # Model the existing initialized journal without the new marker.
             journal.save_product_state(ticket, initial_data(), now=1001, initialized=True)
             state = journal.snapshot()

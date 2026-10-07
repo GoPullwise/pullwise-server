@@ -2,9 +2,11 @@
 
 `src/entry.py` is the Cloudflare Python Worker for the project expense ledger. It routes GitHub sign-in and App authorization, workspace membership and invitations, account API keys, Creem subscription and webhook requests, multi-repository `/api/v1` ledger resources, per-currency reports, paginated CSV export, and optional Jev suggestions.
 
-The new workspace/Organization/multi-repository version is implemented and
-released to preview as of 2026-10-06. Its dedicated native role/browser checks,
-canonical remote v4-to-v5 upgrade and 100% deployment are recorded in
+Named projects can operate without a GitHub repository or Organization.
+GitHub account sign-in remains the application identity, while repository
+authorization is required only when explicitly associating repositories.
+The blank-project implementation, native role/browser checks and controlled
+preview schema upgrade are recorded in
 [latest acceptance](../../docs/validation/local-acceptance.md).
 
 ## Source and database
@@ -13,10 +15,21 @@ canonical remote v4-to-v5 upgrade and 100% deployment are recorded in
 
 Migrations apply in order: `0001_ledger.sql`, `0002_identity_billing_keys.sql`,
 `0003_ledger_suggestions.sql`, `0004_ledger_plan_usage.sql`,
-`0005_workspaces_repositories.sql`. Production remains unmigrated and paused;
-the existing preview completed the controlled 0005 upgrade to v5. The new canonical
+`0005_workspaces_repositories.sql`, `0006_blank_projects.sql`.
+Production remains unmigrated and paused. The current canonical v6
 schema has 18 tables and 33 SQLite indexes. Health requires all 18 tables.
 The deploy script never applies remote migrations.
+
+0006 makes the project GitHub anchor nullable. A standalone project has a
+nonblank name, NULL repository/full-name/Organization and no repository rows.
+The v5-to-v6 upgrade rebuilds only the project parent table in one atomic D1
+batch with deferred foreign-key checks; financial and audit child rows retain
+their IDs and contents. A separate preview-only versioned flag admits this
+one-shot plan under the original database, coordinator namespace and journal.
+Exact schema, typed-record counts and foreign-key integrity are checked before
+and after dispatch. Reservations remain intact on unknown outcomes, with no
+automatic replay. Current local proof covers populated upgrade, actual restart
+without migration replay and injected rollback after dropping the old parent.
 
 0005 appends `workspace_members`, `workspace_invites`, `workspace_events` and
 `ledger_project_repositories`, plus project `name` and

@@ -1,0 +1,310 @@
+{
+  "passed": true,
+  "date": "2026-10-07",
+  "localOnly": true,
+  "nativePythonFFI": true,
+  "nativeDurableObjectSQLite": true,
+  "syntheticPriorJournal": true,
+  "remoteRequests": 0,
+  "remoteD1Operations": 0,
+  "realProviderRequests": 0,
+  "realAccounts": 0,
+  "realPayments": 0,
+  "clientRetries": 0,
+  "localHttpCap": 4,
+  "nativeAttemptsFabricated": false,
+  "fixtureBindingCount": 2,
+  "canonicalSourceTreeSha256": "634c26d1c85f7676293a21d72b47657816f2597d61e70b230bafdf2f8c8e72fe",
+  "canonicalSourceFileCount": 48,
+  "fixtureEntrySha256": "2d1b217842677a079cdf7bd68cee571cc74381b8bf1178a2ded7e25281a99510",
+  "sourceSha256": {
+    "pullwise_server/cloudflare_native_d1.py": "5408b843e5e2d02cf153b89457210fd60d47ff20150a35fbf280593df466eaa0",
+    "pullwise_server/cloudflare_preview_budget.py": "5d65c27d22339075825eccb0a476d36f8304770df961f8ebb90bf53845bf893c",
+    "pullwise_server/cloudflare_preview_schema.py": "f9940a7a394f34ff62a205835fb0940b88a4144495a080e639779a8c98652703",
+    "pullwise_server/cloudflare_state_records.py": "3ad41cf8aa0d8f8db5f1a4e1972ce14de2c2bab51dd8b094089ff20363c7b881",
+    "pullwise_server/cloudflare_validation_budget.py": "48deb528340ba172c56052b7dd7fa2a56792863ea0a7f2315c9b015b594e500d"
+  },
+  "migrationsSha256": {
+    "0001_ledger.sql": "9c55859edadcb1837ce226a3df07b48c4522223ba30915d5d20c514eb75e9538",
+    "0002_identity_billing_keys.sql": "1dabed034c4e8f9ea62e3ab71308dddbab5ad47907d367375a771cfcb2293a31",
+    "0003_ledger_suggestions.sql": "8b258f5a64f2f5cc559aa0c7aad3a9f187a975880ff3799ccdbf740d0903e412",
+    "0004_ledger_plan_usage.sql": "febe80c0f21a9a3697a1a9a6b8b7f35ed1dc28fc831b65ce948e87e9df41d514",
+    "0005_workspaces_repositories.sql": "dccc2c7d4e8bd695158b1748c10c8b527be6d84c4dc2be073e63e4ade6650bc9",
+    "0006_blank_projects.sql": "544bf65c506f0bc2becc6f38678d26ecd6a42aa378a60e1de8da2b1c47b6cfa2"
+  },
+  "runtimeProvenance": {
+    "workerdSha256": "eb449c84ddd55ea357dc73e6c1b50bd255ccdc5d1875544c162435b7bd6168b6",
+    "runtimeBundleSha256": "3c3fd5a4179230e21e018e28b0e735e7c4abd8fe8e4ff39d2fd6bb2ea3a2e260",
+    "miniflareD1SourceSha256": "eb213ff08bfc9f2992253e8ff01fe31229a069728431df54a3f44c9c4c191ee7",
+    "localTransaction": "state.storage.transactionSync(() => queries.map(query))",
+    "totalAttempts": "Raw native fields retained; no fixture metadata substitution"
+  },
+  "scope": "Populated schema migration, storage integrity and journal preservation; authenticated API flow separate",
+  "localHttpRequestsAttempted": 4,
+  "localHttpRequestsCompleted": 4,
+  "runtimeProcessesStarted": 2,
+  "actualProcessRestarts": 1,
+  "nativeResultStatements": 474,
+  "nativeRowsRead": 2393,
+  "nativeRowsWritten": 425,
+  "nativeAttemptsObserved": [
+    null
+  ],
+  "failedNativeDispatches": [
+    {
+      "binding": "main",
+      "statements": 1,
+      "injectedAfterParentDrop": false,
+      "nativeResultsUnavailable": true
+    },
+    {
+      "binding": "rollback",
+      "statements": 10,
+      "injectedAfterParentDrop": true,
+      "nativeResultsUnavailable": true
+    }
+  ],
+  "nativeFailedBatchTotalsUnavailable": true,
+  "cases": [
+    {
+      "path": "setup",
+      "status": 200,
+      "result": {
+        "passed": true,
+        "v5Fingerprint": "8aa939b2f065a1fb893f37c8c14fe96fe979d31686c084f1602c5dab7e5acc3f",
+        "twoFreshLocalBindings": true,
+        "syntheticPriorJournal": true,
+        "foreignKeysEnabled": true,
+        "tables": {
+          "account_entitlement_authority": {
+            "rows": 2,
+            "sha256": "6769d58e36ec197bd7a39c09edeb082c80632499a2104df3d1cbe4f8ba2b409e"
+          },
+          "api_keys": {
+            "rows": 1,
+            "sha256": "ebef2ca5b1ac56d37e7d52d7c3edbdfc8f9f00e0d653e30041e3c27f9e8a324e"
+          },
+          "app_state": {
+            "rows": 11,
+            "sha256": "8ba7a9c774efa2b18a34a40af97d4d44f622052a3b348555cfa9c98393ad43a1"
+          },
+          "billing_public_catalog": {
+            "rows": 1,
+            "sha256": "e02fe6e813e222f487bf93ea9b8f3e6bb8698eb1abcf5f9b2173f1990acfd2d8"
+          },
+          "billing_webhook_receipts": {
+            "rows": 1,
+            "sha256": "57ecc38b86e8dba1bb8b8caa2ba5a965ce0a4e1b6514ae23549361b07508adef"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "cf176897b3141ce62477b917e7362629245ec3e8f7333f26df186ec52e5381f1"
+          },
+          "expense_categories": {
+            "rows": 2,
+            "sha256": "da2bc302d532a6bb1decd5aa29cfda24a114d9a5a35909db5c22a1378a1d86b9"
+          },
+          "expense_create_idempotency": {
+            "rows": 2,
+            "sha256": "3cdf73d136ea7b230c1da1e5ba0ecd300702f5ccdd6deb361763986203ee6163"
+          },
+          "expense_events": {
+            "rows": 2,
+            "sha256": "a111ae2a8923ee4c3aecc3ac850c7a667d495d260e37f8a2bb05f4b3725afbf9"
+          },
+          "expense_suggestion_budget": {
+            "rows": 1,
+            "sha256": "20759263cd11ccae9263829c9af9778cb329f8d1268ce87c41df7ff5c88b442f"
+          },
+          "expense_suggestion_events": {
+            "rows": 1,
+            "sha256": "5f9a8436b660176727cc88259a1f79fb344fe469c5cbeee7448120f19c254b9a"
+          },
+          "expenses": {
+            "rows": 4,
+            "sha256": "e3fdaa6e581541b511c84628fc93830dba74a87d8047d3363c6a0344b40c5eaa"
+          },
+          "ledger_plan_usage": {
+            "rows": 1,
+            "sha256": "2325a6ed6b38c75280053f2407c71a9ece63a0fc61413d54e8b1818d46a23bfb"
+          },
+          "ledger_project_repositories": {
+            "rows": 4,
+            "sha256": "a27722db88f2e0f58d0c71adb071ba85d58dd89aa0e5d6c0bffc4076fae34f94"
+          },
+          "ledger_projects": {
+            "rows": 3,
+            "sha256": "5d85e7a369bc773c71fd56ee47a830ad93935ed343114040186b44fa7446cbdc"
+          },
+          "workspace_events": {
+            "rows": 1,
+            "sha256": "0dbe97c5021d78a8967d4b24236e600b9e8878518afbf6a53bf6be9154df5afb"
+          },
+          "workspace_invites": {
+            "rows": 1,
+            "sha256": "d0708f2b76cae1a1a9b6f463f291cd37fffa80d8087f28470e42f585d5234d71"
+          },
+          "workspace_members": {
+            "rows": 1,
+            "sha256": "fe59ed5c3fe1405043d04aac3268e836af389da896e20f62355a0d8d5abbd18a"
+          }
+        },
+        "schemaObjects": 51,
+        "fixtureSeedStatementsPerBinding": 35,
+        "fixtureSeedOutsideMigrationJournal": true
+      }
+    },
+    {
+      "path": "upgrade",
+      "status": 200,
+      "result": {
+        "passed": true,
+        "schemaVersion": 6,
+        "schemaFingerprint": "2b69141ce0a7f88b7c467a585e7e85476419ba4a8635229e7894d9d49aa7b015",
+        "all18TablesUnchangedByMigration": true,
+        "foreignKeyViolations": 0,
+        "stableProjectIDsAndEveryStoredField": true,
+        "nullableBlankProjectsSameOwner": 2,
+        "blankRepositoryRows": 0,
+        "legacyMarkersAndEvidencePreserved": true,
+        "oneShotCaseCount": 1,
+        "migrationNativeBatches": [
+          {
+            "binding": "main",
+            "statements": 1,
+            "rowsRead": 103,
+            "rowsWritten": 0,
+            "nativeAttempts": [
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 4,
+            "rowsRead": 61,
+            "rowsWritten": 0,
+            "nativeAttempts": [
+              null,
+              null,
+              null,
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 9,
+            "rowsRead": 305,
+            "rowsWritten": 49,
+            "nativeAttempts": [
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 5,
+            "rowsRead": 164,
+            "rowsWritten": 0,
+            "nativeAttempts": [
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          }
+        ],
+        "migrationJournalActualDeltasMatchRawMeta": true,
+        "migrationWriteExecution": {
+          "native_attempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "provenance": "d1-atomic-write-batch-with-fk-pragma-v1"
+        },
+        "counterBefore": {
+          "requests": 89,
+          "reserved_read": 1000,
+          "reserved_written": 549,
+          "actual_read": 800,
+          "actual_written": 200
+        },
+        "counterAfter": {
+          "requests": 90,
+          "reserved_read": 28792,
+          "reserved_written": 835,
+          "actual_read": 1433,
+          "actual_written": 249
+        },
+        "postBlankCounters": {
+          "requests": 91,
+          "reserved_read": 29453,
+          "reserved_written": 845,
+          "actual_read": 1485,
+          "actual_written": 259
+        }
+      }
+    },
+    {
+      "path": "restart",
+      "status": 200,
+      "result": {
+        "passed": true,
+        "actualProcessRestart": true,
+        "canonicalNoReplayNativeDispatches": 0,
+        "journalUnchanged": true,
+        "foreignKeysStillEnforced": true,
+        "failedIntegrityProbeNativeMetaUnavailable": true,
+        "integrityProbeOutsideMigrationJournal": true,
+        "schemaObjectsMatch": true
+      }
+    },
+    {
+      "path": "rollback",
+      "status": 200,
+      "result": {
+        "passed": true,
+        "injectedAfterParentDrop": true,
+        "entireAtomicBatchRolledBack": true,
+        "all18TableDigestsAndIndexesPreserved": true,
+        "foreignKeysEnabled": true,
+        "foreignKeyViolations": 0,
+        "schemaVersionRetained": 5,
+        "unknownOutcomeStopRetained": true,
+        "reconstructedJournalNoRetryDispatches": 0,
+        "fullReadWriteReservationRetained": true,
+        "failedBatchNativeResultsUnavailable": true,
+        "counterBefore": {
+          "requests": 89,
+          "reserved_read": 1000,
+          "reserved_written": 549,
+          "actual_read": 800,
+          "actual_written": 200
+        },
+        "counterAfter": {
+          "requests": 90,
+          "reserved_read": 28792,
+          "reserved_written": 835,
+          "actual_read": 964,
+          "actual_written": 200
+        }
+      }
+    }
+  ],
+  "runtimeStopped": true,
+  "setupAndIntegritySnapshotsOutsideMigrationJournal": true
+}

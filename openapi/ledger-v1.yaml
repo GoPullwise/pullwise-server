@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Pullwise GitHub Project Ledger API
-  version: 0.2.0
+  version: 0.3.0
   description: |
     Target contract for the replacement ledger. S01-S05 provide identity,
     billing, API keys, current profile and repository authorization; project,
@@ -16,6 +16,9 @@ info:
     issuing member's current role; membership revision changes invalidate team
     keys. All members use the ledger owner's plan, capacity and model budget.
     Account billing remains the signed-in user's own account service.
+    Projects can be standalone with a nonblank name and no GitHub repository or
+    organization association. Connecting repositories is optional and continues
+    to require the current actor's GitHub authorization.
 servers:
   - url: /
 security:
@@ -458,36 +461,55 @@ components:
     ProjectInput:
       type: object
       additionalProperties: false
-      oneOf:
-        - {required: [githubRepoId], not: {required: [githubRepoIds]}}
-        - {required: [githubRepoIds], not: {required: [githubRepoId]}}
+      minProperties: 1
+      not: {required: [githubRepoId, githubRepoIds]}
+      allOf:
+        - if:
+            anyOf:
+              - required: [githubRepoIds]
+                properties: {githubRepoIds: {maxItems: 0}}
+              - not:
+                  anyOf:
+                    - {required: [githubRepoId]}
+                    - {required: [githubRepoIds]}
+          then:
+            required: [name]
+            properties:
+              name: {minLength: 1, pattern: '\S'}
+              githubOrganizationId: {type: 'null'}
       properties:
         githubRepoId: {type: integer, minimum: 1, maximum: 9007199254740991, deprecated: true, description: Compatible singular repository selection}
         githubRepoIds:
           type: array
-          minItems: 1
+          minItems: 0
           maxItems: 30
           uniqueItems: true
           items: {type: integer, minimum: 1, maximum: 9007199254740991}
-          description: Explicit currently actor-authorized selection; a repository belongs to one project per ledger, including archived projects. Cross-organization selections are allowed.
-        name: {type: string, maxLength: 120, description: Optional financial project name; persists independently of GitHub grants}
+          description: Omit or use an empty array for a standalone project with a nonblank name. A nonempty set explicitly selects currently actor-authorized repositories; a repository belongs to one project per ledger, including archived projects. Cross-organization selections are allowed.
+        name: {type: string, maxLength: 120, description: Financial project name that persists independently of GitHub grants. Required and nonblank for standalone projects; optional for compatible repository-backed creation.}
         description: {type: string, maxLength: 2000}
-        githubOrganizationId: {type: [integer, 'null'], minimum: 1, maximum: 9007199254740991, description: Optional association verified against current actor installation account metadata; never selects all organization repositories}
+        githubOrganizationId: {type: [integer, 'null'], minimum: 1, maximum: 9007199254740991, description: Optional association on a repository-backed project, verified against current actor installation account metadata; never selects all organization repositories. Must be absent or null on standalone creation.}
     ProjectPatch:
       type: object
       additionalProperties: false
       minProperties: 1
       not: {required: [githubRepoId, githubRepoIds]}
+      allOf:
+        - if:
+            required: [githubRepoIds]
+            properties: {githubRepoIds: {maxItems: 0}}
+          then:
+            properties: {githubOrganizationId: {type: 'null'}}
       properties:
         githubRepoId: {type: integer, minimum: 1, maximum: 9007199254740991, deprecated: true}
         githubRepoIds:
           type: array
-          minItems: 1
+          minItems: 0
           maxItems: 30
           uniqueItems: true
           items: {type: integer, minimum: 1, maximum: 9007199254740991}
-          description: Atomically replace the full explicit repository set under If-Match. Every selected repository must currently be authorized to the actor. Omit to retain historical lost bindings.
-        name: {type: string, maxLength: 120}
+          description: Atomically replace the full explicit repository set under If-Match. Every selected repository must currently be authorized to the actor. Omit to retain historical lost bindings. An explicit empty array disconnects all repositories and clears the organization association while preserving the project ID and expenses; the final project name must be nonblank (supply name in the same patch when needed).
+        name: {type: string, maxLength: 120, description: The final name must be nonblank when no repositories are linked; omission retains the existing name.}
         githubOrganizationId: {type: [integer, 'null'], minimum: 1, maximum: 9007199254740991}
         description: {type: string, maxLength: 2000}
         status: {type: string, enum: [active, archived]}
@@ -515,17 +537,17 @@ components:
       properties:
         id: {type: string}
         name: {type: string, maxLength: 120}
-        githubRepoId: {type: integer, minimum: 1, maximum: 9007199254740991, description: Compatibility anchor; always one of the currently bound repositories}
-        githubRepoIds: {type: array, minItems: 1, maxItems: 30, items: {type: integer, minimum: 1, maximum: 9007199254740991}}
-        repositories: {type: array, minItems: 1, maxItems: 30, items: {$ref: '#/components/schemas/BoundRepository'}}
+        githubRepoId: {type: [integer, 'null'], minimum: 1, maximum: 9007199254740991, description: Null for a standalone project; otherwise a compatibility anchor among the currently bound repositories. Never a fabricated repository ID.}
+        githubRepoIds: {type: array, minItems: 0, maxItems: 30, items: {type: integer, minimum: 1, maximum: 9007199254740991}}
+        repositories: {type: array, minItems: 0, maxItems: 30, items: {$ref: '#/components/schemas/BoundRepository'}}
         githubOrganizationId: {type: [integer, 'null'], minimum: 1, maximum: 9007199254740991}
         githubOrganization:
           oneOf: [{$ref: '#/components/schemas/ProjectOrganization'}, {type: 'null'}]
         githubFullName: {type: [string, 'null'], description: Compatibility anchor name from the actor's current grant; ledger financial history remains available}
         description: {type: string}
         status: {type: string, enum: [active, archived]}
-        githubAccess: {type: string, enum: [authorized, partial, lost, reauthorization_required, unavailable]}
-        canCreateExpense: {type: boolean, description: Active project with at least one bound repository currently authorized to the actor. Historical edits and deletion do not require a live GitHub grant.}
+        githubAccess: {type: string, enum: [not_linked, authorized, partial, lost, reauthorization_required, unavailable], description: not_linked identifies an explicitly standalone project, with null GitHub anchor and organization and empty repository arrays; loss or unavailability of a bound grant never implicitly disconnects a project.}
+        canCreateExpense: {type: boolean, description: Active standalone project, or an active repository-backed project with at least one bound repository currently authorized to the actor. Ledger role, key target scopes and plan limits still apply. Historical edits and deletion do not require a live GitHub grant.}
         revision: {type: integer, minimum: 1}
         totals: {type: array, items: {$ref: '#/components/schemas/MoneyTotal'}}
     ProjectPage:

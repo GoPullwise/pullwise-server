@@ -83,7 +83,7 @@ def test_cutover_is_atomic_one_shot_preserves_facts_schema_and_cumulative_accoun
         assert after["cases"]["historical"] == 9 and after["cases"]["product-state-record-v1"] == 1
         assert after["evidence"] == before["evidence"]
         assert after["reserved_written"] > before["reserved_written"] and after["actual_written"] > before["actual_written"]
-        assert after["schema_version"] == 5 and after["schema_fingerprint"] == SCHEMA_FINGERPRINT
+        assert after["schema_version"] == SCHEMA_VERSION and after["schema_fingerprint"] == SCHEMA_FINGERPRINT
         assert [tuple(row) for row in d1.execute("SELECT name,sql FROM sqlite_schema ORDER BY name")] == schema
         assert len(raw.groups) == 3 and len(raw.groups[1]) <= 64
         for kind, values in legacy.items():

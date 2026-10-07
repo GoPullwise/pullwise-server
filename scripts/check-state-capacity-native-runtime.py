@@ -259,7 +259,7 @@ class FixtureJournal(DurableObject):
             migrated = journal.snapshot()
             cutover_groups = native.groups[prior_groups:]
             assert sum(group["rowsWritten"] > 0 for group in cutover_groups) == 1
-            assert migrated["schema_version"] == SCHEMA_VERSION == 5
+            assert migrated["schema_version"] == SCHEMA_VERSION
             assert migrated["schema_fingerprint"] == SCHEMA_FINGERPRINT
             assert migrated["state_storage_version"] == 1
             for field in ("requests","reserved_read","reserved_written","actual_read","actual_written"):
@@ -287,7 +287,7 @@ class FixtureJournal(DurableObject):
             journal.finish(ticket,now=time.time())
             return Response.json({"passed":True,"migratedRecords":10,"legacyMapsEmpty":True,
                 "oldSessionsPreserved":True,"oauthStatesPreserved":True,"billingEventsPendingPreserved":True,
-                "rolesAndAccountRevisionsPreserved":True,"schemaVersion":5,"schemaFingerprint":SCHEMA_FINGERPRINT,
+                "rolesAndAccountRevisionsPreserved":True,"schemaVersion":SCHEMA_VERSION,"schemaFingerprint":SCHEMA_FINGERPRINT,
                 "atomicCutoverMutationBatches":1,"cutoverNativeBatches":cutover_groups,
                 "explicitLocalSeedNativeStatements":len(commands),"explicitLocalSeedMetered":True,
                 "unknownEmptyLegacyRetainedAndSnapshotCAS":unknown_empty,

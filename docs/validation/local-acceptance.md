@@ -1,6 +1,64 @@
 # Current local acceptance
 
-Updated 2026-10-06. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
+Updated 2026-10-07. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
+
+## Blank projects and REST permission coverage: local acceptance (2026-10-07)
+
+Name-only project POST now creates a standalone project with true NULL GitHub
+repository/full-name/Organization fields, empty repository bindings and
+`githubAccess: not_linked`. Normal GitHub account login remains. Nonblank names
+are required for standalone projects; explicit `githubRepoIds: []` detaches all
+repositories and clears Organization association. Later explicit association
+uses the acting member's real GitHub grant. A lost grant on a linked project
+still fails closed. No extra compatibility route or fabricated repository ID
+was added. OpenAPI is version 0.3.0 and matches these rules.
+
+Standalone creation, reads, all-standalone pages, rename, archive/reactivation
+and new/moved expenses avoid GitHub calls including token unseal. The atomic
+expense target guard checks active project revision, NULL anchor and absence of
+bindings alongside quota, audit and idempotency writes. Binding races roll back
+the complete financial batch. Existing role/key target restrictions remain.
+
+Final full checks pass **1,015 tests plus 56 subtests**, source-mirror verification,
+static deployment checks and release shell syntax. A local socket-restricted
+full run initially failed one transport test; the authorized local-network
+rerun passed. [Pinned preview packaging](blank-projects-packaging-2026-10-07.json)
+passes Wrangler 4.136.3 / pywrangler 1.17.4 dry-run, 78 modules/601,686 bytes, with
+external Node networking blocked and uv offline. Production D1 remains paused.
+
+[Native authenticated API flow](blank-projects-native-2026-10-07.json) passes 49
+local HTTP requests/18 mutation attempts, 495 native statements/482 reads/116
+writes. Four synthetic roles exercise blank creation, restricted key writes,
+exact replay, shared/project moves, exact reports/CSV, archive/history edit,
+reactivation, attach/lost-access/detach and token revocation followed by 401.
+Every standalone provider assertion is zero; ten linked-case GitHub fixture
+operations are deterministic and are not real provider calls. The earlier
+bare-array fixture error and accounted Free-plan 429 are retained; cumulative
+local API totals are 97 HTTP/35 mutation attempts/950 reads/219 writes, excluding
+schema seeding, final SQL snapshots and one stopped-fixture cleanup row.
+
+[Populated v5-to-v6 native upgrade](blank-projects-schema-native-2026-10-07.json)
+passes under the original-style DO journal: 633 migration reads/49 writes,
+unchanged full-field digests of all 18 tables, two coexisting NULL-anchor
+projects, enforced foreign keys and an actual restart with zero upgrade replay.
+Injected failure after parent DROP rolls back the entire atomic batch and
+retains the unknown-outcome stop and full reservation. Local absent native
+attempts stay null; no metadata value is fabricated. The one-shot preview flag
+is independent of earlier migrations and preserves the existing DB, namespace,
+state-record cutover and cumulative counters.
+
+[REST permission coverage](rest-permissions-coverage-2026-10-07.md) adds 68 local
+key tests: all nine scopes across four issuing roles, both credential headers,
+individual read scope success/denial, project/category write success and
+synthetic suggestions-use success with role/target denial. Native and ingress
+checks separately exercise authorization race fences and cookie boundaries.
+This closes local coverage gaps; it does not claim the single real-account key
+will reproduce every role/scope combination.
+
+The companion Web's seven built-browser cases are accepted. Explicit preview
+publication and the consented DFerryman final REST/token cleanup remain separate
+steps, with their evidence to be added after execution. This local phase made
+zero remote D1 or real payment/model requests.
 
 ## Account storage published; real-user acceptance complete (2026-10-06)
 
