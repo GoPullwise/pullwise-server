@@ -1,0 +1,200 @@
+{
+  "passed": true,
+  "status": "passed",
+  "runId": "538132fdc58bf58eafefae12f73c322f",
+  "manifest": {
+    "origin": "https://preview.pull-wise.com",
+    "accountSlots": [
+      "dferryman"
+    ],
+    "businessHttpLimit": 40,
+    "networkRequestLimit": 80,
+    "mutationAttemptLimit": 6,
+    "confirmedWriteLimit": 2,
+    "minimumRequestIntervalMs": 5000,
+    "minimumMutationIntervalMs": 10000,
+    "requestTimeoutMs": 15000,
+    "cleanupRequestTimeoutMs": 5000,
+    "cleanupBusinessHttpReserve": 4,
+    "cleanupMutationReserve": 1,
+    "cleanupDeadlineReserveMs": 45000,
+    "maximumRuntimeMs": 1800000,
+    "keyExpirySeconds": 900,
+    "keyExpiryCleanupMarginMs": 60000,
+    "maximumResponseBytes": 2097152,
+    "maximumKeys": 1,
+    "clientRetries": 0,
+    "polling": false,
+    "newProjects": 0,
+    "newCategories": 0,
+    "newExpenses": 0,
+    "realPayments": false,
+    "modelCalls": false,
+    "credentialPersistence": false,
+    "screenshots": false,
+    "traces": false,
+    "storageState": false,
+    "requestMode": "Node HTTPS with verified TLS through configured CONNECT proxy"
+  },
+  "checks": [
+    {
+      "name": "fresh_session_personal_owner",
+      "passed": true,
+      "httpStatus": 200
+    },
+    {
+      "name": "one_temporary_key_default_five_read_scopes_and_expiry",
+      "passed": true,
+      "httpStatus": 201
+    },
+    {
+      "name": "profile_read",
+      "passed": true,
+      "httpStatus": 200
+    },
+    {
+      "name": "projects_read_scoped_existing_project",
+      "passed": true,
+      "httpStatus": 200
+    },
+    {
+      "name": "categories_read",
+      "passed": true,
+      "httpStatus": 200
+    },
+    {
+      "name": "expenses_read_scoped_one_day",
+      "passed": true,
+      "httpStatus": 200
+    },
+    {
+      "name": "reports_read_summary_scoped_one_day",
+      "passed": true,
+      "httpStatus": 200
+    },
+    {
+      "name": "reports_read_timeseries_scoped_one_day",
+      "passed": true,
+      "httpStatus": 200
+    },
+    {
+      "name": "reports_read_categories_scoped_one_day",
+      "passed": true,
+      "httpStatus": 200
+    },
+    {
+      "name": "csv_export_scoped_one_day",
+      "passed": true,
+      "httpStatus": 200
+    },
+    {
+      "name": "shared_pool_reads_and_export_forbidden",
+      "passed": true,
+      "httpStatus": 403
+    },
+    {
+      "name": "workspace_override_forbidden",
+      "passed": true,
+      "httpStatus": 403
+    },
+    {
+      "name": "known_qa_id_outside_key_allowlist",
+      "passed": true,
+      "httpStatus": 403
+    },
+    {
+      "name": "other_existing_personal_project_outside_key_allowlist",
+      "passed": true,
+      "httpStatus": 403
+    },
+    {
+      "name": "api_key_management_requires_issuer_session",
+      "passed": true,
+      "httpStatus": 401
+    },
+    {
+      "name": "missing_authentication_rejected",
+      "passed": true,
+      "httpStatus": 401
+    },
+    {
+      "name": "projects_write_missing",
+      "passed": true,
+      "httpStatus": 403
+    },
+    {
+      "name": "categories_write_missing",
+      "passed": true,
+      "httpStatus": 403
+    },
+    {
+      "name": "expenses_write_missing",
+      "passed": true,
+      "httpStatus": 403
+    },
+    {
+      "name": "suggestions_use_missing",
+      "passed": true,
+      "httpStatus": 403
+    },
+    {
+      "name": "revoked_token_rejected",
+      "passed": true,
+      "httpStatus": 401
+    }
+  ],
+  "cleanup": [
+    {
+      "name": "issuer_revoke_and_confirm_absent",
+      "status": "complete"
+    }
+  ],
+  "limitations": [
+    "One temporary default read-only key exercises five present read scopes and four absent write/use scopes. Missing-read-scope combinations and Owner/Admin/Editor/Viewer are covered by local native and unit tests.",
+    "The known QA ID is tested as outside this key's allowlist; this rejection does not assert that another ledger's project still exists."
+  ],
+  "counts": {
+    "businessHttp": 28,
+    "networkRequests": 56,
+    "mutationAttempts": 6,
+    "confirmedWrites": 2,
+    "deniedWrites": 4
+  },
+  "credentialPersistence": false,
+  "rawFinancialEvidence": false,
+  "cleanupComplete": true,
+  "controllerSha256": "dc938ce0a2740d341897228d4acd424d4a4471edf595587eaa26010b82582ca6",
+  "release": {
+    "previewVerified": true,
+    "schemaVersion": 6,
+    "serverSourceSha": "38348d071071ec1a117e373efabd82b9e1974e93",
+    "serverVersion": "71e18ae0-f7af-4988-b8d9-7955ae5171f1",
+    "webSourceSha": "19d134f0dc2532052f69051acb61be501392fdf6",
+    "webVersion": "0a588b77-3625-4943-aee5-4c57e2c2bbc6",
+    "trafficPercent": 100,
+    "originalDatabaseAndCoordinatorRetained": true,
+    "productionD1Paused": true,
+    "realPayments": false
+  },
+  "date": "2026-10-07",
+  "realAccount": "DFerryman",
+  "realFinancialWrites": 0,
+  "temporaryKeyIssued": 1,
+  "temporaryKeyRevoked": 1,
+  "temporaryKeyPlaintextPersisted": false,
+  "sessionPersisted": false,
+  "receiverProcessExitedSuccessfully": true,
+  "scopeCoverageNote": "Real preview: five present read scopes, four absent write/use scopes, restrictions and revocation. All nine-scope/four-role issuance/principal cells and additional write-success paths passed locally.",
+  "completionObservedAtUTC": "2026-10-07T14:17:30Z",
+  "helperCleanupVerified": true,
+  "helperCleanupEvidence": "rest-final-helper-cleanup-2026-10-07.json",
+  "postAcceptanceObservedBudgetDelta": {
+    "rowsRead": 906,
+    "rowsWritten": 25
+  },
+  "postAcceptanceBudgetDeltaMayIncludeConcurrentTraffic": true,
+  "postAcceptanceReservedBudgetDelta": {
+    "rowsRead": 906,
+    "rowsWritten": 35
+  }
+}

@@ -1,0 +1,211 @@
+{
+  "cleanupMutations": [
+    {
+      "stage": "helper-route-remove",
+      "success": true,
+      "status": 200,
+      "errorCodes": []
+    },
+    {
+      "stage": "helper-namespace-remove",
+      "success": true,
+      "status": 200,
+      "errorCodes": []
+    },
+    {
+      "stage": "helper-script-remove",
+      "success": true,
+      "status": 200,
+      "errorCodes": []
+    }
+  ],
+  "cleanupVerification": {
+    "success": true,
+    "stage": "read-only-exact-helper-cleanup-verification",
+    "helperName": "pullwise-preview-qa-2cc6022e1640",
+    "helperNamespaceId": "0d281d1d314a4c4b9949af68dfd8322a",
+    "originalNamespaceId": "0e0ce4946c5e4d5f81c606273ba94b5d",
+    "controlPlaneGets": 3,
+    "remoteProductRequests": 0,
+    "remoteD1Operations": 0,
+    "receiverConnections": 0,
+    "results": {
+      "routes": {
+        "success": true,
+        "status": 200,
+        "errorCodes": []
+      },
+      "scripts": {
+        "success": true,
+        "status": 200,
+        "errorCodes": []
+      },
+      "namespaces": {
+        "success": true,
+        "status": 200,
+        "errorCodes": []
+      }
+    },
+    "firstFailedVerificationPreserved": true,
+    "scriptPresenceProof": "documented-unpaginated-Worker-scripts-list",
+    "namespaceListComplete": true,
+    "routeListComplete": true,
+    "scriptListComplete": true,
+    "ownRouteAbsent": true,
+    "helperScriptAbsent": true,
+    "helperNamespaceAbsent": true,
+    "originalNamespacePresent": true,
+    "originalNamespaceClass": "ValidationBudget",
+    "originalNamespaceScript": "pullwise-server-preview",
+    "secretValuesReturned": false
+  },
+  "firstVerificationFailure": {
+    "success": false,
+    "stage": "cleanup-read-unavailable",
+    "controlPlaneGets": 3,
+    "remoteProductRequests": 0,
+    "secretValuesReturned": false
+  },
+  "date": "2026-10-07",
+  "passed": true,
+  "controllerSecurityMockTestsPassed": 11,
+  "receiverSecurityMockTestsPassed": 22,
+  "activationAndCleanupMockTestsPassed": 15,
+  "cleanupVerifierMockTestsPassed": 15,
+  "anonymousReadinessFirstResult": {
+    "scope": "ONE anonymous no-JavaScript Chromium consent document GET, no receiver connection",
+    "helper": "pullwise-preview-qa-2cc6022e1640",
+    "checkedAtUTC": "2026-10-07T14:08:37.426Z",
+    "documentRequests": 1,
+    "blockedSubrequests": 2,
+    "authSessionRequests": 0,
+    "cookiesPresent": 0,
+    "csrfOrBodyRetained": false,
+    "productionRequests": 0,
+    "screenshots": 0,
+    "status": 200,
+    "consentHeadingMatched": false,
+    "nativeFormMatched": false,
+    "helperReady": false,
+    "tls": "Configured HTTP proxy and configured CA SPKI only; global ignore_https_errors false"
+  },
+  "anonymousReadinessCorrectedResult": {
+    "scope": "ONE fresh anonymous exact DFerryman document GET after propagation; no redirect, JS, subrequest, cookie or receiver",
+    "checkedAtUTC": "2026-10-07T14:12:16.103Z",
+    "httpGets": 1,
+    "connectRequests": 1,
+    "authSessionRequests": 0,
+    "d1Requests": 0,
+    "providerRequests": 0,
+    "cookiesSent": 0,
+    "htmlOrCsrfRetained": false,
+    "receiverConnections": 0,
+    "status": 200,
+    "helperCsp": "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; style-src 'unsafe-inline'",
+    "helperHeadingMatched": true,
+    "helperFormMatched": true,
+    "spaTitleMatched": false,
+    "spaRootMatched": false,
+    "helperReady": true,
+    "tls": "Exact configured HTTP CONNECT proxy, configured CA, rejectUnauthorized:true and preview hostname verification"
+  },
+  "liveConsentIdentityChecks": 1,
+  "receiverAcceptedAccounts": [
+    "DFerryman"
+  ],
+  "sessionsPersisted": false,
+  "temporaryKeyRevocationAndImmediate401Verified": true,
+  "postAcceptanceBudget": {
+    "createdAt": "2026-10-07T14:23:20.054Z",
+    "scope": "Exactly one anonymous Node budget GET after focused REST acceptance; no identity, health, key, provider or business mutation requests.",
+    "origin": "https://preview.pull-wise.com",
+    "path": "/api/_preview/budget",
+    "httpRequests": 1,
+    "status": 200,
+    "headers": {
+      "date": "Wed, 07 Oct 2026 14:23:21 GMT",
+      "content-type": "application/json",
+      "cache-control": "no-store",
+      "server": "envoy",
+      "cf-ray": "a46d9027b8aa52cc-LAX"
+    },
+    "body": {
+      "productOperationMode": true,
+      "limits": {
+        "rowsRead": null,
+        "rowsWritten": null
+      },
+      "historicalCeilings": {
+        "rowsRead": 100000,
+        "rowsWritten": 1000
+      },
+      "reserved": {
+        "rowsRead": 106022,
+        "rowsWritten": 2017
+      },
+      "observed": {
+        "rowsRead": 41252,
+        "rowsWritten": 1129
+      },
+      "schemaReady": true,
+      "schemaVersion": 6,
+      "stateStorageVersion": 1,
+      "stopped": null
+    },
+    "bodyBytes": 310,
+    "assertions": {
+      "http200": true,
+      "schemaVersion6": true,
+      "stateStorageVersion1": true,
+      "schemaReady": true,
+      "productOperationMode": true,
+      "readWriteLimitsNull": true,
+      "stoppedNull": true,
+      "safeIntegerCounters": true,
+      "historicalCountersNondecreasing": true
+    },
+    "counterDeltas": {
+      "reserved": {
+        "rowsRead": {
+          "before": 105116,
+          "after": 106022,
+          "delta": 906
+        },
+        "rowsWritten": {
+          "before": 1982,
+          "after": 2017,
+          "delta": 35
+        }
+      },
+      "observed": {
+        "rowsRead": {
+          "before": 40346,
+          "after": 41252,
+          "delta": 906
+        },
+        "rowsWritten": {
+          "before": 1104,
+          "after": 1129,
+          "delta": 25
+        }
+      }
+    },
+    "baseline": {
+      "path": "/workspace/qa-private/server-blank-projects-release-2026-10-07/schema-chromium-after.json",
+      "sha256": "279a971168b821e5d084a4a5000e7461e00a10df17796aa3fcfb1f738645bf3e",
+      "completedAt": "2026-10-07T14:01:49.989Z"
+    },
+    "concurrencyWarning": "Counter deltas span the schema-6 publication baseline and this read. Authentication/helper work, focused REST acceptance and other live requests may contribute; these deltas are not exclusively attributable to the 28-request controller. No resets are performed.",
+    "credentialsProvided": false,
+    "cookiesProvided": false,
+    "retries": 0,
+    "businessMutations": 0,
+    "budgetReadD1Writes": 0,
+    "nodeExtraCaCerts": "/usr/local/share/ca-certificates/environment-proxy-ca.crt",
+    "tlsCertificateVerification": true,
+    "passed": true,
+    "completedAt": "2026-10-07T14:23:21.316Z"
+  },
+  "credentialBearingLocalControlsDeleted": true,
+  "credentialBearingLocalControlsDeletedCount": 6
+}

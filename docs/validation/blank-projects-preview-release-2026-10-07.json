@@ -1,0 +1,479 @@
+{
+  "date": "2026-10-07",
+  "previewOnly": true,
+  "serverSourceSha": "38348d071071ec1a117e373efabd82b9e1974e93",
+  "webSourceSha": "19d134f0dc2532052f69051acb61be501392fdf6",
+  "serverVersion": "71e18ae0-f7af-4988-b8d9-7955ae5171f1",
+  "webVersion": "0a588b77-3625-4943-aee5-4c57e2c2bbc6",
+  "serverTraffic": [
+    {
+      "version_id": "71e18ae0-f7af-4988-b8d9-7955ae5171f1",
+      "percentage": 100
+    }
+  ],
+  "webTraffic": [
+    {
+      "version_id": "0a588b77-3625-4943-aee5-4c57e2c2bbc6",
+      "percentage": 100
+    }
+  ],
+  "originalDatabaseId": "e9dc3b89-f81f-4fce-87ef-d8797d879fb4",
+  "originalCoordinatorNamespaceId": "0e0ce4946c5e4d5f81c606273ba94b5d",
+  "serverBindingsFullyMatched": true,
+  "inheritedSecretNames": [
+    "PULLWISE_CREEM_API_KEY",
+    "PULLWISE_CREEM_WEBHOOK_SECRET",
+    "PULLWISE_GITHUB_CLIENT_SECRET",
+    "PULLWISE_GITHUB_TOKEN_KEY",
+    "TYPESAFE_API_KEY"
+  ],
+  "newV6UpgradeFlagOnlyPreview": true,
+  "noNewProductNamespace": true,
+  "noCoordinatorReset": true,
+  "productionD1PauseManagementConfirmed": true,
+  "realPayments": false,
+  "modelCalls": false,
+  "serverPackaging": {
+    "sourceSha": "38348d071071ec1a117e373efabd82b9e1974e93",
+    "sourceTree": "7de39392960046d11d7ba7464a8c0afbac3d4ca5",
+    "workerName": "pullwise-server-preview",
+    "previewRoute": [
+      {
+        "pattern": "preview-api.pull-wise.com",
+        "custom_domain": true
+      }
+    ],
+    "previousActiveVersion": "ab500595-328d-4fc2-b897-7c6137659c92",
+    "originalD1DatabaseId": "e9dc3b89-f81f-4fce-87ef-d8797d879fb4",
+    "originalDurableObjectNamespaceId": "0e0ce4946c5e4d5f81c606273ba94b5d",
+    "inheritedSecretNames": [
+      "PULLWISE_CREEM_API_KEY",
+      "PULLWISE_CREEM_WEBHOOK_SECRET",
+      "PULLWISE_GITHUB_CLIENT_SECRET",
+      "PULLWISE_GITHUB_TOKEN_KEY",
+      "TYPESAFE_API_KEY"
+    ],
+    "noNewDurableObjectMigration": true,
+    "moduleCount": 78,
+    "moduleBytes": 601686,
+    "modulesManifestSha256": "4cc0cae7c6046b62a751ed98944c5056ab495260378a7eb1f18274e7e052c4f7",
+    "modulesJsonSha256": "f31e2ac7bfe44986af9b5b48024f55ccbce26b18e15997350433c268749dae58",
+    "metadataSha256": "d70ef61a02815b67be540e0359695be0dadf1852a8ce3671b21e5146afcb1f3d",
+    "packagingEvidence": "/workspace/qa-private/server-blank-projects-package-2026-10-07/packaging-evidence.json",
+    "wranglerVersion": "4.136.3",
+    "dryRunExitCode": 0,
+    "remoteMutations": 0,
+    "d1Queries": 0,
+    "bindingReadbackRequiredAfterPublication": true,
+    "trafficReadbackRequiredAfterPublication": true
+  },
+  "webPackaging": {
+    "sourceSha": "19d134f0dc2532052f69051acb61be501392fdf6",
+    "workerName": "pullwise-web-preview",
+    "uiChunk": "projects",
+    "assetCount": 42,
+    "uniqueHashes": 42,
+    "assetBytes": 863317,
+    "workerSha256": "75e3153f55261d74cfd1338875ee5c52dbefb6fbbbd2f8a3f12e0de1b41d8264",
+    "manifestSha256": "e09b769d3b167b11eb7921c56cf5f82e39282ac1378544cb334682f8b09f5d63",
+    "previewRoute": [
+      {
+        "pattern": "preview.pull-wise.com",
+        "custom_domain": true
+      }
+    ],
+    "workersDev": false,
+    "previewUrls": false,
+    "finalBuildMustBeComplete": true,
+    "currentWorkerSettingsMustBeComparedBeforeUpload": true
+  },
+  "assetsRuntime": {
+    "not_found_handling": "single-page-application",
+    "headers": {
+      "version": 2,
+      "rules": {
+        "/*": {
+          "set": {
+            "cache-control": "no-cache",
+            "content-security-policy": "frame-ancestors 'none'",
+            "referrer-policy": "strict-origin-when-cross-origin",
+            "x-content-type-options": "nosniff",
+            "x-frame-options": "DENY"
+          },
+          "unset": []
+        },
+        "/assets/*": {
+          "set": {
+            "cache-control": "public, max-age=31536000, immutable"
+          },
+          "unset": [
+            "Cache-Control"
+          ]
+        }
+      }
+    },
+    "raw_headers": "/*\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: strict-origin-when-cross-origin\n  X-Frame-Options: DENY\n  Content-Security-Policy: frame-ancestors 'none'\n  Cache-Control: no-cache\n\n/assets/*\n  ! Cache-Control\n  Cache-Control: public, max-age=31536000, immutable\n",
+    "static_routing": {
+      "user_worker": [
+        "/*"
+      ],
+      "asset_worker": [
+        "/assets/*"
+      ]
+    },
+    "serve_directly": true,
+    "raw_run_worker_first": [
+      "/*",
+      "!/assets/*"
+    ],
+    "base_path": "/"
+  },
+  "passed": true,
+  "schemaBefore": {
+    "createdAt": "2026-10-07T13:58:16.724Z",
+    "target": "https://preview.pull-wise.com/api/_preview/budget",
+    "method": "GET",
+    "scope": "One anonymous no-JavaScript Chromium budget-status GET. Response-stage CDP interception prevents redirects and parsing/ancillary requests. No credential, cookie, business API, D1 or retry.",
+    "proxy": "inherited HTTPS_PROXY",
+    "verifiedProxySPKI": "n9jEr2dCP1tg9exQzr7xEpZ4TjG2QWO02LUFhmAzII4=",
+    "javaScriptEnabled": false,
+    "credentialsProvided": false,
+    "cookiesProvided": false,
+    "httpCap": 1,
+    "forwardedGETs": 1,
+    "blockedRequests": 0,
+    "redirectsFollowed": 0,
+    "retries": 0,
+    "d1Operations": 0,
+    "browser": "151.0.7922.173",
+    "status": 200,
+    "responseHeaderNames": [
+      "alt-svc",
+      "cache-control",
+      "cf-ray",
+      "content-encoding",
+      "content-type",
+      "date",
+      "nel",
+      "report-to",
+      "server",
+      "server-timing",
+      "x-envoy-upstream-service-time",
+      "x-robots-tag"
+    ],
+    "headers": {
+      "content-type": "application/json",
+      "cache-control": "no-store",
+      "x-robots-tag": "noindex, nofollow",
+      "server": "envoy",
+      "cf-ray": "a46d6b7709312b8e-LAX"
+    },
+    "responseBytes": 338,
+    "bodySHA256": "628c3a548388a9fb78189ff3a059f1c818cfe59a6b8f660d562208a9585487af",
+    "body": {
+      "productOperationMode": true,
+      "limits": {
+        "rowsRead": null,
+        "rowsWritten": null
+      },
+      "historicalCeilings": {
+        "rowsRead": 100000,
+        "rowsWritten": 1000
+      },
+      "reserved": {
+        "rowsRead": 66296,
+        "rowsWritten": 1686
+      },
+      "observed": {
+        "rowsRead": 39237,
+        "rowsWritten": 1044
+      },
+      "schemaReady": true,
+      "schemaVersion": 5,
+      "stateStorageVersion": 1,
+      "stopped": null
+    },
+    "preflightAssertions": {
+      "schemaVersion5": true,
+      "stateStorageVersion1": true,
+      "stoppedNull": true,
+      "productOperationMode": true,
+      "readWriteLimitsNull": true
+    },
+    "preflightPassed": true,
+    "navigationStopped": "Response captured; navigation aborted before parse",
+    "anonymousContextCookies": 0,
+    "browserClosed": true,
+    "completedAt": "2026-10-07T13:58:18.873Z"
+  },
+  "schemaAfter": {
+    "createdAt": "2026-10-07T14:01:46.804Z",
+    "confirmedServerVersion": "71e18ae0-f7af-4988-b8d9-7955ae5171f1",
+    "scope": "Two anonymous no-JavaScript Chromium GETs after Server publication: Web-proxied health, then Web-proxied budget. CDP response interception prevents redirects and parsing/ancillary requests. No credentials, cookies, business writes or retries.",
+    "proxy": "inherited HTTPS_PROXY",
+    "verifiedProxySPKI": "n9jEr2dCP1tg9exQzr7xEpZ4TjG2QWO02LUFhmAzII4=",
+    "javaScriptEnabled": false,
+    "credentialsProvided": false,
+    "cookiesProvided": false,
+    "httpCap": 2,
+    "forwardedGETs": 2,
+    "blockedRequests": 0,
+    "redirectsFollowed": 0,
+    "retries": 0,
+    "responses": [
+      {
+        "stage": "health",
+        "target": "https://preview.pull-wise.com/api/health",
+        "method": "GET",
+        "status": 200,
+        "responseHeaderNames": [
+          "alt-svc",
+          "cf-ray",
+          "content-encoding",
+          "content-type",
+          "date",
+          "nel",
+          "report-to",
+          "server",
+          "server-timing",
+          "x-envoy-upstream-service-time",
+          "x-robots-tag"
+        ],
+        "headers": {
+          "content-type": "application/json",
+          "x-robots-tag": "noindex, nofollow",
+          "server": "envoy",
+          "cf-ray": "a46d70982c446300-LAX"
+        },
+        "responseBytes": 90,
+        "bodySHA256": "a66e46c07f6b1598ad752020c7c8d165307ca87cadc2445fae38401dfcaef949",
+        "body": {
+          "ok": true,
+          "service": "pullwise-server",
+          "database": {
+            "type": "d1",
+            "configured": true
+          }
+        },
+        "assertions": {
+          "healthOk": true
+        },
+        "passed": true,
+        "navigationStopped": "Response captured; navigation aborted before parse",
+        "anonymousContextCookies": 0
+      },
+      {
+        "stage": "budget",
+        "target": "https://preview.pull-wise.com/api/_preview/budget",
+        "method": "GET",
+        "status": 200,
+        "responseHeaderNames": [
+          "alt-svc",
+          "cache-control",
+          "cf-ray",
+          "content-encoding",
+          "content-type",
+          "date",
+          "nel",
+          "report-to",
+          "server",
+          "server-timing",
+          "x-envoy-upstream-service-time",
+          "x-robots-tag"
+        ],
+        "headers": {
+          "content-type": "application/json",
+          "cache-control": "no-store",
+          "x-robots-tag": "noindex, nofollow",
+          "server": "envoy",
+          "cf-ray": "a46d70a20fb5d183-LAX"
+        },
+        "responseBytes": 339,
+        "bodySHA256": "ac48cdea937d1e5e7e3809e15672c7ae327e8dd1e47bfafc266ea614ed8022c9",
+        "body": {
+          "productOperationMode": true,
+          "limits": {
+            "rowsRead": null,
+            "rowsWritten": null
+          },
+          "historicalCeilings": {
+            "rowsRead": 100000,
+            "rowsWritten": 1000
+          },
+          "reserved": {
+            "rowsRead": 105116,
+            "rowsWritten": 1982
+          },
+          "observed": {
+            "rowsRead": 40346,
+            "rowsWritten": 1104
+          },
+          "schemaReady": true,
+          "schemaVersion": 6,
+          "stateStorageVersion": 1,
+          "stopped": null
+        },
+        "assertions": {
+          "schemaVersion6": true,
+          "stateStorageVersion1": true,
+          "stoppedNull": true,
+          "productOperationMode": true,
+          "readWriteLimitsNull": true
+        },
+        "passed": true,
+        "navigationStopped": "Response captured; navigation aborted before parse",
+        "anonymousContextCookies": 0
+      }
+    ],
+    "beforeSnapshot": {
+      "path": "/workspace/qa-private/server-blank-projects-release-2026-10-07/schema-chromium-before.json",
+      "sha256": "d600fe1de6b038dd49f73d3eafcba4b01278c99c2de80e48f79d2d7b39733e69",
+      "completedAt": "2026-10-07T13:58:18.873Z"
+    },
+    "concurrencyWarning": "Counter deltas span before/after publication. Other live requests may contribute; do not attribute deltas exclusively to this helper or migration. No resets are performed.",
+    "browser": "151.0.7922.173",
+    "counterDeltas": {
+      "reserved": {
+        "rowsRead": {
+          "before": 66296,
+          "after": 105116,
+          "delta": 38820
+        },
+        "rowsWritten": {
+          "before": 1686,
+          "after": 1982,
+          "delta": 296
+        }
+      },
+      "observed": {
+        "rowsRead": {
+          "before": 39237,
+          "after": 40346,
+          "delta": 1109
+        },
+        "rowsWritten": {
+          "before": 1044,
+          "after": 1104,
+          "delta": 60
+        }
+      }
+    },
+    "counterAssertions": {
+      "safeIntegerCounters": true,
+      "historicalCountersNondecreasing": true
+    },
+    "passed": true,
+    "browserClosed": true,
+    "completedAt": "2026-10-07T14:01:49.989Z"
+  },
+  "staticVerification": {
+    "passed": true,
+    "sourceSha": "19d134f0dc2532052f69051acb61be501392fdf6",
+    "version": "0a588b77-3625-4943-aee5-4c57e2c2bbc6",
+    "requests": [
+      {
+        "path": "/",
+        "status": 200,
+        "bytes": 4917,
+        "contentType": "text/html",
+        "noindex": "noindex, nofollow"
+      },
+      {
+        "path": "/assets/ledger-C8hciBb7.css",
+        "status": 200,
+        "bytes": 10192,
+        "contentType": "text/css",
+        "sha256": "c8c80b0fd21417ae3b0e792093314c641c655aea2af8907b8243ab0108c145e3"
+      },
+      {
+        "path": "/assets/index-CeC2xTea.js",
+        "status": 200,
+        "bytes": 42047,
+        "contentType": "text/javascript",
+        "sha256": "a4e3b9fe8898a06d81a1f4f607cfe234d885f9948a93e1cd169470d67a25945d"
+      },
+      {
+        "path": "/assets/ledger-Dh7e8Ywm.js",
+        "status": 200,
+        "bytes": 55799,
+        "contentType": "text/javascript",
+        "sha256": "eba70d6c3b9e9fe26dae06ddb6d4b098047ef6a1ce433d655ad8b89a3a97becd"
+      }
+    ],
+    "forwardedRequests": 4,
+    "blockedRequests": 2,
+    "apiRequests": 0,
+    "d1RowsRead": 0,
+    "d1RowsWritten": 0,
+    "javaScriptEnabled": false,
+    "cookiesProvided": false,
+    "credentialsProvided": false,
+    "retries": 0,
+    "redirectsFollowed": 0,
+    "screenshots": false,
+    "traces": false,
+    "scope": "Actual Chromium exact static paths only; no Server service invocation",
+    "browserClosed": true,
+    "completedAt": "2026-10-07T14:04:29.839Z"
+  },
+  "anonymousNodeTransport": {
+    "kind": "one_anonymous_node_verified_https_preflight",
+    "origin": "https://preview.pull-wise.com",
+    "path": "/api/_preview/budget",
+    "httpRequests": 1,
+    "status": 200,
+    "headers": {
+      "date": "Wed, 07 Oct 2026 14:01:24 GMT",
+      "content-type": "application/json",
+      "cache-control": "no-store",
+      "server": "envoy",
+      "cf-ray": "a46d6ffd9d5c4b94-LAX"
+    },
+    "errorCode": null,
+    "body": "{\"productOperationMode\": true, \"limits\": {\"rowsRead\": null, \"rowsWritten\": null}, \"historicalCeilings\": {\"rowsRead\": 100000, \"rowsWritten\": 1000}, \"reserved\": {\"rowsRead\": 66296, \"rowsWritten\": 1686}, \"observed\": {\"rowsRead\": 39237, \"rowsWritten\": 1044}, \"schemaReady\": true, \"schemaVersion\": 5, \"stateStorageVersion\": 1, \"stopped\": null}",
+    "bodyBytes": 338,
+    "bodyLimitBytes": 1024,
+    "nodeExtraCaCerts": "/usr/local/share/ca-certificates/environment-proxy-ca.crt",
+    "tlsCertificateVerification": true,
+    "credentials": false,
+    "retries": 0,
+    "businessMutations": 0,
+    "sourceSha256": "dc938ce0a2740d341897228d4acd424d4a4471edf595587eaa26010b82582ca6"
+  },
+  "preservedDiagnosticFailures": [
+    {
+      "phase": "before",
+      "origin": "https://preview-api.pull-wise.com",
+      "passed": false,
+      "at": "2026-10-07T13:53:16.113606+00:00",
+      "requestsAttempted": 1,
+      "clientRetries": 0,
+      "cookies": false,
+      "cases": [],
+      "failureClass": "HTTPError"
+    },
+    {
+      "phase": "before",
+      "origin": "https://preview.pull-wise.com",
+      "passed": false,
+      "at": "2026-10-07T13:54:58.442464+00:00",
+      "requestsAttempted": 1,
+      "clientRetries": 0,
+      "cookies": false,
+      "cases": [],
+      "failureClass": "HTTPError",
+      "httpStatus": 403
+    }
+  ],
+  "finitePublicVerificationGetAttempts": 10,
+  "verificationGetBreakdown": {
+    "pythonFailureAttempts": 2,
+    "chromiumBudgetBefore": 1,
+    "nodeBudgetBefore": 1,
+    "chromiumHealthAndBudgetAfter": 2,
+    "webStatic": 4
+  },
+  "requestCountingIncludesFailedTransports": true,
+  "schemaCounterDeltaMayIncludeConcurrentTraffic": true,
+  "schemaUpgradeNotRetried": true
+}

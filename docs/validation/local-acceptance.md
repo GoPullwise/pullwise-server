@@ -2,6 +2,41 @@
 
 Updated 2026-10-07. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
 
+## Final real REST and temporary-key acceptance (2026-10-07)
+
+[DFerryman's consented real preview run](rest-final-real-preview-2026-10-07.json)
+passes **28 business HTTP requests**, spaced at least five seconds, with six
+mutation attempts: one temporary key issuance, four exact `INSUFFICIENT_SCOPE`
+rejections and one issuer revocation. The key expires after 900 seconds and
+contains only the five default read scopes, one existing project allowlist,
+its owner's workspace and `shared: false`. No project, category or expense was
+created or changed; no real payment or model request was made.
+
+Profile, project list/detail, categories, one-day expense list, all three
+reports and CSV return their expected success. Shared-pool reads/export,
+workspace override, the known QA ID and a second existing personal project
+outside the allowlist are forbidden. Key management requires the issuer's session; missing authentication
+is rejected. Project/category/expense writes and standalone suggestions reject
+the absent write/use scope before resource/model work. The known QA project ID
+proves an allowlist rejection, not the continued existence of a foreign project.
+
+Issuer revocation succeeds; the token disappears from the active metadata
+list and immediately returns **401 UNAUTHENTICATED** on the next request.
+The sole consented session/token existed only in process memory; the receiver
+has exited and cleared them. Sanitized evidence retains no credential or raw
+financial body. This one-key real run covers five present read scopes and four
+absent write/use scopes; all nine-scope/four-role issuance/principal matrices
+and additional write-success paths are separately local SQL/native evidence.
+
+[Temporary helper cleanup](rest-final-helper-cleanup-2026-10-07.json) is verified:
+the exact consent route, Worker and its own Durable Object namespace are absent;
+the original product budget namespace remains present. The receiver has exited
+and six local helper control files have been removed. One anonymous, DO-only
+post-acceptance budget read confirms schema v6 and no permanent row cutoff.
+The interval added 906 observed D1 rows read and 25 rows written (reserved
+906/35); these counter deltas may include concurrent activity and are not a
+per-request attribution. No budget reset or repeated test loop was used.
+
 ## Blank projects and REST permission coverage: local acceptance (2026-10-07)
 
 Name-only project POST now creates a standalone project with true NULL GitHub
@@ -55,10 +90,25 @@ checks separately exercise authorization race fences and cookie boundaries.
 This closes local coverage gaps; it does not claim the single real-account key
 will reproduce every role/scope combination.
 
-The companion Web's seven built-browser cases are accepted. Explicit preview
-publication and the consented DFerryman final REST/token cleanup remain separate
-steps, with their evidence to be added after execution. This local phase made
-zero remote D1 or real payment/model requests.
+[Actual preview publication](blank-projects-preview-release-2026-10-07.json)
+serves Server source `38348d071071ec1a117e373efabd82b9e1974e93`, version
+`71e18ae0-f7af-4988-b8d9-7955ae5171f1`, at 100% traffic, with the original
+D1/ValidationBudget namespace, all prior variables and five inherited Secrets.
+The only added runtime flag is the preview v6 upgrade. Production's management
+read-back remains `PULLWISE_D1_ACCESS_ENABLED=0`. No production migration or
+product namespace reset occurred.
+
+One anonymous Chromium budget preflight reports v5. After deployment, exactly
+two Chromium GETs report health200/ok and budget200/schema6, stateStorage1 and
+no stop. Across that release window observed read/write counters increase by
+1,109/60 and reservations by 38,820/296; these interval deltas may include
+concurrent preview traffic and are not all attributed to the upgrade. Normal
+product limits remain null and cumulative evidence is retained. Two preceding
+Python transport failures and one successful Node transport preflight are
+preserved, with no migration replay. Including Web's four static GETs, ten
+public verification GET attempts were made. No payment or model call occurred.
+The companion's seven built-browser cases are accepted; the consented DFerryman
+final REST/token-revocation result remains separately recorded.
 
 ## Account storage published; real-user acceptance complete (2026-10-06)
 

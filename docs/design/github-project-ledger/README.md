@@ -2,7 +2,7 @@
 
 状态：当前产品设计，更新于 2026-10-07。本文描述产品契约和实施边界，运行验收状态见两端验证记录。本文中的“项目”是有稳定 project ID 的记账项目，可以没有 GitHub 关联；也可显式关联 1–30 个已授权 repositories，并可选关联 Organization，不是 GitHub Projects 看板。前端 `pullwise-web` 与后端 `pullwise-server` 仍为独立部署单元。
 
-当前实施状态（2026-10-06）：多人账本、角色邀请、多仓库和 Organization 的 Server/Web 已实现、验证并发布 Preview，原数据库已在同一累计预算下升级到 v5。新角色通过真实本地 Worker 与模拟账号浏览器验证；本次线上访客验收不冒充双真实账号邀请测试。完整规则见[本版需求与迁移状态](../../planning/project-repositories.md)。原版本的验收已另行记录，不能作为本版权限或升级验收。
+当前实施状态（2026-10-07）：独立空白项目已实现、验收并发布 Preview；项目名称必填，GitHub 仓库与 Organization 关联可选。当前数据库 v6 的一次升级沿用原数据库、协调器和累计用量记录。前端 476 项、后端 1,015 项测试及原生 Worker/浏览器验收通过；最终 DFerryman REST 与临时 token 撤销有独立验收记录。运行事实见两端 `docs/validation/local-acceptance.md`，产品规则见[项目需求](../../planning/project-repositories.md)。
 
 历史实施状态（2026-09-28）：当时原 S01–S16 已本地实现，S17 Worker/CSV 和 S18 Preview/提供商验收尚未完成。这是当时的阶段记录，当前证据以两端 `docs/validation/local-acceptance.md` 为准。
 

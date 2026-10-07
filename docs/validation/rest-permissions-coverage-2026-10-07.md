@@ -85,10 +85,17 @@ write scope.
   two confirmed key writes. Its planned success path is 28 HTTP requests when
   the optional second project exists; it reads existing data, checks all four
   absent write/use scopes, then revokes and verifies rejection/metadata absence.
-  At this review's completion its 11 mock-controller tests passed; a completed
-  real run has not been audited here. Its result must remain separate from
-  local coverage, including empty-data/date-filter and optional-project limits.
+  Its 11 mock-controller tests and verified TLS transport checks passed.
+  The [subsequent real DFerryman run](rest-final-real-preview-2026-10-07.json)
+  passes all 28 requests, including both available existing-project probes,
+  exact missing-scope errors, confirmed revocation, metadata absence and the
+  immediate revoked-token 401. Existing-data reads use a single UTC day;
+  real coverage remains separate from the complete local role/scope matrix.
 
-This review added only a test file and this document. It did not change product
-authorization, expand legacy-state handling, run remote requests, create online
-keys, deploy, or perform real payment/model calls.
+The local permission review added the test file and this document without
+changing product authorization or adding legacy-state handling. The separate
+preview release and consented real run are linked above; the real run created
+and revoked one temporary key and performed no real payment or model call.
+The [helper cleanup](rest-final-helper-cleanup-2026-10-07.json) confirms its
+route, Worker and private namespace were removed, preserving the original
+product budget namespace.
