@@ -13,6 +13,8 @@
     "PULLWISE_PREVIEW_PRODUCT_ENABLED": "1",
     "PULLWISE_PREVIEW_SCHEMA_UPGRADE_ENABLED": "1",
     "PULLWISE_PREVIEW_SCHEMA_V6_UPGRADE_ENABLED": "1",
+    "PULLWISE_PREVIEW_SCHEMA_V7_UPGRADE_ENABLED": "1",
+    "PULLWISE_RECURRING_EXPENSES_ENABLED": "1",
     "PULLWISE_MODE": "preview",
     "PULLWISE_APP_URL": "https://preview.pull-wise.com",
     "PULLWISE_GITHUB_CALLBACK_URL": "https://preview.pull-wise.com/api/auth/github/callback",
@@ -32,6 +34,7 @@
     "database_id": "e9dc3b89-f81f-4fce-87ef-d8797d879fb4",
     "migrations_dir": "migrations"
   }],
+  "triggers": {"crons": ["0 * * * *"]},
   "durable_objects": {"bindings": [{"name": "VALIDATION_BUDGET", "class_name": "ValidationBudget"}]},
   "migrations": [{"tag": "validation-budget-v1", "new_sqlite_classes": ["ValidationBudget"]}]
 }

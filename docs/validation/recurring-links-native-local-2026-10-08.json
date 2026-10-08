@@ -1,0 +1,4272 @@
+{
+  "passed": true,
+  "localOnly": true,
+  "nativePythonFFI": true,
+  "nativePreviewSingleton": true,
+  "canonicalEntryCopiedByteForByte": true,
+  "fixtureWrapperSha256": "fcdf59477b37bdf7919590f7a7095994a37b6157511ff138d2fda3fcfabe8dca",
+  "scriptSha256": "976de05527312c88b18a70f520aeb80d145133e1793a199229d961391ad23668",
+  "sourceSha256": {
+    "cloudflare/server/src/entry.py": "bc9196cbabb2e1f358d8940ef22d1cb063346e80279c2fe5df75b51eb0c44433",
+    "pullwise_server/__init__.py": "7d9d0b0ef2d8bc885aec331e6917279945ef9cad3f7647c50f965b584996c5e0",
+    "pullwise_server/account_cycle_rules.py": "cb5a090e81863b16fd35dc50ad907673711b79b7be0fbfb686500bdb3ce9647b",
+    "pullwise_server/api_key_dto_rules.py": "a5323e76e62a7923bd62585850b72addb3cf8ac6437482198e3f928dd03c93f1",
+    "pullwise_server/billing_account_rules.py": "50e1b5ca2a9e397b66721f0c155ebf5cfdd3e8e211c1fd236c8871bd194df2a2",
+    "pullwise_server/billing_catalog_rules.py": "4dcacbe67f166d11e3787c144bb00f11984e6a594647b2c1151f34b8a195a9a5",
+    "pullwise_server/billing_projection.py": "a69aa11ff9eb884a5e3dca27cd22089aee2e5618c50f13025211e45920725b89",
+    "pullwise_server/cloudflare_account_adapter.py": "c7c0378da2982510671bea8fa027954194662c17201c663424cebee3fd086e46",
+    "pullwise_server/cloudflare_api_key_read.py": "e488f8592a4ddad934a58b68d9822e73018c5f5509809c880c4e80458ab7707d",
+    "pullwise_server/cloudflare_api_key_write.py": "f2c4bb780b47df112708b94b7287eead691ef923e68906d6f3080678c8420444",
+    "pullwise_server/cloudflare_billing_catalog.py": "d3842d08e1b95cc451fa1e3b742814fc71e935c284588e7b49c9608fc944bc1e",
+    "pullwise_server/cloudflare_billing_catalog_refresh.py": "42acec5860e4bfe11eb4e4b8b5f1e456cf2a785f2a6a875ef0408b0cdf715aee",
+    "pullwise_server/cloudflare_billing_catalog_write.py": "145ec58d410b47ba0f92a891db3aa8b6cf53a97ac0cfe8d51f8c6c45cb97f486",
+    "pullwise_server/cloudflare_billing_mutations.py": "199549cd6cf1fd675676aa8110ba282a70bc019fc4d4abdb50782602720f0378",
+    "pullwise_server/cloudflare_billing_read.py": "b324faa995efa9a82894b437674aa29956939ace457ee01c5968b437bfc682c3",
+    "pullwise_server/cloudflare_creem_gateway.py": "c844912d033226d7721a48d22a15e0ad1763c0461dc4966dd147d6c880bf71fe",
+    "pullwise_server/cloudflare_creem_handler.py": "4af4c9917c59b450a2e593af6c88639589d1fef79b078158eb745a0470fddc0e",
+    "pullwise_server/cloudflare_d1_batch.py": "f3e3e4df4f9d8892683b061cbac8a90c6ba33b5903216e8dc600a5dd3008ca9c",
+    "pullwise_server/cloudflare_d1_mapping.py": "30a9bbc39b5e4e695d3c17aeb7a9b53eb2ed86c6faf12ac8e57e7c59ef61ba1c",
+    "pullwise_server/cloudflare_github_gateway.py": "7576d95b0ad933df92b8c80657a22511bbbb11ddf755e7576a845869237dd55b",
+    "pullwise_server/cloudflare_github_identity_http.py": "538a0bf28b933b49e177f072849d844d84b51385b159bbbe56593d5d7756598b",
+    "pullwise_server/cloudflare_http_contract.py": "989f55c97cd680dfdcd5c23a901ced1b2f5972f359b32a9989711167a67109a1",
+    "pullwise_server/cloudflare_jev_gateway.py": "5233cff0ab7bdfff2e2ca941c0ddb4c3c54a68b3ae6de202c7482243903ceffc",
+    "pullwise_server/cloudflare_ledger_api.py": "33a16bf5906a1719b2a1485558c6616de66f69b293ae160944f082f2f3b1b8a5",
+    "pullwise_server/cloudflare_ledger_auth.py": "7e2fc562fb9dbbf4a62e9bca0e4ac66cae997de86a977a141f5070a4229917d0",
+    "pullwise_server/cloudflare_ledger_expenses.py": "bccf6628b301d7c076da442269894401d8d16c85bdc983817322a5debaab66ae",
+    "pullwise_server/cloudflare_ledger_profile.py": "0d80eb538b76d219837484aa9ab810fbe3b9a2d7b144ff686e624b429fa971e1",
+    "pullwise_server/cloudflare_ledger_recurring.py": "01a15ca4d11e8c531701ec0adec0e562151dc4c2e1074a7912e18d188b2fd9a8",
+    "pullwise_server/cloudflare_ledger_reports.py": "dc11f45324749d5a8d0e75bf3bfcb3eb3cd5aec3ed251cc8c5580736371c83f8",
+    "pullwise_server/cloudflare_ledger_suggestions.py": "5cf564a3100d4fe3d8045d57c051a124e6208403db7dc40fa2de8801169a5be9",
+    "pullwise_server/cloudflare_native_d1.py": "5408b843e5e2d02cf153b89457210fd60d47ff20150a35fbf280593df466eaa0",
+    "pullwise_server/cloudflare_oauth_state_adapter.py": "942242ffa6e9692a483af2a7e94615574512711757c6be3eac5100d5f79af944",
+    "pullwise_server/cloudflare_plan_limits.py": "52b6e62d50a7865345bed78560cdc415cb730ead67adfa6855bda2748f205662",
+    "pullwise_server/cloudflare_preview_budget.py": "d96a03809bc9dbe0915e72ec14a607c177bb10f8657a6825ae0b2833d1919349",
+    "pullwise_server/cloudflare_preview_rate.py": "1d2f6446f73e72d4cf96c8d7576d527ea1ca5f4b7cc4b392d6991dc395151993",
+    "pullwise_server/cloudflare_preview_schema.py": "cb081b9e27326056f0576c0eea7a2ecc2d8f9fcbff36719a89b8240d39e03c84",
+    "pullwise_server/cloudflare_principal.py": "a620fab13eb8f025908b6c44704851a3029042396ea63d036c6ead9bebdd1f89",
+    "pullwise_server/cloudflare_project_repositories.py": "0b7da0865457604771f2bc863caa602486aec82a9c5e18bed9497ccebe47d393",
+    "pullwise_server/cloudflare_session_adapter.py": "0043a42082eb45f280782adea7d52a5a85eda597c6cf16af62277a54db3ca79d",
+    "pullwise_server/cloudflare_state_records.py": "3ad41cf8aa0d8f8db5f1a4e1972ce14de2c2bab51dd8b094089ff20363c7b881",
+    "pullwise_server/cloudflare_validation_budget.py": "48deb528340ba172c56052b7dd7fa2a56792863ea0a7f2315c9b015b594e500d",
+    "pullwise_server/cloudflare_webhook_receipts.py": "71d4cdddba613b68f58c8dcd685bcc3fe7a176ff85eee0a36d09fabc9d1ff3e3",
+    "pullwise_server/cloudflare_workspaces.py": "bd86a06d1d87ff168277055a04eaf1939c72140967f9e7d27bb1a895edcb574f",
+    "pullwise_server/creem_event_rules.py": "7f1054d8bf4d04009a48385ed3d393ed983d9e33f940e260d5f757fcbcca1614",
+    "pullwise_server/creem_public_catalog_rules.py": "570f31ef15b5091d6e48494c3d6227e754bf08a33e90becb06416ba890cafd5b",
+    "pullwise_server/creem_signature.py": "3cb105e50952a79365d64f8946db39f7647f5b5da1b52b3e1c4d70cab11787cc",
+    "pullwise_server/json_input.py": "3f5699b1eef9ef6a6119edaf735eadb3cee40fbc863982262c5dede1fbc704b8",
+    "pullwise_server/ledger_money_totals.py": "552c26b9c14343336f9e858488552e05ce1bd90345e3d2f10422c14634124de1",
+    "pullwise_server/ledger_plan_policy.py": "c1d2c6520c42782c14bf2e4e93a5df5653865c681c324b3c7c445fe5bcc86dc6",
+    "pullwise_server/ledger_recurrence_calendar.py": "53b5b86a5bbe466482fcc55b1636c386b85f35d646b97d0b9fc909b5add52311",
+    "pullwise_server/typesafe_client.py": "7a18ee3bd21267e6e18b751902ea55561e6074c7c6d9968fff7d173015e7d903"
+  },
+  "seedCompiledBound": {
+    "statements": 26,
+    "rowsRead": 322,
+    "rowsWritten": 53,
+    "refreshStatements": 2,
+    "refreshRowsRead": 594,
+    "totalRowsReadReservation": 916,
+    "totalRowsWrittenReservation": 53
+  },
+  "localHttpCap": 64,
+  "localMutationCap": 24,
+  "scheduledTickCap": 8,
+  "realAccounts": 0,
+  "realSessions": 0,
+  "remoteRequests": 0,
+  "remoteD1Operations": 0,
+  "realProviderRequests": 0,
+  "clientRetries": 0,
+  "scheduledTransport": "Miniflare official /cdn-cgi/local/scheduled dispatch",
+  "scheduledExecutionClock": "canonical time.time(); controller time only valid metadata",
+  "schemaUpgradeAcceptance": "separate four-request schema runner; this run initializes a fresh schema7",
+  "finalSqlSnapshot": [
+    [
+      {
+        "id": "exp_1863c982262449838f9f3372834931ee",
+        "owner_id": "usr_github_780001",
+        "target_kind": "shared",
+        "project_id": null,
+        "category_id": "cat_recurring_native",
+        "occurred_on": "2026-10-08",
+        "amount_minor": 9007199254740991,
+        "currency": "USD",
+        "purpose": "Native recurring 汉字🙂",
+        "note": "Exact synthetic template",
+        "quantity_decimal": null,
+        "unit": null,
+        "revision": 1,
+        "created_at": "2026-10-08T12:36:34Z",
+        "updated_at": "2026-10-08T12:36:34Z",
+        "deleted_at": null
+      },
+      {
+        "id": "exp_34dc2c6027ad4a54aaeb817656af30a3",
+        "owner_id": "usr_github_780001",
+        "target_kind": "shared",
+        "project_id": null,
+        "category_id": "cat_recurring_native",
+        "occurred_on": "2026-10-08",
+        "amount_minor": 0,
+        "currency": "USD",
+        "purpose": "Native editor zero",
+        "note": "Exact synthetic template",
+        "quantity_decimal": null,
+        "unit": null,
+        "revision": 1,
+        "created_at": "2026-10-08T12:36:34Z",
+        "updated_at": "2026-10-08T12:36:34Z",
+        "deleted_at": null
+      },
+      {
+        "id": "exp_d25445fcbc5342ffa41d3d09b3636f3d",
+        "owner_id": "usr_github_780001",
+        "target_kind": "project",
+        "project_id": "prj_6b487b4b49e148a895cd13f70cdb08e9",
+        "category_id": "cat_recurring_native",
+        "occurred_on": "2026-10-08",
+        "amount_minor": 1234,
+        "currency": "USD",
+        "purpose": "Native recurring 汉字🙂",
+        "note": "Exact synthetic template",
+        "quantity_decimal": null,
+        "unit": null,
+        "revision": 1,
+        "created_at": "2026-10-08T12:36:34Z",
+        "updated_at": "2026-10-08T12:36:34Z",
+        "deleted_at": null
+      }
+    ],
+    [
+      {
+        "rule_id": "rec_11b24636ac6f42f49546cbc58374f28e",
+        "owner_id": "usr_github_780001",
+        "period_key": "M2026-10",
+        "scheduled_on": "2026-10-08",
+        "expense_id": "exp_d25445fcbc5342ffa41d3d09b3636f3d",
+        "rule_revision": 1,
+        "created_at": "2026-10-08T12:36:34Z"
+      },
+      {
+        "rule_id": "rec_17c9443b68c04e7c8631665748c115af",
+        "owner_id": "usr_github_780001",
+        "period_key": "W2026-41",
+        "scheduled_on": "2026-10-08",
+        "expense_id": "exp_1863c982262449838f9f3372834931ee",
+        "rule_revision": 1,
+        "created_at": "2026-10-08T12:36:34Z"
+      },
+      {
+        "rule_id": "rec_a3e5d1df077645199cf018ef80872148",
+        "owner_id": "usr_github_780001",
+        "period_key": "W2026-41",
+        "scheduled_on": "2026-10-08",
+        "expense_id": "exp_34dc2c6027ad4a54aaeb817656af30a3",
+        "rule_revision": 1,
+        "created_at": "2026-10-08T12:36:34Z"
+      }
+    ],
+    [
+      {
+        "id": "evt_13b059740e8f4e8cb43c40272f65a6b8",
+        "expense_id": "exp_d25445fcbc5342ffa41d3d09b3636f3d",
+        "owner_id": "usr_github_780001",
+        "actor_kind": "schedule",
+        "actor_id": "rec_11b24636ac6f42f49546cbc58374f28e:usr_github_780001",
+        "action": "create",
+        "before_json": null,
+        "after_json": "{\"amount\":\"12.34\",\"amountMinor\":1234,\"categoryId\":\"cat_recurring_native\",\"createdAt\":\"2026-10-08T12:36:34Z\",\"currency\":\"USD\",\"id\":\"exp_d25445fcbc5342ffa41d3d09b3636f3d\",\"note\":\"Exact synthetic template\",\"occurredOn\":\"2026-10-08\",\"purpose\":\"Native recurring 汉字🙂\",\"quantity\":null,\"revision\":1,\"target\":{\"kind\":\"project\",\"projectId\":\"prj_6b487b4b49e148a895cd13f70cdb08e9\"},\"unit\":null,\"updatedAt\":\"2026-10-08T12:36:34Z\"}",
+        "created_at": "2026-10-08T12:36:34Z"
+      },
+      {
+        "id": "evt_3dad23faadc04d5ca366608edd69e960",
+        "expense_id": "exp_1863c982262449838f9f3372834931ee",
+        "owner_id": "usr_github_780001",
+        "actor_kind": "schedule",
+        "actor_id": "rec_17c9443b68c04e7c8631665748c115af:usr_github_780001",
+        "action": "create",
+        "before_json": null,
+        "after_json": "{\"amount\":\"90071992547409.91\",\"amountMinor\":9007199254740991,\"categoryId\":\"cat_recurring_native\",\"createdAt\":\"2026-10-08T12:36:34Z\",\"currency\":\"USD\",\"id\":\"exp_1863c982262449838f9f3372834931ee\",\"note\":\"Exact synthetic template\",\"occurredOn\":\"2026-10-08\",\"purpose\":\"Native recurring 汉字🙂\",\"quantity\":null,\"revision\":1,\"target\":{\"kind\":\"shared\"},\"unit\":null,\"updatedAt\":\"2026-10-08T12:36:34Z\"}",
+        "created_at": "2026-10-08T12:36:34Z"
+      },
+      {
+        "id": "evt_9dcd96d4276b41de9d80e6767c4d244d",
+        "expense_id": "exp_34dc2c6027ad4a54aaeb817656af30a3",
+        "owner_id": "usr_github_780001",
+        "actor_kind": "schedule",
+        "actor_id": "rec_a3e5d1df077645199cf018ef80872148:usr_github_780003",
+        "action": "create",
+        "before_json": null,
+        "after_json": "{\"amount\":\"0.00\",\"amountMinor\":0,\"categoryId\":\"cat_recurring_native\",\"createdAt\":\"2026-10-08T12:36:34Z\",\"currency\":\"USD\",\"id\":\"exp_34dc2c6027ad4a54aaeb817656af30a3\",\"note\":\"Exact synthetic template\",\"occurredOn\":\"2026-10-08\",\"purpose\":\"Native editor zero\",\"quantity\":null,\"revision\":1,\"target\":{\"kind\":\"shared\"},\"unit\":null,\"updatedAt\":\"2026-10-08T12:36:34Z\"}",
+        "created_at": "2026-10-08T12:36:34Z"
+      }
+    ],
+    [
+      {
+        "owner_id": "usr_github_780001",
+        "projects": 1,
+        "records": 3,
+        "writes": 16
+      }
+    ],
+    [
+      {
+        "id": "rec_03d8fa4e1b994f00acafd25b17e51ca5",
+        "owner_id": "usr_github_780001",
+        "actor_user_id": "usr_github_780001",
+        "status": "blocked",
+        "revision": 2,
+        "next_occurrence_on": "2026-10-08",
+        "next_run_at": 1791417600,
+        "blocked_code": "GITHUB_ACCESS_REQUIRED"
+      },
+      {
+        "id": "rec_11b24636ac6f42f49546cbc58374f28e",
+        "owner_id": "usr_github_780001",
+        "actor_user_id": "usr_github_780001",
+        "status": "completed",
+        "revision": 2,
+        "next_occurrence_on": null,
+        "next_run_at": null,
+        "blocked_code": null
+      },
+      {
+        "id": "rec_17c9443b68c04e7c8631665748c115af",
+        "owner_id": "usr_github_780001",
+        "actor_user_id": "usr_github_780001",
+        "status": "completed",
+        "revision": 2,
+        "next_occurrence_on": null,
+        "next_run_at": null,
+        "blocked_code": null
+      },
+      {
+        "id": "rec_a3e5d1df077645199cf018ef80872148",
+        "owner_id": "usr_github_780001",
+        "actor_user_id": "usr_github_780003",
+        "status": "completed",
+        "revision": 2,
+        "next_occurrence_on": null,
+        "next_run_at": null,
+        "blocked_code": null
+      },
+      {
+        "id": "rec_e1f524293202406d91d5d2e0056345e4",
+        "owner_id": "usr_github_780001",
+        "actor_user_id": "usr_github_780001",
+        "status": "blocked",
+        "revision": 2,
+        "next_occurrence_on": "2026-10-08",
+        "next_run_at": 1791417600,
+        "blocked_code": "INVALID_CATEGORY"
+      },
+      {
+        "id": "rec_e6155f68bb6646f1ac817f9f088210ca",
+        "owner_id": "usr_github_780001",
+        "actor_user_id": "usr_github_780001",
+        "status": "canceled",
+        "revision": 4,
+        "next_occurrence_on": null,
+        "next_run_at": null,
+        "blocked_code": null
+      },
+      {
+        "id": "rec_ebabfcbd16934626bf7d223b08cd1585",
+        "owner_id": "usr_github_780001",
+        "actor_user_id": "usr_github_780001",
+        "status": "blocked",
+        "revision": 2,
+        "next_occurrence_on": "2026-07-02",
+        "next_run_at": 1782950400,
+        "blocked_code": "CATCHUP_REVIEW_REQUIRED"
+      }
+    ],
+    [
+      {
+        "guards": 0,
+        "fk": 0
+      }
+    ],
+    [
+      {
+        "development_url": "https://dev.example.test/%E8%B7%AF%E5%BE%84?q=%E6%B1%89%E5%AD%97#%E6%88%90%E6%9C%AC",
+        "product_url": "https://product.example.test/app?view=costs"
+      }
+    ]
+  ],
+  "finalBudget": {
+    "productOperationMode": true,
+    "limits": {
+      "rowsRead": null,
+      "rowsWritten": null
+    },
+    "historicalCeilings": {
+      "rowsRead": 100000,
+      "rowsWritten": 1000
+    },
+    "reserved": {
+      "rowsRead": 30403,
+      "rowsWritten": 654
+    },
+    "observed": {
+      "rowsRead": 2260,
+      "rowsWritten": 421
+    },
+    "schemaReady": true,
+    "schemaVersion": 7,
+    "stateStorageVersion": 1,
+    "stopped": null
+  },
+  "realProcessRestarts": 1,
+  "localHttpRequests": 49,
+  "localBusinessMutationAttempts": 24,
+  "scheduledTicks": 4,
+  "responses": [
+    {
+      "id": 1,
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "actor": null,
+      "scheduled": false
+    },
+    {
+      "id": 2,
+      "method": "GET",
+      "path": "/_preview/budget",
+      "status": 200,
+      "actor": null,
+      "scheduled": false
+    },
+    {
+      "id": 3,
+      "method": "GET",
+      "path": "/api/v1/me",
+      "status": 200,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 4,
+      "method": "GET",
+      "path": "/api/v1/me",
+      "status": 200,
+      "actor": "admin",
+      "scheduled": false
+    },
+    {
+      "id": 5,
+      "method": "GET",
+      "path": "/api/v1/me",
+      "status": 200,
+      "actor": "editor",
+      "scheduled": false
+    },
+    {
+      "id": 6,
+      "method": "GET",
+      "path": "/api/v1/me",
+      "status": 200,
+      "actor": "viewer",
+      "scheduled": false
+    },
+    {
+      "id": 7,
+      "method": "POST",
+      "path": "/api/v1/projects",
+      "status": 201,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 8,
+      "method": "PATCH",
+      "path": "/api/v1/projects/prj_6b487b4b49e148a895cd13f70cdb08e9",
+      "status": 422,
+      "actor": "owner",
+      "scheduled": false,
+      "errorCode": "INVALID_INPUT"
+    },
+    {
+      "id": 9,
+      "method": "PATCH",
+      "path": "/api/v1/projects/prj_6b487b4b49e148a895cd13f70cdb08e9",
+      "status": 422,
+      "actor": "owner",
+      "scheduled": false,
+      "errorCode": "INVALID_INPUT"
+    },
+    {
+      "id": 10,
+      "method": "PATCH",
+      "path": "/api/v1/projects/prj_6b487b4b49e148a895cd13f70cdb08e9",
+      "status": 200,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 11,
+      "method": "PATCH",
+      "path": "/api/v1/projects/prj_6b487b4b49e148a895cd13f70cdb08e9",
+      "status": 200,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 12,
+      "method": "GET",
+      "path": "/api/v1/projects/prj_6b487b4b49e148a895cd13f70cdb08e9",
+      "status": 200,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 13,
+      "method": "POST",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 201,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 14,
+      "method": "POST",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 201,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 15,
+      "method": "POST",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 409,
+      "actor": "owner",
+      "scheduled": false,
+      "errorCode": "IDEMPOTENCY_CONFLICT"
+    },
+    {
+      "id": 16,
+      "method": "POST",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 201,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 17,
+      "method": "POST",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 201,
+      "actor": "editor",
+      "scheduled": false
+    },
+    {
+      "id": 18,
+      "method": "POST",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 403,
+      "actor": "viewer",
+      "scheduled": false,
+      "errorCode": "ROLE_FORBIDDEN"
+    },
+    {
+      "id": 19,
+      "method": "POST",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 422,
+      "actor": "owner",
+      "scheduled": false,
+      "errorCode": "INVALID_INPUT"
+    },
+    {
+      "id": 20,
+      "method": "GET",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 403,
+      "actor": null,
+      "scheduled": false,
+      "errorCode": "RECURRING_SESSION_REQUIRED"
+    },
+    {
+      "id": 21,
+      "method": "POST",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 201,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 22,
+      "method": "PATCH",
+      "path": "/api/v1/expense-recurring-rules/rec_e6155f68bb6646f1ac817f9f088210ca",
+      "status": 428,
+      "actor": "owner",
+      "scheduled": false,
+      "errorCode": "PRECONDITION_REQUIRED"
+    },
+    {
+      "id": 23,
+      "method": "PATCH",
+      "path": "/api/v1/expense-recurring-rules/rec_e6155f68bb6646f1ac817f9f088210ca",
+      "status": 412,
+      "actor": "owner",
+      "scheduled": false,
+      "errorCode": "PRECONDITION_FAILED"
+    },
+    {
+      "id": 24,
+      "method": "PATCH",
+      "path": "/api/v1/expense-recurring-rules/rec_e6155f68bb6646f1ac817f9f088210ca",
+      "status": 200,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 25,
+      "method": "POST",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 201,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 26,
+      "method": "POST",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 201,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 27,
+      "method": "DELETE",
+      "path": "/api/v1/categories/cat_recurring_blocked",
+      "status": 204,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 28,
+      "method": "GET",
+      "path": "/cdn-cgi/local/scheduled",
+      "status": 200,
+      "actor": null,
+      "scheduled": true
+    },
+    {
+      "id": 29,
+      "method": "GET",
+      "path": "/api/v1/expense-recurring-rules/rec_17c9443b68c04e7c8631665748c115af",
+      "status": 200,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 30,
+      "method": "GET",
+      "path": "/api/v1/expense-recurring-rules/rec_11b24636ac6f42f49546cbc58374f28e",
+      "status": 200,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 31,
+      "method": "GET",
+      "path": "/api/v1/expense-recurring-rules/rec_a3e5d1df077645199cf018ef80872148",
+      "status": 200,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 32,
+      "method": "GET",
+      "path": "/api/v1/expense-recurring-rules/rec_e6155f68bb6646f1ac817f9f088210ca",
+      "status": 200,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 33,
+      "method": "GET",
+      "path": "/api/v1/expense-recurring-rules/rec_ebabfcbd16934626bf7d223b08cd1585",
+      "status": 200,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 34,
+      "method": "GET",
+      "path": "/api/v1/expense-recurring-rules/rec_e1f524293202406d91d5d2e0056345e4",
+      "status": 200,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 35,
+      "method": "GET",
+      "path": "/api/v1/expenses",
+      "status": 200,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 36,
+      "method": "GET",
+      "path": "/cdn-cgi/local/scheduled",
+      "status": 200,
+      "actor": null,
+      "scheduled": true
+    },
+    {
+      "id": 37,
+      "method": "GET",
+      "path": "/api/v1/expenses",
+      "status": 200,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 38,
+      "method": "PATCH",
+      "path": "/api/v1/expense-recurring-rules/rec_e6155f68bb6646f1ac817f9f088210ca",
+      "status": 200,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 39,
+      "method": "DELETE",
+      "path": "/api/v1/expense-recurring-rules/rec_e6155f68bb6646f1ac817f9f088210ca",
+      "status": 204,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 40,
+      "method": "POST",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 201,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 41,
+      "method": "PATCH",
+      "path": "/api/v1/expense-recurring-rules/rec_03d8fa4e1b994f00acafd25b17e51ca5",
+      "status": 422,
+      "actor": "owner",
+      "scheduled": false,
+      "errorCode": "RECURRING_TARGET_IMMUTABLE"
+    },
+    {
+      "id": 42,
+      "method": "PATCH",
+      "path": "/api/v1/projects/prj_6b487b4b49e148a895cd13f70cdb08e9",
+      "status": 200,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 43,
+      "method": "GET",
+      "path": "/cdn-cgi/local/scheduled",
+      "status": 200,
+      "actor": null,
+      "scheduled": true
+    },
+    {
+      "id": 44,
+      "method": "GET",
+      "path": "/api/v1/expense-recurring-rules/rec_03d8fa4e1b994f00acafd25b17e51ca5",
+      "status": 200,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 45,
+      "method": "GET",
+      "path": "/api/v1/expenses",
+      "status": 200,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 46,
+      "method": "GET",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 200,
+      "actor": "viewer",
+      "scheduled": false
+    },
+    {
+      "id": 47,
+      "method": "GET",
+      "path": "/cdn-cgi/local/scheduled",
+      "status": 200,
+      "actor": null,
+      "scheduled": true
+    },
+    {
+      "id": 48,
+      "method": "GET",
+      "path": "/api/v1/expenses",
+      "status": 200,
+      "actor": "owner",
+      "scheduled": false
+    },
+    {
+      "id": 49,
+      "method": "GET",
+      "path": "/_preview/budget",
+      "status": 200,
+      "actor": null,
+      "scheduled": false
+    }
+  ],
+  "checks": [
+    "Native packaged tzdata before seed; canonical fresh schema7; four exact roles in the original singleton",
+    "URL create/read/clear/update canonical serialization; unsafe protocol rejects before native mutation; no destination transport",
+    "Exact idempotent replay/changed intent, editor actual grant, viewer/API-key denial, bad IANA, CAS and paused no-generation cases",
+    "Official scheduled actual-clock ticks create exactly three expenses; duplicate delivery and real restart create none; paused/end/catchup/category/archived-target fences retain facts"
+  ],
+  "nativeRequestEvidence": [
+    {
+      "id": 1,
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 5,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 4,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 4,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 8,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 2,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 4,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 2,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 4,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 52,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 52,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 4,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 5,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 62,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 202,
+          "rowsWritten": 23,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 55,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 55,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 57,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 198,
+          "rowsWritten": 21,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 5,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 4,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 4,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 4,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 4,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 61,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": {
+        "sqlCount": 26,
+        "compilerBound": {
+          "statements": 26,
+          "rowsRead": 322,
+          "rowsWritten": 53,
+          "refreshStatements": 2,
+          "refreshRowsRead": 594,
+          "totalRowsReadReservation": 916,
+          "totalRowsWrittenReservation": 53
+        },
+        "reservationIncludingRefresh": {
+          "rowsRead": 916,
+          "rowsWritten": 53
+        },
+        "meta": [
+          {
+            "rowsRead": 0,
+            "rowsWritten": 2,
+            "attempts": null
+          },
+          {
+            "rowsRead": 0,
+            "rowsWritten": 2,
+            "attempts": null
+          },
+          {
+            "rowsRead": 1,
+            "rowsWritten": 1,
+            "attempts": null
+          },
+          {
+            "rowsRead": 0,
+            "rowsWritten": 2,
+            "attempts": null
+          },
+          {
+            "rowsRead": 0,
+            "rowsWritten": 1,
+            "attempts": null
+          },
+          {
+            "rowsRead": 0,
+            "rowsWritten": 2,
+            "attempts": null
+          },
+          {
+            "rowsRead": 0,
+            "rowsWritten": 2,
+            "attempts": null
+          },
+          {
+            "rowsRead": 1,
+            "rowsWritten": 1,
+            "attempts": null
+          },
+          {
+            "rowsRead": 0,
+            "rowsWritten": 2,
+            "attempts": null
+          },
+          {
+            "rowsRead": 0,
+            "rowsWritten": 1,
+            "attempts": null
+          },
+          {
+            "rowsRead": 1,
+            "rowsWritten": 3,
+            "attempts": null
+          },
+          {
+            "rowsRead": 0,
+            "rowsWritten": 2,
+            "attempts": null
+          },
+          {
+            "rowsRead": 0,
+            "rowsWritten": 2,
+            "attempts": null
+          },
+          {
+            "rowsRead": 1,
+            "rowsWritten": 1,
+            "attempts": null
+          },
+          {
+            "rowsRead": 0,
+            "rowsWritten": 2,
+            "attempts": null
+          },
+          {
+            "rowsRead": 0,
+            "rowsWritten": 1,
+            "attempts": null
+          },
+          {
+            "rowsRead": 1,
+            "rowsWritten": 3,
+            "attempts": null
+          },
+          {
+            "rowsRead": 0,
+            "rowsWritten": 2,
+            "attempts": null
+          },
+          {
+            "rowsRead": 0,
+            "rowsWritten": 2,
+            "attempts": null
+          },
+          {
+            "rowsRead": 1,
+            "rowsWritten": 1,
+            "attempts": null
+          },
+          {
+            "rowsRead": 0,
+            "rowsWritten": 2,
+            "attempts": null
+          },
+          {
+            "rowsRead": 0,
+            "rowsWritten": 1,
+            "attempts": null
+          },
+          {
+            "rowsRead": 1,
+            "rowsWritten": 3,
+            "attempts": null
+          },
+          {
+            "rowsRead": 0,
+            "rowsWritten": 4,
+            "attempts": null
+          },
+          {
+            "rowsRead": 0,
+            "rowsWritten": 4,
+            "attempts": null
+          },
+          {
+            "rowsRead": 0,
+            "rowsWritten": 4,
+            "attempts": null
+          },
+          {
+            "rowsRead": 22,
+            "rowsWritten": 0,
+            "attempts": null
+          },
+          {
+            "rowsRead": 12,
+            "rowsWritten": 0,
+            "attempts": null
+          }
+        ],
+        "verifiedInventory": {
+          "rows": {
+            "account_entitlement_authority": 4,
+            "api_keys": 1,
+            "app_state": 12,
+            "billing_public_catalog": 0,
+            "billing_webhook_receipts": 0,
+            "d1_command_guard": 0,
+            "expense_categories": 2,
+            "expense_create_idempotency": 0,
+            "expense_events": 0,
+            "expense_suggestion_budget": 0,
+            "expense_suggestion_events": 0,
+            "expenses": 0,
+            "ledger_plan_usage": 0,
+            "ledger_project_repositories": 0,
+            "ledger_projects": 0,
+            "workspace_events": 0,
+            "workspace_invites": 0,
+            "workspace_members": 3,
+            "expense_recurring_rules": 0,
+            "expense_recurring_occurrences": 0
+          },
+          "json": {},
+          "arrays": 262144,
+          "records": {
+            "users": 4,
+            "sessions": 4,
+            "githubStates": 0,
+            "billingEvents": 0,
+            "billingPendingUpdates": 0
+          }
+        },
+        "iana": {
+          "tzdataVersion": "2026.5",
+          "systemTzpathDisabled": true,
+          "conversions": [
+            {
+              "timezone": "UTC",
+              "date": "2026-10-08",
+              "utc": "2026-10-08T00:00:00+00:00"
+            },
+            {
+              "timezone": "Asia/Shanghai",
+              "date": "2026-10-08",
+              "utc": "2026-10-07T16:00:00+00:00"
+            },
+            {
+              "timezone": "Asia/Kathmandu",
+              "date": "2026-10-08",
+              "utc": "2026-10-07T18:15:00+00:00"
+            },
+            {
+              "timezone": "America/New_York",
+              "date": "2026-10-08",
+              "utc": "2026-10-08T04:00:00+00:00"
+            },
+            {
+              "timezone": "America/Santiago",
+              "date": "2019-09-08",
+              "utc": "2019-09-08T04:00:00+00:00"
+            },
+            {
+              "timezone": "America/Havana",
+              "date": "2020-11-01",
+              "utc": "2020-11-01T04:00:00+00:00"
+            },
+            {
+              "timezone": "Pacific/Apia",
+              "date": "2011-12-30",
+              "utc": "2011-12-30T10:00:00+00:00"
+            }
+          ],
+          "monthlyOriginalDay": [
+            "2026-01-31",
+            "2026-02-28",
+            "2026-03-31"
+          ],
+          "packagedResourceSha256": "bf8b7ed82fe6e63e6d98f8cea934eeac901cd16aba85eb5755ce3f8b4289ea8a",
+          "packagedResourceBytes": 393,
+          "actualLocalToday": {
+            "UTC": "2026-10-08",
+            "Asia/Shanghai": "2026-10-08",
+            "Asia/Kathmandu": "2026-10-08",
+            "America/New_York": "2026-10-08"
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "method": "GET",
+      "path": "/_preview/budget",
+      "status": 200,
+      "meta": [],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 3,
+      "method": "GET",
+      "path": "/api/v1/me",
+      "status": 200,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 4,
+      "method": "GET",
+      "path": "/api/v1/me",
+      "status": 200,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 5,
+      "method": "GET",
+      "path": "/api/v1/me",
+      "status": 200,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 6,
+      "method": "GET",
+      "path": "/api/v1/me",
+      "status": 200,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 7,
+      "method": "POST",
+      "path": "/api/v1/projects",
+      "status": 201,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 2,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 5,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 24,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 8,
+      "method": "PATCH",
+      "path": "/api/v1/projects/prj_6b487b4b49e148a895cd13f70cdb08e9",
+      "status": 422,
+      "meta": [],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 9,
+      "method": "PATCH",
+      "path": "/api/v1/projects/prj_6b487b4b49e148a895cd13f70cdb08e9",
+      "status": 422,
+      "meta": [],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 10,
+      "method": "PATCH",
+      "path": "/api/v1/projects/prj_6b487b4b49e148a895cd13f70cdb08e9",
+      "status": 200,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 3,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 2,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 24,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 11,
+      "method": "PATCH",
+      "path": "/api/v1/projects/prj_6b487b4b49e148a895cd13f70cdb08e9",
+      "status": 200,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 3,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 2,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 24,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 12,
+      "method": "GET",
+      "path": "/api/v1/projects/prj_6b487b4b49e148a895cd13f70cdb08e9",
+      "status": 200,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 13,
+      "method": "POST",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 201,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 3,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 6,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 2,
+          "attempts": null
+        },
+        {
+          "rowsRead": 25,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 14,
+      "method": "POST",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 201,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 15,
+      "method": "POST",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 409,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 16,
+      "method": "POST",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 201,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 3,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 6,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 26,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 17,
+      "method": "POST",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 201,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 4,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 3,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 6,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 2,
+          "attempts": null
+        },
+        {
+          "rowsRead": 27,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 18,
+      "method": "POST",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 403,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 19,
+      "method": "POST",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 422,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 20,
+      "method": "GET",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 403,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 21,
+      "method": "POST",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 201,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 3,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 6,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 2,
+          "attempts": null
+        },
+        {
+          "rowsRead": 28,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 22,
+      "method": "PATCH",
+      "path": "/api/v1/expense-recurring-rules/rec_e6155f68bb6646f1ac817f9f088210ca",
+      "status": 428,
+      "meta": [],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 23,
+      "method": "PATCH",
+      "path": "/api/v1/expense-recurring-rules/rec_e6155f68bb6646f1ac817f9f088210ca",
+      "status": 412,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 24,
+      "method": "PATCH",
+      "path": "/api/v1/expense-recurring-rules/rec_e6155f68bb6646f1ac817f9f088210ca",
+      "status": 200,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 2,
+          "attempts": null
+        },
+        {
+          "rowsRead": 28,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 25,
+      "method": "POST",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 201,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 4,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 3,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 6,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 2,
+          "attempts": null
+        },
+        {
+          "rowsRead": 29,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 26,
+      "method": "POST",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 201,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 5,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 3,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 6,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 2,
+          "attempts": null
+        },
+        {
+          "rowsRead": 30,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 27,
+      "method": "DELETE",
+      "path": "/api/v1/categories/cat_recurring_blocked",
+      "status": 204,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 3,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 2,
+          "attempts": null
+        },
+        {
+          "rowsRead": 30,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 29,
+      "method": "GET",
+      "path": "/api/v1/expense-recurring-rules/rec_17c9443b68c04e7c8631665748c115af",
+      "status": 200,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 30,
+      "method": "GET",
+      "path": "/api/v1/expense-recurring-rules/rec_11b24636ac6f42f49546cbc58374f28e",
+      "status": 200,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 31,
+      "method": "GET",
+      "path": "/api/v1/expense-recurring-rules/rec_a3e5d1df077645199cf018ef80872148",
+      "status": 200,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 32,
+      "method": "GET",
+      "path": "/api/v1/expense-recurring-rules/rec_e6155f68bb6646f1ac817f9f088210ca",
+      "status": 200,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 33,
+      "method": "GET",
+      "path": "/api/v1/expense-recurring-rules/rec_ebabfcbd16934626bf7d223b08cd1585",
+      "status": 200,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 34,
+      "method": "GET",
+      "path": "/api/v1/expense-recurring-rules/rec_e1f524293202406d91d5d2e0056345e4",
+      "status": 200,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 35,
+      "method": "GET",
+      "path": "/api/v1/expenses",
+      "status": 200,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 37,
+      "method": "GET",
+      "path": "/api/v1/expenses",
+      "status": 200,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 38,
+      "method": "PATCH",
+      "path": "/api/v1/expense-recurring-rules/rec_e6155f68bb6646f1ac817f9f088210ca",
+      "status": 200,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 3,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 39,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 39,
+      "method": "DELETE",
+      "path": "/api/v1/expense-recurring-rules/rec_e6155f68bb6646f1ac817f9f088210ca",
+      "status": 204,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 2,
+          "attempts": null
+        },
+        {
+          "rowsRead": 39,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 40,
+      "method": "POST",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 201,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 6,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 3,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 6,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 40,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 41,
+      "method": "PATCH",
+      "path": "/api/v1/expense-recurring-rules/rec_03d8fa4e1b994f00acafd25b17e51ca5",
+      "status": 422,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 42,
+      "method": "PATCH",
+      "path": "/api/v1/projects/prj_6b487b4b49e148a895cd13f70cdb08e9",
+      "status": 200,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 3,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 2,
+          "attempts": null
+        },
+        {
+          "rowsRead": 4,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 40,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 44,
+      "method": "GET",
+      "path": "/api/v1/expense-recurring-rules/rec_03d8fa4e1b994f00acafd25b17e51ca5",
+      "status": 200,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 45,
+      "method": "GET",
+      "path": "/api/v1/expenses",
+      "status": 200,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 46,
+      "method": "GET",
+      "path": "/api/v1/expense-recurring-rules",
+      "status": 200,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 7,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 48,
+      "method": "GET",
+      "path": "/api/v1/expenses",
+      "status": 200,
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": [],
+      "fixtureSetup": null
+    },
+    {
+      "id": 49,
+      "method": "GET",
+      "path": "/_preview/budget",
+      "status": 200,
+      "meta": [],
+      "providerOperations": [],
+      "fixtureSetup": null
+    }
+  ],
+  "nativeTickEvidence": [
+    {
+      "result": {
+        "ok": true,
+        "scanned": 5,
+        "created": 3,
+        "blocked": 2,
+        "replayed": 0
+      },
+      "meta": [
+        {
+          "rowsRead": 6,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 30,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 3,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 5,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 33,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 4,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 3,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 5,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 2,
+          "attempts": null
+        },
+        {
+          "rowsRead": 36,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 3,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 5,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 2,
+          "attempts": null
+        },
+        {
+          "rowsRead": 39,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 39,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": []
+    },
+    {
+      "result": {
+        "ok": true,
+        "scanned": 0,
+        "created": 0,
+        "blocked": 0,
+        "replayed": 0
+      },
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": []
+    },
+    {
+      "result": {
+        "ok": true,
+        "scanned": 1,
+        "created": 0,
+        "blocked": 1,
+        "replayed": 0
+      },
+      "meta": [
+        {
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 1,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 2,
+          "rowsWritten": 3,
+          "attempts": null
+        },
+        {
+          "rowsRead": 0,
+          "rowsWritten": 1,
+          "attempts": null
+        },
+        {
+          "rowsRead": 40,
+          "rowsWritten": 0,
+          "attempts": null
+        },
+        {
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": []
+    },
+    {
+      "result": {
+        "ok": true,
+        "scanned": 0,
+        "created": 0,
+        "blocked": 0,
+        "replayed": 0
+      },
+      "meta": [
+        {
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "attempts": null
+        }
+      ],
+      "providerOperations": []
+    }
+  ],
+  "runtimeStopped": true,
+  "businessAndInitializationNativeTotals": {
+    "statements": 553,
+    "rowsRead": 2219,
+    "rowsWritten": 368,
+    "rawAttempts": [
+      null
+    ],
+    "metadataComplete": true
+  },
+  "fixtureSetupNativeTotals": {
+    "statements": 28,
+    "rowsRead": 41,
+    "rowsWritten": 53,
+    "rawAttempts": [
+      null
+    ],
+    "metadataComplete": true
+  },
+  "nativeAttemptsFabricated": false,
+  "sourceUnchanged": true,
+  "cleanupPorts": [
+    {
+      "port": 8908,
+      "free": true,
+      "rebindOption": "SO_REUSEADDR; excludes kernel TIME_WAIT without allowing an active listener"
+    },
+    {
+      "port": 9908,
+      "free": true,
+      "rebindOption": "SO_REUSEADDR; excludes kernel TIME_WAIT without allowing an active listener"
+    }
+  ]
+}

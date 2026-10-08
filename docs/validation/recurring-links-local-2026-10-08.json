@@ -1,0 +1,112 @@
+{
+  "date": "2026-10-08",
+  "scope": "Project navigation URLs and recurring expense rules/generation; preview-only publication pending",
+  "unitTests": {
+    "passed": 1266,
+    "subtestsPassed": 56,
+    "python": "3.10.12"
+  },
+  "staticChecks": {
+    "s01": true,
+    "mirror": true,
+    "compile": true,
+    "whitespace": true,
+    "previewWranglerDryRun": "4.136.3"
+  },
+  "schema": {
+    "version": 7,
+    "fingerprint": "cde5d88f7e7c0febfbe541a64645afba9141d189182e81479a466ecfe5fa1aab",
+    "tables": 20,
+    "indexes": 40,
+    "atomicUpgradeStatements": 13
+  },
+  "nativeSchemaReceipt": "recurring-schema-native-local-2026-10-08.json",
+  "nativeApiReceipt": "recurring-links-native-local-2026-10-08.json",
+  "nativeScope": {
+    "apiHttpRequests": 49,
+    "businessMutationAttempts": 24,
+    "officialScheduledDispatches": 4,
+    "generatedExpenses": 3,
+    "tickCreated": [
+      3,
+      0,
+      0,
+      0
+    ],
+    "processRestarts": 1,
+    "providerTransports": 0,
+    "remoteD1Operations": 0,
+    "realAccounts": 0,
+    "nativeTransactionFailureScope": "Atomic v6-to-v7 rollback exercised natively; generation revocation/rollback fences are CPython SQL tests, not an injected failed native generation batch"
+  },
+  "tzdata": {
+    "package": "2026.5",
+    "iana": "2026e",
+    "systemTzpathDisabledInNativeProof": true,
+    "resource": "tzdata.zoneinfo.Asia/Shanghai",
+    "bytes": 393,
+    "sha256": "bf8b7ed82fe6e63e6d98f8cea934eeac901cd16aba85eb5755ce3f8b4289ea8a"
+  },
+  "excludedLocalHarnessRuns": [
+    {
+      "reason": "Wrong local pywrangler working directory; zero HTTP/SQL",
+      "sha256": "cb8f5fa167aa0978cac6b304f5927a74e87b4060983c140b2af8a9906ca60f3d",
+      "httpRequests": 0,
+      "businessMutationAttempts": 0,
+      "actualScheduledDispatches": 0,
+      "nativeTotals": {
+        "statements": 0,
+        "rowsRead": 0,
+        "rowsWritten": 0,
+        "rawAttempts": [],
+        "metadataComplete": true
+      },
+      "originalLocalStateRetained": true,
+      "productSourceChanged": false
+    },
+    {
+      "reason": "Synthetic fixture key had wrong prefix; fully accounted 401, no scheduled dispatch",
+      "sha256": "952a6073706ee0f6ccb6d57d8a3083f35f2baf67babaa42351f65efc11a2a743",
+      "httpRequests": 20,
+      "businessMutationAttempts": 12,
+      "actualScheduledDispatches": 0,
+      "nativeTotals": {
+        "statements": 230,
+        "rowsRead": 1217,
+        "rowsWritten": 210,
+        "rawAttempts": [
+          null
+        ],
+        "metadataComplete": true
+      },
+      "originalLocalStateRetained": true,
+      "productSourceChanged": false
+    },
+    {
+      "reason": "Obsolete local scheduled transport path; fully accounted 404 with zero SQL, no scheduled dispatch",
+      "sha256": "a739047f71dd9d859a880f7d200dfb927875fae0ce8d3a4dc79be8ef10c38fef",
+      "httpRequests": 28,
+      "businessMutationAttempts": 19,
+      "actualScheduledDispatches": 0,
+      "nativeTotals": {
+        "statements": 321,
+        "rowsRead": 1507,
+        "rowsWritten": 256,
+        "rawAttempts": [
+          null
+        ],
+        "metadataComplete": true
+      },
+      "originalLocalStateRetained": true,
+      "productSourceChanged": false
+    }
+  ],
+  "remoteScope": {
+    "productionD1Access": "paused",
+    "productionCron": false,
+    "previewCron": "0 * * * *",
+    "database": "e9dc3b89-f81f-4fce-87ef-d8797d879fb4",
+    "namespace": "0e0ce4946c5e4d5f81c606273ba94b5d",
+    "singleton": "pullwise-s17-s18-2026-09-28"
+  }
+}

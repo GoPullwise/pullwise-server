@@ -1,13 +1,70 @@
 """Explicit project repository bindings and actor-specific GitHub visibility."""
 from __future__ import annotations
 
+import re
+from ipaddress import IPv4Address, IPv6Address
 from typing import Any
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from .cloudflare_github_identity_http import read_repository_access
 from .cloudflare_github_gateway import GitHubFailure
 
 MAX_REPOSITORIES = 30
 MAX_GITHUB_ID = 9007199254740991
+MAX_PROJECT_URL_BYTES = 2048
+
+
+def project_url(value: object) -> str | None:
+    """Validate optional user links without borrowing provider redirect rules."""
+    if value is None:
+        return None
+    if (not isinstance(value, str)
+            or any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in value)):
+        raise ValueError("invalid project URL")
+    url = value.strip()
+    if (not url or len(url.encode("utf-8")) > MAX_PROJECT_URL_BYTES
+            or "\\" in url or any(char.isspace() for char in url)
+            or not re.match(r"https?://", url, re.I)):
+        raise ValueError("invalid project URL")
+    try:
+        parsed = urlsplit(url)
+        host = parsed.hostname
+        if (parsed.scheme not in {"http", "https"} or not host
+                or "@" in parsed.netloc or parsed.username is not None
+                or parsed.password is not None):
+            raise ValueError("invalid project URL")
+        # urllib validates IPv6 brackets and port ranges. Require the whole
+        # authority to match too: an IPv6 suffix or malformed port is not a URL.
+        authority = r"\[[^\[\]]+\](?::[0-9]+)?" if ":" in host else r"[^:\[\]]+(?::[0-9]+)?"
+        if not re.fullmatch(authority, parsed.netloc):
+            raise ValueError("invalid project URL")
+        port = parsed.port
+        if ":" in host:
+            if "%" in host:
+                raise ValueError("invalid project URL")
+            canonical_host = "[" + IPv6Address(host).compressed + "]"
+        else:
+            ascii_host = host.encode("idna").decode("ascii")
+            if (not re.fullmatch(r"[A-Za-z0-9_.-]+", ascii_host)
+                    or ".." in ascii_host or ascii_host.startswith(".")):
+                raise ValueError("invalid project URL")
+            canonical_host = ascii_host.lower()
+            if re.fullmatch(r"[0-9]+(?:\.[0-9]+){3}", canonical_host):
+                canonical_host = str(IPv4Address(canonical_host))
+        canonical_authority = canonical_host
+        if port is not None and port != (80 if parsed.scheme == "http" else 443):
+            canonical_authority += ":" + str(port)
+        # Match browser URL serialization for Unicode hosts/components so an
+        # accepted link cannot become oversized and disappear in Web's reader.
+        url = urlunsplit((parsed.scheme, canonical_authority,
+            quote(parsed.path or "/", safe="/!$&'()*+,-.:;=@_%~[]"),
+            quote(parsed.query, safe="/?!$&()*+,-.:;=@_%~[]"),
+            quote(parsed.fragment, safe="/?!$&'()*+,-.:;=@_%~[]")))
+        if len(url.encode("utf-8")) > MAX_PROJECT_URL_BYTES:
+            raise ValueError("invalid project URL")
+    except (ValueError, UnicodeError):
+        raise ValueError("invalid project URL") from None
+    return url
 
 
 def github_actor(user: dict) -> dict:
@@ -43,12 +100,16 @@ def repository_ids(body: dict, *, required: bool = False) -> list[int] | None:
 def project_input(body: object, *, creating: bool) -> list[int] | None:
     if (not isinstance(body, dict) or not body
             or set(body) - {"githubRepoId", "githubRepoIds", "name", "description",
-                            "githubOrganizationId", *({"status"} if not creating else set())}):
+                            "githubOrganizationId", "developmentUrl", "productUrl",
+                            *({"status"} if not creating else set())}):
         raise ValueError("invalid fields")
     for field, maximum in (("name", 120), ("description", 2000)):
         if field in body and (not isinstance(body[field], str)
                 or len(body[field].strip() if field == "name" else body[field]) > maximum):
             raise ValueError("invalid text")
+    for field in ("developmentUrl", "productUrl"):
+        if field in body:
+            project_url(body[field])
     if "status" in body and (not isinstance(body["status"], str)
                              or body["status"] not in {"active", "archived"}):
         raise ValueError("invalid status")

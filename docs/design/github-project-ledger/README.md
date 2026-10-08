@@ -4,6 +4,8 @@
 
 当前实施状态（2026-10-07）：独立空白项目已实现、验收并发布 Preview；独立项目名称必填，GitHub 仓库与 Organization 关联可选，兼容仓库关联创建的 API 可省略名称。当前数据库 v6 的一次升级沿用原数据库、协调器和累计用量记录。前端 476 项、后端 1,015 项测试及原生 Worker/浏览器验收通过；最终 DFerryman REST 与临时 token 撤销有独立验收记录。运行事实见两端 `docs/validation/local-acceptance.md`，产品规则见[项目需求](../../planning/project-repositories.md)。
 
+2026-10-08 补充：当前源码新增开发／产品链接和周、月、自然季度、年度周期支出，使用 v7 schema；原生时区、月底、暂停和防重复检查已通过。功能契约见[周期支出与项目链接](../../planning/recurring-expenses-project-links.md)，本地证据和实际 Preview 发布分别记录，不替代此前版本证据。
+
 历史实施状态（2026-09-28）：当时原 S01–S16 已本地实现，S17 Worker/CSV 和 S18 Preview/提供商验收尚未完成。这是当时的阶段记录，当前证据以两端 `docs/validation/local-acceptance.md` 为准。
 
 ## 1. 产品目标与边界
@@ -123,7 +125,7 @@ workspace-scoped Key 绑定 `workspaceId` 与当前 `workspaceMemberRevision`；
 
 两端各维护一份 `docs/validation/local-acceptance.md` 并互相链接，记录当前检查和剩余门槛；已完成阶段的临时交接不作为现行规则保留。
 
-0005 追加四张成员/邀请/审计/仓库关联表及两列，并回填原单仓库映射；0006 允许独立项目的 GitHub anchor 为 NULL。owner ID、project ID 和 expense/history 不重写。当前 canonical schema 为六个 migrations、18 表/33 SQLite indexes。Preview 的 v4→v5 与 v5→v6 一次性编译、原子升级均有各自验收记录，沿用原 journal/namespace/database 并保留全部累计计数和证据；不重置、重试或添加 cron。最新用户要求正常可用的 Preview，因此普通产品流量不再受历史累计 100,000-read / 1,000-write 测试上限限制；有限验证计划保留原上限，每个产品 SQL batch 仍需边界预留和实际原生计量，商业配额和权限维持生效。详见 `docs/validation/d1-validation-budget.md` 当前策略。
+0005 追加四张成员/邀请/审计/仓库关联表及两列，并回填原单仓库映射；0006 允许独立项目的 GitHub anchor 为 NULL。owner ID、project ID 和 expense/history 不重写。当前 canonical schema 为七个 migrations、20 表/40 SQLite indexes；0007 添加项目链接及周期规则/发生记录，并允许 schedule 审计 actor。Preview 的 v4→v5 与 v5→v6 一次性编译、原子升级均有各自验收记录，沿用原 journal/namespace/database 并保留全部累计计数和证据；不重置或重试未知结果。新增周期支出仅允许 Preview 的每小时 `0 * * * *` cron，生产仍不配置 cron。最新用户要求正常可用的 Preview，因此普通产品流量不再受历史累计 100,000-read / 1,000-write 测试上限限制；有限验证计划保留原上限，每个产品 SQL batch 仍需边界预留和实际原生计量，商业配额和权限维持生效。详见 `docs/validation/d1-validation-budget.md` 当前策略。
 
 当前授权允许本地修复/检查、main 推送及 Preview 发布与有限远程验收；最终结果须补充到验证记录。Server/Web 环境配置及数据库保持隔离，生产 `PULLWISE_D1_ACCESS_ENABLED=0`，本轮远程验证仅限 Preview。部署脚本不执行远程 migration；发布代码、迁移成功和业务验收必须分别记录。
 

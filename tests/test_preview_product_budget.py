@@ -123,6 +123,7 @@ def test_every_current_literal_update_has_a_unique_key_fence():
     import ast
     from pathlib import Path
     from pullwise_server.cloudflare_preview_budget import sql_write_bound
+    from pullwise_server.cloudflare_preview_schema import INDEX_COUNTS
     count = 0
     for path in (Path(__file__).resolve().parents[1] / "pullwise_server").glob("cloudflare_*.py"):
         if path.stem in {"cloudflare_validation_budget", "cloudflare_preview_budget",
@@ -131,8 +132,12 @@ def test_every_current_literal_update_has_a_unique_key_fence():
         for node in ast.walk(ast.parse(path.read_text())):
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 sql = node.value.strip()
-                if sql.upper().startswith("UPDATE ") and " SET " in " ".join(sql.upper().split()):
-                    assert 0 <= sql_write_bound(sql) <= 9
+                if (sql.upper().startswith("UPDATE ") and " SET " in " ".join(sql.upper().split())
+                        and sql.count("'") % 2 == 0):
+                    # A scalar row can remove/add every reviewed index entry.
+                    # Incomplete quoted fragments in trusted SQL concatenation
+                    # are covered by runtime metering and the domain tests.
+                    assert 0 <= sql_write_bound(sql) <= 1 + 2 * max(INDEX_COUNTS.values())
                     count += 1
     assert count >= 15
 

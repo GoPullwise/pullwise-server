@@ -33,6 +33,8 @@ MODULES = (
     "cloudflare_ledger_expenses",
     "cloudflare_ledger_profile",
     "cloudflare_ledger_reports",
+    "cloudflare_ledger_recurring",
+    "ledger_recurrence_calendar",
     "cloudflare_ledger_suggestions",
     "cloudflare_native_d1",
     "cloudflare_oauth_state_adapter",

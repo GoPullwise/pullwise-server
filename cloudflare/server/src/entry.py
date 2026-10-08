@@ -1,4 +1,4 @@
-"""Candidate Server Worker entry; no probe endpoints or scheduled trigger."""
+"""Server Worker with coordinated preview-only recurring expense scheduling."""
 import asyncio
 import io
 import json
@@ -11,7 +11,7 @@ from pullwise_server.cloudflare_validation_budget import (
     BUDGET_SCOPE, REQUEST_SECONDS, BudgetError, BudgetJournal, MeteredD1,
     REVIEWED_REMOTE_PLANS,
     REVIEWED_INITIALIZATION_PLAN, run_initialization,
-    READ_CEILING, WRITE_CEILING,
+    READ_CEILING, WRITE_CEILING, _field,
 )
 
 from pullwise_server.cloudflare_http_contract import handle_http_request
@@ -22,11 +22,12 @@ from pullwise_server.cloudflare_billing_catalog_refresh import read_or_refresh_c
 from pullwise_server.cloudflare_creem_gateway import WorkerCreemGateway, product_bindings, webhook_product_ids
 from pullwise_server.cloudflare_ledger_profile import read_ledger_me
 from pullwise_server.cloudflare_ledger_api import handle_ledger_request
+from pullwise_server.cloudflare_ledger_recurring import run_due_recurring
 from pullwise_server.cloudflare_jev_gateway import WorkerJevGateway
 from pullwise_server.cloudflare_ledger_reports import CsvExport
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1, PlanLimitError
 from pullwise_server.ledger_plan_policy import parse_policy
-from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initialize_product, reconcile_schema_reads, upgrade_product_schema, upgrade_product_schema_v6, migrate_product_state_records
+from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initialize_product, reconcile_schema_reads, upgrade_product_schema, upgrade_product_schema_v6, upgrade_product_schema_v7, migrate_product_state_records
 from pullwise_server.cloudflare_preview_rate import PreviewRateLimiter, PreviewRateLimit, request_channel
 from pullwise_server.cloudflare_native_d1 import NativeD1
 from pullwise_server.json_input import validate_json_unicode
@@ -160,7 +161,7 @@ class _Application:
             return Response.json(payload, status=status, headers={"Cache-Control": "no-store"})
         if path.startswith(("/api/v1/projects", "/api/v1/categories",
                             "/api/v1/expenses", "/api/v1/reports/",
-                            "/api/v1/expense-suggestions", "/api/v1/workspaces",
+                            "/api/v1/expense-suggestions", "/api/v1/expense-recurring-rules", "/api/v1/workspaces",
                             "/api/v1/workspace-invitations", "/api/v1/repositories")):
             from pullwise_server.cloudflare_principal import _cookie_sessions
             if request.method in {"POST", "PATCH", "DELETE"} and _cookie_sessions(headers):
@@ -309,7 +310,30 @@ def _unavailable(code):
                          headers={"Cache-Control": "no-store"})
 
 
+def _recurring_enabled(env):
+    return (str(getattr(env, "PULLWISE_D1_ACCESS_ENABLED", "0")) == "1"
+        and getattr(env, "PULLWISE_MODE", "") == "preview"
+        and str(getattr(env, "PULLWISE_PREVIEW_PRODUCT_ENABLED", "0")) == "1"
+        and str(getattr(env, "PULLWISE_RECURRING_EXPENSES_ENABLED", "0")) == "1")
+
+
 class Default(WorkerEntrypoint):
+    async def scheduled(self, controller, env, ctx):
+        # Await the only background task. Keep all D1 work inside the existing
+        # singleton coordinator; controller time never becomes a client clock.
+        if not _recurring_enabled(self.env):
+            return
+        scheduled = float(controller.scheduledTime)
+        if (str(controller.cron) != "0 * * * *" or not 0 <= scheduled <= 9007199254740991):
+            raise RuntimeError("RECURRING_TRIGGER_INVALID")
+        namespace = getattr(self.env, "VALIDATION_BUDGET", None)
+        if namespace is None:
+            raise RuntimeError("VALIDATION_CONTROL_REQUIRED")
+        stub = namespace.get(namespace.idFromName(BUDGET_SCOPE))
+        result = await stub.runRecurring()
+        if not bool(_field(result, "ok", False)):
+            raise RuntimeError("RECURRING_EXECUTION_UNAVAILABLE")
+
     async def fetch(self, request):
         if str(getattr(self.env, "PULLWISE_D1_ACCESS_ENABLED", "0")) != "1":
             return _unavailable("D1_ACCESS_PAUSED")
@@ -424,6 +448,56 @@ class ValidationBudget(DurableObject):
                 raise
             return _unavailable(journal.snapshot()["stopped"])
 
+    async def runRecurring(self):
+        """Binding-only RPC; no HTTP tick endpoint, reset or caller-supplied clock."""
+        if not _recurring_enabled(self.env):
+            return {"ok": False, "error": "RECURRING_DISABLED"}
+        if self._waiting >= 16:
+            return {"ok": False, "error": "VALIDATION_BUSY"}
+        self._waiting += 1
+        try:
+            async with self._product_lock:
+                journal = self._journal()
+                state = journal.snapshot()
+                # Scheduler never initializes or migrates user data. Publication
+                # upgrades once through the reviewed ordinary preview path first.
+                if not state.get("schema_ready") or state.get("schema_version") != 7:
+                    return {"ok": False, "error": "SCHEMA_UPGRADE_REQUIRED"}
+                ticket = binding = None
+                try:
+                    async def execute():
+                        nonlocal ticket, binding
+                        now = int(time.time())
+                        ticket = journal.begin_product(now=time.time())
+                        binding = ProductMeteredD1(NativeD1(self.env.DB), journal, ticket)
+                        await binding.ensure_cardinality()
+                        application = PlanLimitedD1(binding, now=now,
+                            policy=parse_policy(getattr(self.env, "PULLWISE_PLAN_LIMITS_JSON", "")))
+                        result = await run_due_recurring(binding=application,
+                            maintenance_binding=binding, gateway=WorkerGitHubGateway(self.env),
+                            now=now, rule_limit=10, occurrence_limit=10)
+                        journal.finish(ticket, now=time.time())
+                        return {"ok": True, **result}
+                    return await asyncio.wait_for(execute(), timeout=REQUEST_SECONDS)
+                except BudgetError as error:
+                    if journal.snapshot()["active"] is not None:
+                        journal.stop(str(error))
+                    return {"ok": False, "error": str(error)}
+                except BaseException as error:
+                    if (not isinstance(error, asyncio.CancelledError)
+                            and ticket is not None and binding is not None
+                            and binding.accounted_outcome()):
+                        journal.finish_accounted_product_failure(ticket, now=time.time(),
+                            timeout=isinstance(error, asyncio.TimeoutError))
+                        return {"ok": False, "error": "RECURRING_EXECUTION_UNAVAILABLE"}
+                    journal.stop("TIMEOUT" if isinstance(error, asyncio.TimeoutError)
+                                 else "REQUEST_OUTCOME_UNKNOWN")
+                    if isinstance(error, asyncio.CancelledError):
+                        raise
+                    return {"ok": False, "error": journal.snapshot()["stopped"]}
+        finally:
+            self._waiting -= 1
+
     async def _product_fetch(self, request):
         target, invalid_target = _request_target(request)
         if invalid_target is not None:
@@ -474,6 +548,9 @@ class ValidationBudget(DurableObject):
                         if (str(getattr(self.env, "PULLWISE_PREVIEW_SCHEMA_V6_UPGRADE_ENABLED", "0")) == "1"
                                 and journal.snapshot().get("schema_ready")):
                             await upgrade_product_schema_v6(native, journal)
+                        if (str(getattr(self.env, "PULLWISE_PREVIEW_SCHEMA_V7_UPGRADE_ENABLED", "0")) == "1"
+                                and journal.snapshot().get("schema_ready")):
+                            await upgrade_product_schema_v7(native, journal)
                         await initialize_product(native, journal)
                         await migrate_product_state_records(native, journal)
                         ticket = journal.begin_product(now=time.time())

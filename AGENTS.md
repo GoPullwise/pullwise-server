@@ -1,5 +1,35 @@
 # Pullwise Server
 
+## Project links and recurring expenses (2026-10-08)
+
+The latest user explicitly requests implementation of development/product links
+and weekly/monthly/calendar-quarter/yearly recurring expenses. This authorizes
+the necessary preview Server schema upgrade, bounded hourly background writes,
+main pushes and preview-only publication, superseding older blanket no-cron and
+Web-only follow-up instructions for these features. Keep production D1 paused
+and production without cron. Preserve the original preview DB, coordinator,
+namespace, cumulative journal and completed upgrade markers; never reset or
+retry an unknown outcome. Local native acceptance precedes one reviewed v7
+upgrade and preview publication; do not create remote synthetic users or issue
+remote forced ticks.
+
+Project URLs are optional absolute HTTP(S) destinations, validated and bounded
+before persistence. Manual development links apply to truly unlinked projects;
+GitHub links require each current actor's authorized metadata. Product links
+apply to every project. Never fetch configured URLs on the Server or weaken
+trusted authentication/payment redirect restrictions.
+
+Recurring rules require a real cookie-session creator and current expense-write
+permissions; API keys do not create permanent background grants. Recheck actor,
+workspace/project/category access and owner plan at execution. Store timezone
+and original day anchors, clamp short months, preserve calendar period identity
+across revisions and expense deletion, and generate expense/audit/occurrence/
+quota/next-date atomically. Pause/resume skips paused periods; explicit start
+allows bounded catch-up. Future planned costs do not enter financial reports.
+Use packaged pinned tzdata and prove IANA timezone behavior in native Pyodide.
+Scheduled execution uses the existing singleton lock and metered D1 path, with
+finite per-tick limits; no public scheduler or migration endpoint.
+
 ## Standalone projects follow-up (2026-10-07)
 
 Projects may be created with a nonblank name and no GitHub repository or

@@ -2,6 +2,43 @@
 
 Updated 2026-10-08. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
 
+## Project links and recurring expenses: local acceptance (2026-10-08)
+
+[Current receipt](recurring-links-local-2026-10-08.json) records 1,266 CPython
+3.10.12 tests and 56 subtests, static contract/configuration/mirror checks and
+pinned preview packaging. The original production D1 pause remains; only
+preview has the hourly recurring trigger. Project URLs preserve existing
+role/key/CAS/actor metadata guards. Cookie-managed recurring rules use a real
+saved execution grant, calendar selectors and permanent rule/period identity.
+
+[Native schema proof](recurring-schema-native-local-2026-10-08.json) passes four
+finite local requests, populated v6-to-v7 atomic upgrade, exact historical-field
+preservation, one real process restart with no replay, and isolated failed-batch
+rollback/stop. It observes 492 native statement results, 3,036 rows read and 472
+written, including separately labeled seed/integrity work. It does not claim
+that added-column SELECT-star hashes stay identical.
+
+[Native API and scheduled proof](recurring-links-native-local-2026-10-08.json)
+passes 49 local HTTP requests, 24 mutation attempts, four official native
+`/cdn-cgi/local/scheduled` dispatches and one real restart. Exactly three costs,
+three permanent occurrences and three schedule audit events are generated;
+tick creation counts are `[3, 0, 0, 0]`. Paused, ended, excess-catch-up,
+archived-category/project and permission/idempotency fences retain their facts.
+Native packaged tzdata 2026.5 is proven with an empty system TZPATH, the exact
+Shanghai TZif resource and seven IANA conversions including midnight gap/fold
+and a skipped day. Business/initialization observes 553 statements and
+2,219/368 rows; trusted metered setup separately observes 28 statements and
+41/53 rows, against its closed 916/53 reservation. Missing native attempt fields
+remain null, with conservative reservations; no native metadata is fabricated.
+
+The healthy original local singleton ends at schema7/storage1 with no stop and
+unchanged canonical source. Three known harness/tool failures are excluded and
+retained separately, never resumed or treated as acceptance. Native upgrade
+rollback is distinct from CPython generation revocation/atomic-fence tests;
+this run does not claim an injected failed native generation batch. No remote
+D1 test, provider request, real account, real payment or forced remote tick is
+part of these local receipts. Preview release gets a separate dated receipt.
+
 ## Product copy and contract documentation audit (2026-10-08)
 
 Current product documentation uses Pullwise / pull-wise.com and describes a

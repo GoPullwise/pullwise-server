@@ -74,15 +74,58 @@ def request(path="/api/v1/expenses", *, method="POST", headers=None, raw=b"{}"):
 @pytest.mark.parametrize("same_site", ["Lax", "Strict", "None"])
 @pytest.mark.parametrize("origin", [None, "https://hostile.example.test"])
 @pytest.mark.parametrize("authorization", [None, "Basic invalid", "Bearer"])
-def test_cookie_writes_require_trusted_origin_for_every_samesite_mode(same_site, origin, authorization):
+@pytest.mark.parametrize("path,method", [
+    ("/api/v1/expenses", "POST"),
+    ("/api/v1/expense-recurring-rules", "POST"),
+    ("/api/v1/expense-recurring-rules/rule_1", "PATCH"),
+    ("/api/v1/expense-recurring-rules/rule_1", "DELETE"),
+])
+def test_cookie_writes_require_trusted_origin_for_every_samesite_mode(same_site, origin, authorization, path, method):
     app, calls = application(same_site=same_site)
     headers = {"cookie": "pw_session=synthetic"}
     if origin:
         headers["origin"] = origin
     if authorization:
         headers["authorization"] = authorization
-    response = asyncio.run(app.fetch(request(headers=headers)))
+    incoming = request(path, method=method, headers=headers)
+    async def forbidden_body():
+        raise AssertionError("Untrusted Cookie write read its body")
+    incoming.bytes = forbidden_body
+    response = asyncio.run(app.fetch(incoming))
     assert response.status == 403 and response.payload["error"]["code"] == "UNTRUSTED_ORIGIN"
+    assert calls == []
+
+
+@pytest.mark.parametrize("path,method", [
+    ("/api/v1/expense-recurring-rules", "POST"),
+    ("/api/v1/expense-recurring-rules/rule_1", "PATCH"),
+    ("/api/v1/expense-recurring-rules/rule_1", "DELETE"),
+])
+def test_trusted_recurring_cookie_writes_reach_the_ledger_handler(path, method):
+    app, calls = application()
+    response = asyncio.run(app.fetch(request(path, method=method,
+        headers={"cookie": "pw_session=synthetic", "origin": "https://app.example.test"})))
+    assert response.status == 204 and calls == ["ledger"]
+    assert response.headers["Cache-Control"] == "no-store"
+
+
+@pytest.mark.parametrize("path,method", [
+    ("/api/v1/expense-recurring-rules", "POST"),
+    ("/api/v1/expense-recurring-rules/rule_1", "PATCH"),
+])
+@pytest.mark.parametrize("raw,status,code", [
+    (b'{"schedule":', 422, "INVALID_INPUT"),
+    (b'\xff', 422, "INVALID_INPUT"),
+    (b'{"purpose":"\\ud800"}', 422, "INVALID_INPUT"),
+    (b'{"schedule":{"\\udfff":true}}', 422, "INVALID_INPUT"),
+    (b"x" * 8193, 413, "REQUEST_TOO_LARGE"),
+])
+def test_recurring_body_safety_fails_before_business_dispatch(path, method, raw, status, code):
+    app, calls = application()
+    response = asyncio.run(app.fetch(request(path, method=method, raw=raw,
+        headers={"cookie": "pw_session=synthetic", "origin": "https://app.example.test"})))
+    assert response.status == status and response.payload == {"error": {"code": code}}
+    assert response.headers["Cache-Control"] == "no-store"
     assert calls == []
 
 

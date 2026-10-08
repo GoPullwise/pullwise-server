@@ -7,11 +7,12 @@ import pytest
 from test_d1_validation_budget import LocalSql
 from test_preview_schema_upgrade import SQLiteD1
 from pullwise_server.cloudflare_preview_schema import (
-    V5_SCHEMA_SQL, V5_SCHEMA_FINGERPRINT, SCHEMA_VERSION, SCHEMA_FINGERPRINT,
-    SCHEMA_OBJECTS, INDEX_COUNTS, UPGRADE_V6_SQL,
+    V5_SCHEMA_SQL, V5_SCHEMA_FINGERPRINT, V6_SCHEMA_VERSION as SCHEMA_VERSION,
+    V6_SCHEMA_FINGERPRINT as SCHEMA_FINGERPRINT, V6_SCHEMA_OBJECTS as SCHEMA_OBJECTS,
+    V6_INDEX_COUNTS as INDEX_COUNTS, UPGRADE_V6_SQL,
 )
 from pullwise_server.cloudflare_preview_budget import (
-    upgrade_product_schema_v6, _upgrade_v6_plan, _COUNT_SQL,
+    upgrade_product_schema_v6, _upgrade_v6_plan, _V6_COUNT_SQL as _COUNT_SQL,
 )
 from pullwise_server.cloudflare_state_records import record_name, encode_record
 from pullwise_server.cloudflare_validation_budget import BudgetJournal, BudgetError

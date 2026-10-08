@@ -1,5 +1,9 @@
 # 当前版本：多人账本、独立项目与可选 GitHub 关联
 
+2026-10-08 补充：开发／产品链接与周期支出已在当前源码实现，采用 v7 schema。
+频率、时区、权限、执行与本地原生验收见[新增功能契约](recurring-expenses-project-links.md)；
+实际 Preview 发布单独记录在当前验收文档，不以此前 v6 发布替代。
+
 状态（2026-10-07）：Server/Web 已实现、验证、推送 main 并发布 Preview。
 原数据库在同一累计 journal 下完成 v4→v5 和 v5→v6 升级，独立项目使用
 真实 nullable GitHub anchor，保留账本身份和财务历史。当前验收见

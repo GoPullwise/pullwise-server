@@ -6,8 +6,9 @@ developers and teams](docs/design/github-project-ledger/README.md), at
 The Server owns GitHub identity/repository authorization, Cookie/API-key
 security, shared ledgers with Owner/Admin/Editor/Viewer roles, multi-repository
 projects with optional GitHub associations, categories, exact money, reports,
-paginated CSV and conditional AI assistance. Expenses are entered by users or
-authorized API clients; the service does not import bank or vendor transactions.
+paginated CSV and conditional AI assistance. Expenses are entered by users,
+authorized API clients or their configured recurring rules; the service does not
+import bank or vendor transactions.
 Currencies are reported separately without exchange-rate conversion. The shared
 expense pool belongs to the selected ledger and is not publicly accessible.
 Creem subscriptions remain separate from expenses.
@@ -17,12 +18,14 @@ the implementation; `cloudflare/server/sync_server_modules.py` generates the
 ignored Worker mirror. The [ledger OpenAPI](openapi/ledger-v1.yaml) is the shared
 business contract.
 
-## Current version (2026-10-07)
+## Current version (2026-10-08)
 
 Standalone named projects, optional repository/Organization associations and
-shared ledgers are implemented and released to preview with the v6 schema.
-Separate local role/browser
-evidence and actual remote publication checks are in
+shared ledgers are implemented. The current source adds development/product
+links and server-generated weekly, monthly, calendar-quarterly and yearly
+expenses with schema v7. The [feature contract](docs/planning/recurring-expenses-project-links.md)
+describes timezone, month-end, permissions and duplicate prevention. Separate
+local role/browser evidence and actual remote publication checks are in
 [latest acceptance](docs/validation/local-acceptance.md). Original-version
 acceptance remains historical rather than new-role evidence.
 
@@ -82,7 +85,9 @@ test ceilings from enabled preview product traffic. The existing journal retains
 all cumulative reservations, observed usage and prior evidence; each SQL batch
 still needs bounded admission and native metering. Generic finite validation
 keeps its original ceilings. Production D1 access remains paused. Do not reset
-the journal, add cron triggers or copy preview credentials/data into production.
+the journal or copy preview credentials/data into production. The recurring
+expense feature authorizes exactly the preview-only hourly `0 * * * *` trigger;
+production retains no cron and paused D1 access.
 The user's USD 200/month Cloudflare target is supported by preview abuse limits
 and avoiding repeated full-table cardinality scans, without hard daily/monthly
 row caps. Rate counters use bounded hashed DO subjects and return recoverable

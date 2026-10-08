@@ -56,8 +56,15 @@ def validate_config(environment: str, allow_placeholders: bool,
                 or bindings[0].get("class_name") != "ValidationBudget"
                 or vars_.get("PULLWISE_CREEM_API_BASE_URL") != "https://test-api.creem.io"):
             raise ValueError("product preview requires the existing budget coordinator and test provider")
-    if config.get("triggers", {}).get("crons"):
-        raise ValueError("cron is forbidden during bounded validation")
+    crons = config.get("triggers", {}).get("crons", [])
+    recurring = vars_.get("PULLWISE_RECURRING_EXPENSES_ENABLED", "0")
+    if recurring not in {"0", "1"}:
+        raise ValueError("recurring execution must be explicitly enabled or disabled")
+    if crons or recurring == "1":
+        if not (product_preview and access == "1" and recurring == "1"
+                and vars_.get("PULLWISE_PREVIEW_SCHEMA_V7_UPGRADE_ENABLED") == "1"
+                and crons == ["0 * * * *"]):
+            raise ValueError("only coordinated hourly preview recurrence is allowed")
     app_url = vars_.get("PULLWISE_APP_URL", "")
     allowed = vars_.get("PULLWISE_ALLOWED_ORIGINS", "")
     parsed_app = urlparse(app_url)
@@ -133,7 +140,8 @@ def validate_contract() -> None:
         for path in sorted(migrations):
             database.executescript(path.read_text(encoding="utf-8"))
         required = {"ledger_projects", "expenses", "expense_events", "app_state",
-                    "api_keys", "billing_webhook_receipts", "billing_public_catalog", "ledger_plan_usage"}
+                    "api_keys", "billing_webhook_receipts", "billing_public_catalog", "ledger_plan_usage",
+                    "expense_recurring_rules", "expense_recurring_occurrences"}
         actual = {row[0] for row in database.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if not required <= actual:
             raise ValueError("ledger runtime migration tables are missing")

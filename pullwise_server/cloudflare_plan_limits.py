@@ -31,7 +31,7 @@ _ERRORS = {"plan_project_limit": (403, "PROJECT_LIMIT"),
            "plan_max_required": (403, "MAX_REQUIRED"),
            "plan_jev_budget_limit": (429, "JEV_BUDGET_LIMIT")}
 _MUTATION = re.compile(r"^\s*(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM)\s+"
-    r"(ledger_projects|expense_categories|expenses|api_keys|expense_suggestion_budget|expense_suggestion_events|ledger_plan_usage|workspace_members|workspace_invites|workspace_events|ledger_project_repositories)\b", re.I)
+    r"(ledger_projects|expense_categories|expenses|api_keys|expense_suggestion_budget|expense_suggestion_events|ledger_plan_usage|workspace_members|workspace_invites|workspace_events|ledger_project_repositories|expense_recurring_rules|expense_recurring_occurrences)\b", re.I)
 _USER_FENCE = re.compile(r"\bu\.name\s*=\s*\?\s+AND\s+u\.payload\s*=\s*\?", re.I)
 
 
@@ -96,6 +96,14 @@ class PlanLimitedD1:
         if mutations and all(table == "api_keys" and re.match(
                 r"^\s*UPDATE\s+api_keys\s+SET\s+revoked_at\s*=", item.sql, re.I)
                 for item, table in mutations):
+            return await self.binding.batch(raw)
+        # Stopping an automation remains possible after an account allowance
+        # is exhausted. Only a literal pause/cancel update gets this exemption;
+        # active edits, occurrences and generated expenses retain normal quota.
+        # The original cookie/member/rule CAS guards and global meter remain.
+        if mutations and all(table == "expense_recurring_rules" and re.match(
+                r"^\s*UPDATE\s+expense_recurring_rules\s+SET\s+status\s*=\s*'(?:paused|canceled)'\s*,",
+                item.sql, re.I) for item, table in mutations):
             return await self.binding.batch(raw)
         # Emergency membership/token revocation remains available after a
         # commercial allowance is exhausted. It still needs the original

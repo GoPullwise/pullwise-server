@@ -16,10 +16,20 @@ preview schema upgrade are recorded in
 
 Migrations apply in order: `0001_ledger.sql`, `0002_identity_billing_keys.sql`,
 `0003_ledger_suggestions.sql`, `0004_ledger_plan_usage.sql`,
-`0005_workspaces_repositories.sql`, `0006_blank_projects.sql`.
-Production remains unmigrated and paused. The current canonical v6
-schema has 18 tables and 33 SQLite indexes. Health requires all 18 tables.
+`0005_workspaces_repositories.sql`, `0006_blank_projects.sql`,
+`0007_recurring_expenses_project_links.sql`.
+Production remains unmigrated and paused. The current canonical v7
+schema has 20 tables and 40 SQLite indexes. Coordinated initialization and
+upgrade verify the full schema; health retains its 18-table compatibility probe.
 The deploy script never applies remote migrations.
+
+0007 adds optional development/product URLs and recurring rule/occurrence
+records, and permits the `schedule` audit actor. Its preview-only one-shot v6-to-v7
+upgrade uses 13 statements in one guarded atomic batch under the existing
+database, coordinator and journal. It preserves actual expenses and cumulative
+accounting. Scheduled execution refuses an unready schema rather than migrating
+it. See the [feature contract](../../docs/planning/recurring-expenses-project-links.md)
+and [native evidence](../../docs/validation/recurring-links-local-2026-10-08.json).
 
 0006 makes the project GitHub anchor nullable. A standalone project has a
 nonblank name, NULL repository/full-name/Organization and no repository rows.
@@ -90,7 +100,8 @@ total Cloudflare target does not introduce a hard day/month row budget.
 The capacity follow-up stores users, sessions, OAuth states and billing
 event/pending facts at exact `record:<kind>:<id>` keys in the existing
 `app_state` table. This storage cutover preserved the then-current v5 schema;
-the later blank-project upgrade advances the canonical schema to v6. Under the
+the later blank-project upgrade advances it to v6, followed by the current v7
+links/recurrence upgrade. Under the
 same coordinator lock, one bounded atomic batch copies legal legacy facts and
 empties their former containers, retaining all account/session fields, receipts,
 revisions and journal counters. A completed `stateStorageVersion: 1` status
@@ -155,8 +166,9 @@ The release script uses locked Python 3.14.2 / pywrangler packaging with the
 locally pinned Wrangler, and preserves each environment's runtime switches.
 It never runs migrations. The Worker uses the native bounded TypeSafe gateway;
 the optional local SDK helper is not bundled as an unused runtime dependency.
-The current request authorizes these checks and deployments. Do not add cron
-triggers. The [acceptance record](../../docs/validation/local-acceptance.md)
+The current request authorizes these checks and deployments and exactly the
+preview-only hourly `0 * * * *` recurring-expense trigger. Production retains
+paused D1 access and no cron. The [acceptance record](../../docs/validation/local-acceptance.md)
 separates local mocks, native runtime evidence, publication and real providers.
 
 ## Moving the verified release to production

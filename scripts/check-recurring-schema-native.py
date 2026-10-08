@@ -1,4 +1,4 @@
-"""Four-request local native proof for the populated v5-to-v6 project rebuild.
+"""Four-request local native proof for the populated v6-to-v7 recurring-expense extension.
 
 The generated fixture packages canonical modules without changing them. It has
 two separate local D1 bindings and one local SQLite Durable Object namespace;
@@ -34,11 +34,10 @@ import time
 from workers import WorkerEntrypoint, DurableObject, Response
 from pullwise_server.cloudflare_native_d1 import NativeD1
 from pullwise_server.cloudflare_validation_budget import BudgetJournal, BudgetError, _field
-from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, upgrade_product_schema_v6
+from pullwise_server.cloudflare_preview_budget import upgrade_product_schema_v7
 from pullwise_server.cloudflare_preview_schema import (
-    V5_SCHEMA_SQL, V5_SCHEMA_OBJECTS, V5_SCHEMA_FINGERPRINT, V5_INDEX_COUNTS,
-    V6_SCHEMA_OBJECTS as SCHEMA_OBJECTS, V6_SCHEMA_FINGERPRINT as SCHEMA_FINGERPRINT,
-    V6_SCHEMA_VERSION as SCHEMA_VERSION, UPGRADE_V6_SQL,
+    V6_SCHEMA_SQL, V6_SCHEMA_OBJECTS, V6_SCHEMA_FINGERPRINT, V6_INDEX_COUNTS,
+    SCHEMA_OBJECTS, SCHEMA_FINGERPRINT, SCHEMA_VERSION, UPGRADE_V7_SQL,
 )
 from pullwise_server.cloudflare_state_records import STATE_KINDS, record_name, encode_record
 
@@ -46,6 +45,9 @@ OWNER, MEMBER = "usr_github_740001", "usr_github_740002"
 OLD_UPGRADE = {"from":4,"to":5,"request":23,"complete":True,
     "write_execution":{"native_attempts":[None]*10,
         "provenance":"d1-nonretryable-write-contract-v1"}}
+OLD_V6_UPGRADE = {"from":5,"to":6,"request":63,"complete":True,
+    "write_execution":{"native_attempts":[None]*9,
+        "provenance":"d1-atomic-write-batch-with-fk-pragma-v1"}}
 OLD_CUTOVER = {"version":1,"request":41,"complete":True,"copied_records":7,
     "write_execution":{"provenance":"local-synthetic-historical-record-cutover"}}
 COUNTERS = ("requests","reserved_read","reserved_written","actual_read","actual_written")
@@ -85,10 +87,10 @@ class ObservedD1(NativeD1):
         assert statements and len(statements)<=64
         assert all(item.owner is self for item in statements)
         native = [item.native for item in statements]
-        injected = self.inject and tuple(item.sql for item in statements)==UPGRADE_V6_SQL
+        injected = self.inject and tuple(item.sql for item in statements)==UPGRADE_V7_SQL
         if injected:
             position = next(index for index,item in enumerate(statements)
-                if item.sql.strip().upper().startswith("DROP TABLE LEDGER_PROJECTS"))
+                if item.sql.strip().upper().startswith("DROP TABLE EXPENSE_EVENTS"))
             # Only this isolated rollback fixture inserts the failure. The
             # canonical migration and every copied module remain unchanged.
             native.insert(position+1,super().prepare("INSERT INTO d1_command_guard(ok) VALUES(0)"))
@@ -97,9 +99,9 @@ class ObservedD1(NativeD1):
             results = await super().batch(native)
         except BaseException:
             failure = {"binding":self.label,"statements":len(native),
-                "injectedAfterParentDrop":injected,"nativeResultsUnavailable":True}
+                "injectedAfterEventDrop":injected,"nativeResultsUnavailable":True}
             self.failed.append(failure)
-            print(json.dumps({"nativeBlankSchemaFailure":failure}))
+            print(json.dumps({"nativeRecurringSchemaFailure":failure}))
             raise
         values = [{"rowsRead":_field(_field(item,"meta"),"rows_read"),
             "rowsWritten":_field(_field(item,"meta"),"rows_written"),
@@ -111,7 +113,7 @@ class ObservedD1(NativeD1):
             "rowsWritten":sum(item["rowsWritten"] for item in values),
             "nativeAttempts":[item["attempts"] for item in values]}
         self.groups.append(group)
-        print(json.dumps({"nativeBlankSchemaMeta":group}))
+        print(json.dumps({"nativeRecurringSchemaMeta":group}))
         return results
 
 
@@ -204,7 +206,9 @@ def seed_commands():
 
 
 async def snapshot(native):
-    tables = sorted(V5_INDEX_COUNTS)
+    tables = sorted(V6_INDEX_COUNTS)
+    # Preserve the historical columns for digests; new nullable URL fields are
+    # independently verified through the exact current schema fingerprint.
     commands = [("PRAGMA table_info("+table+")",()) for table in tables]
     commands += [("SELECT * FROM "+table,()) for table in tables]
     commands += [("PRAGMA foreign_keys",()),("PRAGMA foreign_key_check",()),
@@ -213,7 +217,8 @@ async def snapshot(native):
     results = await execute(native,commands)
     data = {}
     for index,table in enumerate(tables):
-        columns = [_field(row,"name") for row in _field(results[index],"results")]
+        columns = [_field(row,"name") for row in _field(results[index],"results")
+            if _field(row,"name") not in {"development_url","product_url"}]
         rows = [[_field(row,column) for column in columns]
             for row in _field(results[index+len(tables)],"results")]
         rows.sort(key=lambda row:json.dumps(row,ensure_ascii=False,separators=(",",":")))
@@ -233,12 +238,12 @@ def historical_journal(sql, baseline):
     state = journal.snapshot()
     assert state["requests"]==0
     rows = {table:item["rows"] for table,item in baseline["tables"].items()}
-    state.update(schema_ready=True,schema_version=5,schema_fingerprint=V5_SCHEMA_FINGERPRINT,
+    state.update(schema_ready=True,schema_version=6,schema_fingerprint=V6_SCHEMA_FINGERPRINT,
         requests=89,cases={"product-schema":1,"product":88,"product-schema-v4-to-v5":1,
-            "product-state-record-v1":1},reserved_read=1000,reserved_written=549,
+            "product-state-record-v1":1,"product-schema-v5-to-v6":1},reserved_read=1000,reserved_written=549,
         actual_read=800,actual_written=200,
         evidence=[{"request":1,"operation":1,"rows_read":800,"rows_written":200}],
-        schema_upgrade=OLD_UPGRADE,state_record_migration=OLD_CUTOVER,state_storage_version=1,
+        schema_upgrade=OLD_UPGRADE,schema_upgrade_v6=OLD_V6_UPGRADE,state_record_migration=OLD_CUTOVER,state_storage_version=1,
         product_data={"rows":rows,"json":{},"arrays":262144,
             "records":{"users":2,"sessions":2,"githubStates":1,"billingEvents":1,"billingPendingUpdates":1}},
         product_data_verified=True)
@@ -247,7 +252,7 @@ def historical_journal(sql, baseline):
 
 
 def preserved(before, after):
-    for key in ("scope","schema_upgrade","state_record_migration","state_storage_version"):
+    for key in ("scope","schema_upgrade","schema_upgrade_v6","state_record_migration","state_storage_version"):
         assert after[key]==before[key]
     assert after["evidence"][:len(before["evidence"])]==before["evidence"]
     assert all(after[key]>=before[key] for key in COUNTERS)
@@ -262,7 +267,7 @@ class Default(WorkerEntrypoint):
         path = str(request.url).rsplit("/",1)[-1]
         if path not in {"setup","upgrade","restart","rollback"} or request.method!="POST":
             return Response.json({"error":"NOT_FOUND"},status=404)
-        name = "local-blank-rollback-fixture" if path=="rollback" else "local-blank-main-fixture"
+        name = "local-recurring-rollback-fixture" if path=="rollback" else "local-recurring-main-fixture"
         return await self.env.FIXTURE_JOURNAL.get(self.env.FIXTURE_JOURNAL.idFromName(name)).fetch(request)
 
 
@@ -276,65 +281,57 @@ class FixtureJournal(DurableObject):
         if path=="setup":
             baselines = []
             for item in (native,ObservedD1(self.env.ROLLBACK_DB,"rollback")):
-                await execute(item,[(sql,()) for sql in V5_SCHEMA_SQL])
+                await execute(item,[(sql,()) for sql in V6_SCHEMA_SQL])
                 await execute(item,seed_commands())
                 value = await snapshot(item)
-                assert value["schemaObjects"]==V5_SCHEMA_OBJECTS
+                assert value["schemaObjects"]==V6_SCHEMA_OBJECTS
                 baselines.append(value)
             assert baselines[0]["tables"]==baselines[1]["tables"]
             historical_journal(self.ctx.storage.sql,baselines[0])
             await save_fixture(self.ctx.storage,"fixtureBaseline",baselines[0])
-            return Response.json({"passed":True,"v5Fingerprint":V5_SCHEMA_FINGERPRINT,
+            return Response.json({"passed":True,"v6Fingerprint":V6_SCHEMA_FINGERPRINT,
                 "twoFreshLocalBindings":True,"syntheticPriorJournal":True,
                 "foreignKeysEnabled":True,"tables":baselines[0]["tables"],
-                "schemaObjects":len(V5_SCHEMA_OBJECTS),"fixtureSeedStatementsPerBinding":len(seed_commands()),
+                "schemaObjects":len(V6_SCHEMA_OBJECTS),"fixtureSeedStatementsPerBinding":len(seed_commands()),
                 "fixtureSeedOutsideMigrationJournal":True})
         if path=="upgrade":
             journal = BudgetJournal(self.ctx.storage.sql,preview_product=True,product_operations=True)
             baseline = await load_fixture(self.ctx.storage,"fixtureBaseline")
             before = journal.snapshot()
             start = len(native.groups)
-            await upgrade_product_schema_v6(native,journal)
+            await upgrade_product_schema_v7(native,journal)
             after = journal.snapshot()
             migration_groups = native.groups[start:]
             preserved(before,after)
-            assert SCHEMA_VERSION==6 and after["schema_version"]==6
+            assert SCHEMA_VERSION==7 and after["schema_version"]==7
             assert after["schema_fingerprint"]==SCHEMA_FINGERPRINT
-            assert after["schema_upgrade_v6"]["complete"] is True
-            assert after["cases"]["product-schema-v5-to-v6"]==1
+            assert after["schema_upgrade_v7"]["complete"] is True
+            assert after["cases"]["product-schema-v6-to-v7"]==1
             assert after["active"] is None and after["stopped"] is None
             assert after["actual_read"]-before["actual_read"]==sum(item["rowsRead"] for item in migration_groups)
             assert after["actual_written"]-before["actual_written"]==sum(item["rowsWritten"] for item in migration_groups)
             verified = await snapshot(native)
             assert verified["tables"]==baseline["tables"]
             assert verified["schemaObjects"]==SCHEMA_OBJECTS
-            ticket = journal.begin_product(now=time.time())
-            meter = ProductMeteredD1(native,journal,ticket)
-            await meter.batch([meter.prepare("""INSERT INTO ledger_projects(id,owner_id,github_repo_id,
-                github_full_name,name,description,created_at,updated_at) VALUES(?,?,NULL,NULL,?,?,?,?)""").bind(
-                    identity,OWNER,name,"Blank native fixture","local","local")
-                for identity,name in (("prj_blank_one","Blank one"),("prj_blank_two","Blank two"))])
-            journal.finish(ticket,now=time.time())
-            final = journal.snapshot()
-            assert final["product_data"]["rows"]["ledger_projects"]==5
-            assert final["product_data"]["rows"]["ledger_project_repositories"]==4
+            assert after["product_data"]["rows"]["expense_recurring_rules"]==0
+            assert after["product_data"]["rows"]["expense_recurring_occurrences"]==0
+            final = after
             await save_fixture(self.ctx.storage,"postUpgradeJournal",final)
             await save_fixture(self.ctx.storage,"postUpgradeTables",(await snapshot(native))["tables"])
-            return Response.json({"passed":True,"schemaVersion":6,"schemaFingerprint":SCHEMA_FINGERPRINT,
-                "all18TablesUnchangedByMigration":True,"foreignKeyViolations":0,
-                "stableProjectIDsAndEveryStoredField":True,"nullableBlankProjectsSameOwner":2,
-                "blankRepositoryRows":0,"legacyMarkersAndEvidencePreserved":True,
+            return Response.json({"passed":True,"schemaVersion":7,"schemaFingerprint":SCHEMA_FINGERPRINT,
+                "all18HistoricalTablesPreserved":True,"twoNewTablesInitiallyEmpty":True,"foreignKeyViolations":0,
+                "stableProjectIDsAndEveryStoredField":True,"oldProjectsGainNullLinks":True,"legacyMarkersAndEvidencePreserved":True,
                 "oneShotCaseCount":1,"migrationNativeBatches":migration_groups,
                 "migrationJournalActualDeltasMatchRawMeta":True,
-                "migrationWriteExecution":after["schema_upgrade_v6"].get("write_execution"),
+                "migrationWriteExecution":after["schema_upgrade_v7"].get("write_execution"),
                 "counterBefore":{key:before[key] for key in COUNTERS},
                 "counterAfter":{key:after[key] for key in COUNTERS},
-                "postBlankCounters":{key:final[key] for key in COUNTERS}})
+                "postUpgradeCounters":{key:final[key] for key in COUNTERS}})
         if path=="restart":
             journal = BudgetJournal(self.ctx.storage.sql,preview_product=True,product_operations=True)
             before = journal.snapshot()
             assert before==await load_fixture(self.ctx.storage,"postUpgradeJournal")
-            await upgrade_product_schema_v6(native,journal)
+            await upgrade_product_schema_v7(native,journal)
             assert native.dispatches==0 and journal.snapshot()==before
             value = await snapshot(native)
             assert value["tables"]==await load_fixture(self.ctx.storage,"postUpgradeTables")
@@ -355,38 +352,38 @@ class FixtureJournal(DurableObject):
                 "integrityProbeOutsideMigrationJournal":True,"schemaObjectsMatch":True})
         if path=="rollback":
             baseline = await snapshot(native)
-            assert baseline["schemaObjects"]==V5_SCHEMA_OBJECTS
+            assert baseline["schemaObjects"]==V6_SCHEMA_OBJECTS
             journal = historical_journal(self.ctx.storage.sql,baseline)
             before = journal.snapshot()
             try:
-                await upgrade_product_schema_v6(native,journal)
+                await upgrade_product_schema_v7(native,journal)
             except BudgetError as error:
                 assert str(error)=="D1_OUTCOME_UNKNOWN"
             else:
                 raise AssertionError("Injected native failure unexpectedly completed")
             after = journal.snapshot()
-            assert after["stopped"]=="D1_OUTCOME_UNKNOWN" and after["schema_version"]==5
-            assert after["schema_upgrade_v6"]["complete"] is False
+            assert after["stopped"]=="D1_OUTCOME_UNKNOWN" and after["schema_version"]==6
+            assert after["schema_upgrade_v7"]["complete"] is False
             assert after["reserved_read"]>before["reserved_read"]
             assert after["reserved_written"]>before["reserved_written"]
             preserved(before,after)
             value = await snapshot(native)
-            assert value["tables"]==baseline["tables"] and value["schemaObjects"]==V5_SCHEMA_OBJECTS
-            assert any(item["injectedAfterParentDrop"] for item in native.failed)
+            assert value["tables"]==baseline["tables"] and value["schemaObjects"]==V6_SCHEMA_OBJECTS
+            assert any(item["injectedAfterEventDrop"] for item in native.failed)
             reconstructed = BudgetJournal(self.ctx.storage.sql,preview_product=True,product_operations=True)
             stopped = reconstructed.snapshot()
             before_dispatches = native.dispatches
             try:
-                await upgrade_product_schema_v6(native,reconstructed)
+                await upgrade_product_schema_v7(native,reconstructed)
             except BudgetError:
                 pass
             else:
                 raise AssertionError("Unknown native outcome was admitted for retry")
             assert native.dispatches==before_dispatches and reconstructed.snapshot()==stopped
             assert stopped["stopped"]=="D1_OUTCOME_UNKNOWN"
-            return Response.json({"passed":True,"injectedAfterParentDrop":True,
+            return Response.json({"passed":True,"injectedAfterEventDrop":True,
                 "entireAtomicBatchRolledBack":True,"all18TableDigestsAndIndexesPreserved":True,
-                "foreignKeysEnabled":True,"foreignKeyViolations":0,"schemaVersionRetained":5,
+                "foreignKeysEnabled":True,"foreignKeyViolations":0,"schemaVersionRetained":6,
                 "unknownOutcomeStopRetained":True,"reconstructedJournalNoRetryDispatches":0,
                 "fullReadWriteReservationRetained":True,"failedBatchNativeResultsUnavailable":True,
                 "counterBefore":{key:before[key] for key in COUNTERS},
@@ -407,7 +404,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--port", type=int, default=8906)
+    parser.add_argument("--port", type=int, default=8907)
     args = parser.parse_args()
     directory = args.run_dir.resolve()
     if not directory.is_relative_to(Path("/workspace")) or not 1024 <= args.port <= 64535:
@@ -420,14 +417,18 @@ def main():
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     shutil.copytree(WORKER / "python_modules", directory / "python_modules",
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    config = {"name": "pullwise-blank-schema-native-local-only", "main": "src/entry.py",
+    # Keep the fixture's Worker dependencies and lock identical to the release,
+    # including the pinned IANA tzdata package used by recurring execution.
+    for name in ("pyproject.toml", "uv.lock"):
+        shutil.copy2(WORKER / name, directory / name)
+    config = {"name": "pullwise-recurring-schema-native-local-only", "main": "src/entry.py",
         "compatibility_date": "2026-09-23", "compatibility_flags": ["python_workers"],
         "workers_dev": False, "preview_urls": False, "routes": [],
         "vars": {"PULLWISE_MODE": "local", "PULLWISE_D1_ACCESS_ENABLED": "1"},
         "d1_databases": [{"binding": binding, "database_name": name,
             "database_id": identity, "remote": False} for binding, name, identity in (
-                ("DB", "blank-schema-main-local-only", "00000000-0000-0000-0000-000000000016"),
-                ("ROLLBACK_DB", "blank-schema-rollback-local-only", "00000000-0000-0000-0000-000000000017"))],
+                ("DB", "recurring-schema-main-local-only", "00000000-0000-0000-0000-000000000018"),
+                ("ROLLBACK_DB", "recurring-schema-rollback-local-only", "00000000-0000-0000-0000-000000000019"))],
         "durable_objects": {"bindings": [{"name": "FIXTURE_JOURNAL", "class_name": "FixtureJournal"}]},
         "migrations": [{"tag": "local-fixture-v1", "new_sqlite_classes": ["FixtureJournal"]}]}
     config_path = directory / "wrangler.jsonc"
@@ -447,13 +448,14 @@ def main():
     files = sorted((source / "pullwise_server").glob("*.py"))
     manifest = [(str(path.relative_to(source)), sha256(path)) for path in files]
     d1_source = WORKER / "node_modules/miniflare/dist/src/workers/d1/database.worker.js"
-    evidence = {"passed": False, "date": "2026-10-07", "localOnly": True,
+    evidence = {"passed": False, "date": "2026-10-08", "localOnly": True,
         "nativePythonFFI": True, "nativeDurableObjectSQLite": True, "syntheticPriorJournal": True,
         "remoteRequests": 0, "remoteD1Operations": 0, "realProviderRequests": 0,
         "realAccounts": 0, "realPayments": 0, "clientRetries": 0, "localHttpCap": len(HTTP_PATHS),
         "nativeAttemptsFabricated": False, "fixtureBindingCount": 2,
         "canonicalSourceTreeSha256": hashlib.sha256(json.dumps(manifest, separators=(",", ":")).encode()).hexdigest(),
         "canonicalSourceFileCount": len(files), "fixtureEntrySha256": sha256(source / "entry.py"),
+        "dependencySha256": {name: sha256(directory / name) for name in ("pyproject.toml", "uv.lock")},
         "sourceSha256": {str(path.relative_to(source)): sha256(path) for path in files
             if path.name in {"cloudflare_preview_schema.py", "cloudflare_preview_budget.py",
                 "cloudflare_validation_budget.py", "cloudflare_native_d1.py", "cloudflare_state_records.py"}},
@@ -532,10 +534,10 @@ def main():
                 process.wait(timeout=5)
         groups, failures = [], []
         for line in log_path.read_text(errors="replace").splitlines() if log_path.exists() else []:
-            if line.startswith('{"nativeBlankSchemaMeta":'):
-                groups.append(json.loads(line)["nativeBlankSchemaMeta"])
-            elif line.startswith('{"nativeBlankSchemaFailure":'):
-                failures.append(json.loads(line)["nativeBlankSchemaFailure"])
+            if line.startswith('{"nativeRecurringSchemaMeta":'):
+                groups.append(json.loads(line)["nativeRecurringSchemaMeta"])
+            elif line.startswith('{"nativeRecurringSchemaFailure":'):
+                failures.append(json.loads(line)["nativeRecurringSchemaFailure"])
         evidence.update(localHttpRequestsAttempted=attempted, localHttpRequestsCompleted=len(results),
             runtimeProcessesStarted=processes_started, actualProcessRestarts=max(0, processes_started - 1),
             nativeResultStatements=sum(group["statements"] for group in groups),

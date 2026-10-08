@@ -17,7 +17,7 @@ from .json_input import validate_json_unicode
 from .cloudflare_state_records import record_name
 from .cloudflare_project_repositories import (
     MAX_REPOSITORIES, bound_repository_dto, live_repository_access, project_input,
-    repository_snapshot_values, standalone_project,
+    project_url, repository_snapshot_values, standalone_project,
 )
 
 
@@ -84,6 +84,7 @@ def _project(row: dict, allowed_repos: dict[int, dict], totals: list[dict], gith
                 "type": "Organization", "githubAccess": "authorized" if organization else github_access}
                 if organization_id is not None else None,
             "description": row["description"],
+            "developmentUrl": row.get("development_url"), "productUrl": row.get("product_url"),
             "status": row["status"], "githubAccess": state,
             "canCreateExpense": row["status"] == "active" and (standalone or authorized > 0),
             "revision": row["revision"], "totals": [{"currency": total["currency"],
@@ -217,6 +218,10 @@ async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path
         from .cloudflare_ledger_reports import handle_report_request
         return await handle_report_request(binding=binding, method=method, path=path,
             headers=headers, params=params, now=now)
+    if path == "/api/v1/expense-recurring-rules" or path.startswith("/api/v1/expense-recurring-rules/"):
+        from .cloudflare_ledger_recurring import handle_recurring_request
+        return await handle_recurring_request(binding=binding, gateway=gateway,
+            method=method, path=path, headers=headers, params=params, body=body, now=now)
     if path.startswith("/api/v1/expenses"):
         from .cloudflare_ledger_expenses import handle_expense_request
         try:
@@ -261,6 +266,8 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
             return _error(422, "INVALID_INPUT")
         if "name" in body:
             body = {**body, "name": body["name"].strip()}
+        body = {**body, **{field: project_url(body[field])
+            for field in ("developmentUrl", "productUrl") if field in body}}
     if method == "GET":
         if item_id:
             user, _, auth, validate = await ledger_principal(binding=binding, headers=headers,
@@ -377,10 +384,11 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
         repo_id = selected[0] if selected else None
         commands = [_write_guard(binding, proof, user["id"], now),
             binding.prepare("""INSERT INTO ledger_projects(id,owner_id,github_repo_id,
-                github_full_name,description,status,revision,created_at,updated_at,name,github_organization_id)
-                VALUES(?,?,?,?,?,'active',1,?,?,?,?)""").bind(project_id, user["id"], repo_id,
+                github_full_name,description,status,revision,created_at,updated_at,name,github_organization_id,
+                development_url,product_url)
+                VALUES(?,?,?,?,?,'active',1,?,?,?,?,?,?)""").bind(project_id, user["id"], repo_id,
                     repos[repo_id]["fullName"] if repo_id is not None else None, body.get("description", ""), stamp, stamp,
-                    body.get("name", ""), organization_id),
+                    body.get("name", ""), organization_id, body.get("developmentUrl"), body.get("productUrl")),
             *_insert_repository_bindings(binding, user["id"], project_id, selected, repos, stamp),
             binding.prepare("DELETE FROM d1_command_guard")]
         try:
@@ -391,16 +399,20 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
             return _error(409, "PROJECT_CONFLICT")
         return 201, _project({"id": project_id, "github_repo_id": repo_id,
             "name": body.get("name", ""), "github_organization_id": organization_id,
+            "development_url": body.get("developmentUrl"), "product_url": body.get("productUrl"),
             "description": body.get("description", ""), "status": "active", "revision": 1}, repos, [],
             bindings=[{"github_repo_id": value} for value in selected], organizations=organizations)
     repo_id = (selected[0] if selected else None) if selected is not None else existing["github_repo_id"]
     full_name = (repos[repo_id]["fullName"] if repo_id is not None else None) if selected is not None else existing["github_full_name"]
     commands = [_write_guard(binding, proof, user["id"], now),
         binding.prepare("""UPDATE ledger_projects SET name=?,github_organization_id=?,
-            github_repo_id=?,github_full_name=?,description=?,status=?,revision=revision+1,
+            github_repo_id=?,github_full_name=?,description=?,development_url=?,product_url=?,
+            status=?,revision=revision+1,
             updated_at=? WHERE id=? AND owner_id=? AND revision=?""").bind(
             body.get("name", existing["name"]), organization_id, repo_id, full_name,
-            body.get("description", existing["description"]), status, stamp, item_id,
+            body.get("description", existing["description"]),
+            body.get("developmentUrl", existing.get("development_url")),
+            body.get("productUrl", existing.get("product_url")), status, stamp, item_id,
             user["id"], expected),
         binding.prepare("INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN changes()=1 THEN 1 ELSE 0 END)")]
     if selected is not None:
@@ -421,6 +433,8 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
             return _error(409, "PROJECT_CONFLICT")
         return _error(412, "PRECONDITION_FAILED")
     updated = {**existing, "description": body.get("description", existing["description"]),
+        "development_url": body.get("developmentUrl", existing.get("development_url")),
+        "product_url": body.get("productUrl", existing.get("product_url")),
         "name": body.get("name", existing["name"]), "github_organization_id": organization_id,
         "github_repo_id": repo_id, "status": status, "revision": expected + 1}
     bindings = [{"github_repo_id": value} for value in selected] if selected is not None else current_bindings

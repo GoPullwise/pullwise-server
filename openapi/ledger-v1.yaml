@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Pullwise Project Expense Ledger API
-  version: 0.3.0
+  version: 0.4.0
   description: |
     Current ledger contract for Pullwise, the project expense tracker for
     developers and teams at pull-wise.com. Users and authorized API clients
@@ -24,6 +24,13 @@ info:
     is shared across projects in a ledger, never publicly accessible. AI assistance
     depends on the ledger owner's Max plan, current activation and usage budget;
     an explicit category permits manual entry when assistance is unavailable.
+    Project development and product links are optional absolute HTTP(S) URLs.
+    Recurring expense rules require a cookie session and explicit expense-write
+    authority; API keys cannot create persistent background authority. Each
+    generated occurrence uses the current ledger owner's plan and the rule
+    saved execution actor's current membership and GitHub access. A rule records one ordinary
+    expense per calendar period without making a payment or extending a
+    subscription. Stopping a rule preserves its previously recorded expenses.
 servers:
   - url: /
 security:
@@ -291,6 +298,85 @@ paths:
         '204': {description: Removed or already removed within the same authorized ledger}
         '404': {$ref: '#/components/responses/NotFound'}
         '412': {$ref: '#/components/responses/PreconditionFailed'}
+  /api/v1/expense-recurring-rules:
+    get:
+      operationId: listRecurringExpenseRules
+      x-pullwise-scope: expenses:read
+      security: [{cookieSession: []}]
+      description: Current ledger rules excluding canceled entries. Reads never generate expenses. All current ledger members with expense-read authority can inspect rules.
+      parameters: [{$ref: '#/components/parameters/Target'}, {$ref: '#/components/parameters/ProjectId'}, {$ref: '#/components/parameters/Limit'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
+      responses:
+        '200': {description: Paginated rules, content: {application/json: {schema: {$ref: '#/components/schemas/RecurringExpensePage'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {$ref: '#/components/responses/InvalidInput'}
+    post:
+      operationId: createRecurringExpenseRule
+      x-pullwise-scope: expenses:write
+      security: [{cookieSession: []}]
+      description: |
+        Create an automation with an explicit existing active category and a
+        currently authorized project/shared target. The creating session user
+        is initially its execution actor; session tokens are never stored in the rule.
+        At most 100 noncanceled rules per ledger is an operational bound,
+        independent of the owner's paid plan. An exact repeated creation key
+        replays its original DTO; different input with that key conflicts.
+        Creation keys remain scoped to the original creating user even if a
+        later authorized edit or resume changes the saved execution actor.
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RecurringExpenseInput'}}}}
+      responses:
+        '201': {description: Created rule or exact original creation response replayed, content: {application/json: {schema: {$ref: '#/components/schemas/RecurringExpenseRule'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/InvalidInput'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+  /api/v1/expense-recurring-rules/{id}:
+    parameters: [{$ref: '#/components/parameters/Id'}]
+    get:
+      operationId: getRecurringExpenseRule
+      x-pullwise-scope: expenses:read
+      security: [{cookieSession: []}]
+      parameters: [{$ref: '#/components/parameters/WorkspaceHeader'}]
+      responses:
+        '200': {description: Authorized rule, content: {application/json: {schema: {$ref: '#/components/schemas/RecurringExpenseRule'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      operationId: updateRecurringExpenseRule
+      x-pullwise-scope: expenses:write
+      security: [{cookieSession: []}]
+      description: |
+        Pause or resume with a status-only body, or replace the complete
+        template and calendar. The target is immutable. A complete edit or
+        explicit resume rechecks the current session user's write and project
+        access, then makes that user the saved execution actor. The original
+        creation key and replay response remain immutable.
+        Canceled rules cannot resume. Changes affect future occurrences only;
+        after an edit/resume the next occurrence is strictly after the current
+        date in the rule's timezone. Pausing remains available when commercial
+        write allowances are exhausted, with all role and revision guards.
+      parameters: [{$ref: '#/components/parameters/IfMatch'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
+      requestBody: {required: true, content: {application/json: {schema: {oneOf: [{$ref: '#/components/schemas/RecurringExpenseInput'}, {type: object, additionalProperties: false, required: [status], properties: {status: {type: string, enum: [active, paused]}}}]}}}}
+      responses:
+        '200': {description: Updated rule, content: {application/json: {schema: {$ref: '#/components/schemas/RecurringExpenseRule'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '428': {description: If-Match is required}
+        '422': {$ref: '#/components/responses/InvalidInput'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+    delete:
+      operationId: cancelRecurringExpenseRule
+      x-pullwise-scope: expenses:write
+      security: [{cookieSession: []}]
+      description: Permanently cancel automation while retaining all generated expense and occurrence history. This remains available after commercial quota exhaustion.
+      parameters: [{$ref: '#/components/parameters/IfMatch'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
+      responses:
+        '204': {description: Canceled}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '428': {description: If-Match is required}
   /api/v1/reports/summary:
     get:
       operationId: getLedgerSummary
@@ -494,6 +580,8 @@ components:
           description: Omit or use an empty array for a standalone project with a nonblank name. A nonempty set explicitly selects currently actor-authorized repositories; a repository belongs to one project per ledger, including archived projects. Cross-organization selections are allowed.
         name: {type: string, maxLength: 120, description: Financial project name that persists independently of GitHub grants. Required and nonblank for standalone projects; optional for compatible repository-backed creation.}
         description: {type: string, maxLength: 2000}
+        developmentUrl: {$ref: '#/components/schemas/ProjectUrl'}
+        productUrl: {$ref: '#/components/schemas/ProjectUrl'}
         githubOrganizationId: {type: [integer, 'null'], minimum: 1, maximum: 9007199254740991, description: Optional association on a repository-backed project, verified against current actor installation account metadata; never selects all organization repositories. Must be absent or null on standalone creation.}
     ProjectPatch:
       type: object
@@ -518,7 +606,15 @@ components:
         name: {type: string, maxLength: 120, description: The final name must be nonblank when no repositories are linked; omission retains the existing name.}
         githubOrganizationId: {type: [integer, 'null'], minimum: 1, maximum: 9007199254740991}
         description: {type: string, maxLength: 2000}
+        developmentUrl: {$ref: '#/components/schemas/ProjectUrl'}
+        productUrl: {$ref: '#/components/schemas/ProjectUrl'}
         status: {type: string, enum: [active, archived]}
+    ProjectUrl:
+      type: [string, 'null']
+      minLength: 1
+      maxLength: 2048
+      pattern: '^[Hh][Tt][Tt][Pp][Ss]?://'
+      description: Absolute HTTP(S) URL, at most 2048 UTF-8 bytes. Server rejects missing/invalid hosts or ports, userinfo, whitespace, control characters and backslashes. Null clears the link; omission preserves it on PATCH and defaults to null on POST. Empty strings are invalid. Development/product links are ledger metadata and never grant repository access.
     BoundRepository:
       type: object
       required: [githubRepoId, githubFullName, githubAccess, installationId, account]
@@ -539,7 +635,7 @@ components:
         githubAccess: {type: string, enum: [authorized, lost, reauthorization_required, unavailable]}
     Project:
       type: object
-      required: [id, name, githubRepoId, githubRepoIds, repositories, githubOrganizationId, githubOrganization, description, status, githubAccess, canCreateExpense, revision, totals]
+      required: [id, name, githubRepoId, githubRepoIds, repositories, githubOrganizationId, githubOrganization, description, developmentUrl, productUrl, status, githubAccess, canCreateExpense, revision, totals]
       properties:
         id: {type: string}
         name: {type: string, maxLength: 120}
@@ -551,6 +647,8 @@ components:
           oneOf: [{$ref: '#/components/schemas/ProjectOrganization'}, {type: 'null'}]
         githubFullName: {type: [string, 'null'], description: Compatibility anchor name from the actor's current grant; ledger financial history remains available}
         description: {type: string}
+        developmentUrl: {$ref: '#/components/schemas/ProjectUrl'}
+        productUrl: {$ref: '#/components/schemas/ProjectUrl'}
         status: {type: string, enum: [active, archived]}
         githubAccess: {type: string, enum: [not_linked, authorized, partial, lost, reauthorization_required, unavailable], description: not_linked identifies an explicitly standalone project, with null GitHub anchor and organization and empty repository arrays; loss or unavailability of a bound grant never implicitly disconnects a project.}
         canCreateExpense: {type: boolean, description: Active standalone project, or an active repository-backed project with at least one bound repository currently authorized to the actor. Ledger role, key target scopes and plan limits still apply. Historical edits and deletion do not require a live GitHub grant.}
@@ -590,6 +688,73 @@ components:
         note: {type: [string, 'null'], maxLength: 4000}
         quantity: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$'}
         unit: {type: [string, 'null'], maxLength: 40}
+    RecurringExpenseSchedule:
+      type: object
+      additionalProperties: false
+      required: [frequency, timezone, startOn]
+      description: |
+        Calendar in a validated IANA timezone. Weekly weekday is ISO Monday=1
+        through Sunday=7. Quarterly quarterMonth is 1, 2 or 3 within each
+        calendar quarter. Days beyond a month's length use its final day;
+        February 29 therefore becomes February 28 in a nonleap year.
+        The occurrence becomes due at local midnight or the first valid
+        instant after a timezone gap. Start and optional end dates are
+        inclusive. Each period posts once; delayed dispatch catches up under
+        a bounded hourly tick without charging a card or polling the client.
+      properties:
+        frequency: {type: string, enum: [weekly, monthly, quarterly, yearly]}
+        timezone: {type: string, minLength: 1, maxLength: 100, description: Valid IANA zone available to the runtime, for example Asia/Shanghai or UTC}
+        startOn: {type: string, format: date}
+        endOn: {type: [string, 'null'], format: date, description: Inclusive last eligible business date; must be on or after startOn}
+        weekday: {type: integer, minimum: 1, maximum: 7}
+        day: {type: integer, minimum: 1, maximum: 31}
+        quarterMonth: {type: integer, minimum: 1, maximum: 3}
+        month: {type: integer, minimum: 1, maximum: 12}
+      allOf:
+        - if: {properties: {frequency: {const: weekly}}}
+          then: {required: [weekday], not: {anyOf: [{required: [day]}, {required: [quarterMonth]}, {required: [month]}]}}
+        - if: {properties: {frequency: {const: monthly}}}
+          then: {required: [day], not: {anyOf: [{required: [weekday]}, {required: [quarterMonth]}, {required: [month]}]}}
+        - if: {properties: {frequency: {const: quarterly}}}
+          then: {required: [day, quarterMonth], not: {anyOf: [{required: [weekday]}, {required: [month]}]}}
+        - if: {properties: {frequency: {const: yearly}}}
+          then: {required: [day, month], not: {anyOf: [{required: [weekday]}, {required: [quarterMonth]}]}}
+    RecurringExpenseFields:
+      type: object
+      required: [target, amount, currency, categoryId, purpose, schedule]
+      properties:
+        target: {$ref: '#/components/schemas/Target'}
+        amount: {type: string, pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$', description: Same currency-exponent and integer bounds as an ordinary expense}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        categoryId: {type: string, minLength: 1, description: Explicit existing active category; no automatic model selection during background execution}
+        purpose: {type: string, minLength: 1, maxLength: 500}
+        note: {type: [string, 'null'], maxLength: 4000}
+        quantity: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$'}
+        unit: {type: [string, 'null'], maxLength: 40}
+        schedule: {$ref: '#/components/schemas/RecurringExpenseSchedule'}
+    RecurringExpenseInput:
+      allOf: [{$ref: '#/components/schemas/RecurringExpenseFields'}]
+      unevaluatedProperties: false
+    RecurringExpenseRule:
+      allOf:
+        - {$ref: '#/components/schemas/RecurringExpenseFields'}
+        - type: object
+          required: [id, status, revision, nextOccurrenceOn, nextRunAt, blockedCode, createdAt, updatedAt]
+          properties:
+            id: {type: string}
+            status: {type: string, enum: [active, paused, blocked, completed, canceled]}
+            revision: {type: integer, minimum: 1, maximum: 9007199254740991}
+            nextOccurrenceOn: {type: [string, 'null'], format: date}
+            nextRunAt: {type: [integer, 'null'], minimum: 0, maximum: 9007199254740991, description: UTC epoch seconds for the next due occurrence}
+            blockedCode: {type: [string, 'null'], maxLength: 80, description: Current authorization, target, category or plan stop reason; blocked rules do not keep executing automatically}
+            createdAt: {type: string, format: date-time}
+            updatedAt: {type: string, format: date-time}
+    RecurringExpensePage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/RecurringExpenseRule'}}
+        nextCursor: {type: [string, 'null']}
     ExpensePatchInput:
       allOf:
         - {$ref: '#/components/schemas/ExpenseInput'}
