@@ -21,6 +21,21 @@ sandbox test run lacked loopback socket permission; the complete suite passes
 with that permission enabled. No remote business request or database operation
 is part of this audit. Preview publication is recorded separately below.
 
+Preview source commit `9349b48eb043d9b0dc566cae15a63265b7db510f` is published
+as version `ead2b046-b7df-4869-b8d3-c5dbb84e33f1` at `preview-api.pull-wise.com`.
+Management readback confirms 100% traffic, the original database/budget namespace,
+existing runtime settings and `python_workers` compatibility. All 48 audited
+Server source modules remain unchanged. An initial upload using an external
+config directory omitted the managed SDK and was rejected before publication;
+the identical overlay in the Python project directory packages the SDK and
+publishes successfully. No dependency/SDK upgrade, schema migration or remote
+business request was used; the temporary config is removed and pylock restored.
+The companion [release evidence](../../../pullwise-web/docs/validation/copy-audit-preview-release-2026-10-08.json)
+records both versions and the Cloudflare 1010 block on Web's finite static check.
+Public-page and real-payment acceptance are not established by deployment
+management readback. Production stays paused. These evidence updates are
+documentation-only and require no further deployment.
+
 ## Final real REST and temporary-key acceptance (2026-10-07)
 
 [DFerryman's consented real preview run](rest-final-real-preview-2026-10-07.json)
