@@ -24,7 +24,8 @@ Organization permissions → Members → Read-only。如未来读取私有邮箱
 这些功能当前未实现，不是本版安装要求。GitHub App user token 使用 App 的
 fine-grained permissions；旧授权 URL 的 OAuth scope 字符串不会额外赋权。
 
-还需在目标 Organization 安装 App，并选择需要使用的仓库。
+如需关联目标 Organization 的仓库，还需在该 Organization 安装 App，
+并选择需要使用的仓库。独立项目不需要仓库安装或 Organization 关联。
 Only select repositories 可以限制安装范围；All repositories 由组织策略决定。
 Organization Owner 可安装或批准请求，也可限制仓库管理员的安装权限。
 如 App 要安装到注册账户之外的账户或组织，注册设置

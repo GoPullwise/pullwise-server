@@ -1,8 +1,8 @@
-# Pullwise 转型设计：GitHub 项目支出记账
+# Pullwise 产品设计：面向开发者与团队的项目支出账本
 
-状态：当前产品设计，更新于 2026-10-07。本文描述产品契约和实施边界，运行验收状态见两端验证记录。本文中的“项目”是有稳定 project ID 的记账项目，可以没有 GitHub 关联；也可显式关联 1–30 个已授权 repositories，并可选关联 Organization，不是 GitHub Projects 看板。前端 `pullwise-web` 与后端 `pullwise-server` 仍为独立部署单元。
+状态：当前产品设计，文案核对于 2026-10-08。产品名称统一为 **Pullwise**，域名为 **pull-wise.com**；对外定位为“面向开发者与团队的项目支出账本”。本文描述产品契约和实施边界，运行验收状态见两端验证记录。本文中的“项目”是有稳定 project ID 的记账项目，可以没有 GitHub 关联；也可显式关联 1–30 个已授权 repositories，并可选关联 Organization，不是 GitHub Projects 看板。前端 `pullwise-web` 与后端 `pullwise-server` 仍为独立部署单元。
 
-当前实施状态（2026-10-07）：独立空白项目已实现、验收并发布 Preview；项目名称必填，GitHub 仓库与 Organization 关联可选。当前数据库 v6 的一次升级沿用原数据库、协调器和累计用量记录。前端 476 项、后端 1,015 项测试及原生 Worker/浏览器验收通过；最终 DFerryman REST 与临时 token 撤销有独立验收记录。运行事实见两端 `docs/validation/local-acceptance.md`，产品规则见[项目需求](../../planning/project-repositories.md)。
+当前实施状态（2026-10-07）：独立空白项目已实现、验收并发布 Preview；独立项目名称必填，GitHub 仓库与 Organization 关联可选，兼容仓库关联创建的 API 可省略名称。当前数据库 v6 的一次升级沿用原数据库、协调器和累计用量记录。前端 476 项、后端 1,015 项测试及原生 Worker/浏览器验收通过；最终 DFerryman REST 与临时 token 撤销有独立验收记录。运行事实见两端 `docs/validation/local-acceptance.md`，产品规则见[项目需求](../../planning/project-repositories.md)。
 
 历史实施状态（2026-09-28）：当时原 S01–S16 已本地实现，S17 Worker/CSV 和 S18 Preview/提供商验收尚未完成。这是当时的阶段记录，当前证据以两端 `docs/validation/local-acceptance.md` 为准。
 
@@ -12,9 +12,9 @@
 
 账本/workspace ID 沿用现有 `owner_id`。个人账本保留隐式 Owner；显式邀请 Admin/Editor/Viewer 后分享同一账本所有当前和未来财务数据，邀请创建与接受均提示此范围，不复制或重写历史。邀请绑定稳定 GitHub user ID、24 小时有效、token 只返回一次且只存 hash。GitHub Organization 成员资格不授予账本角色。Owner/Admin 管理项目与类别，Owner 管理 Admin，Admin 只管理 Editor/Viewer，Viewer 只读。账本配额、套餐与模型预算统一归 Owner；成员个人订阅和账本独立。
 
-账户还有一个独立的**公共支出池**：例如一份供多个项目使用的 coding agent 订阅。公共支出只入公共池，不复制、不隐式摊入任何项目。项目报表只汇总该项目的支出；账户总览分别显示项目支出合计、公共池合计以及二者之和，避免重复计数。若将来需要分摊，应另做显式、可追溯的分摊功能，而不修改原始公共记录的归属。
+每个账本还有一个独立的**公共支出池**：例如一份供多个项目使用的 coding agent 订阅。“公共”表示供多个项目共同使用，不表示对互联网公开；数据仅按账本角色及 API Key 范围可见。公共支出只入公共池，不复制、不隐式摊入任何项目。项目报表只汇总该项目的支出；账本总览分别显示项目支出合计、公共池合计以及二者之和，避免重复计数。若将来需要分摊，应另做显式、可追溯的分摊功能，而不修改原始公共记录的归属。
 
-现有 Creem 支付是用户购买 Pullwise 服务的**平台账单**，用户填写的项目支出是**业务记账数据**。两者必须使用不同表、API、导航和文案；平台支付不会自动成为项目支出。保留既有支付交易事实、订阅历史、Webhook 验签及幂等处理，产品套餐权益改为适合记账服务的项目数、记录数或 Jev 辅助次数，具体价格和限额须在实施前与运营配置对齐。核心手工记账和报表不依赖 Jev。
+现有 Creem 支付是用户购买 Pullwise 服务的**平台账单**，用户或授权 API 客户端录入的项目支出是**业务记账数据**。两者使用不同表、API、导航和文案；平台支付不会自动成为项目支出。当前不自动导入银行、支付账户或供应商交易，不提供自动分摊、换汇、报税或会计意见。保留既有支付交易事实、订阅历史、Webhook 验签及幂等处理；套餐权益以当前项目数、存储记录数、写入额度和 Jev 辅助预算配置为准，价格以已核实的 Creem 商品为准。核心手工记账和报表不依赖 Jev。
 
 ## 2. 当前实现入口
 
@@ -26,7 +26,7 @@
 | 仓库关联 | `cloudflare_project_repositories.py`、`cloudflare_ledger_api.py`；实际操作成员 GitHub 授权 |
 | 报表与导出 | `cloudflare_ledger_reports.py`；CSV 每页 250 条，Preview 在预算 ticket 内完成物化 |
 | 平台支付 | `cloudflare_billing_*`、`cloudflare_creem_*`、`cloudflare_account_adapter.py`；支付事实与支出分离 |
-| 可选建议 | `cloudflare_ledger_suggestions.py`、`cloudflare_jev_gateway.py`、`typesafe_client.py`；默认关闭 |
+| 可选建议 | `cloudflare_ledger_suggestions.py`、`cloudflare_jev_gateway.py`、`typesafe_client.py`；仅 Max 及开启的运行环境可用，Preview 已启用、生产关闭 |
 | Web | `src/api/ledger.js`、`src/screens/ledger.jsx`、账户/支付页面及 `worker.js` 同源代理 |
 
 ## 3. 目标架构
@@ -42,7 +42,7 @@ flowchart LR
     S -. Max 正常保存时辅助 .-> J[Jev]
 ```
 
-- Web 只调用 Server REST API；浏览器不持有 GitHub App 私钥、Creem 密钥、Jev 密钥或 API Key。沿用 `worker.js` 的同源代理与 `/api` 前缀剥离规则，Cookie 登录通过 `/api/auth/*`；脚本可直连 Server `/api/v1/*`，使用 `Authorization: Bearer pwk_…`。
+- Web 只调用 Server REST API；浏览器不持有 GitHub App 私钥、Creem 密钥或 Jev 密钥。新建 API Key 的 token 仅在创建响应中显示一次，后端只保存 hash；用户可复制给自己的脚本。沿用 `worker.js` 的同源代理与 `/api` 前缀剥离规则，Cookie 登录通过 `/api/auth/*`；脚本可直连 Server `/api/v1/*`，使用 `Authorization: Bearer pwk_…`。
 - Server 负责认证、workspace 成员角色、GitHub 仓库资格、输入校验、D1 事务、金额汇总、平台支付和可选建议。所有记账读写在服务端校验所选账本 `owner_id` 和真实 actor 的当前凭证及 membership revision，不能信任客户端传来的 owner。Cookie 默认个人账本，可用 `X-Pullwise-Workspace` 显式选择；账本共享不改变平台账单的个人身份。
 - GitHub 稳定 numeric repository/Organization ID 是外部身份；更名只影响展示。创建或修改非空仓库关联时逐仓库校验实际 actor 的 App user token，不能借用 Owner 凭证。每个仓库在同一账本最多关联一个项目，包括已归档项目；发现列表返回 `isBound`。独立项目为真实 NULL anchor、空绑定和 `not_linked` 状态，按账本权限正常记账且不请求 GitHub。对关联项目，部分失权时隐藏该仓库受保护的 GitHub 详情，历史财务记录按账本角色仍可使用；新增或移入须项目未归档且至少一个关联仓库当前对 actor 授权。未知授权结果失败关闭，不能自动变成独立项目或当作“项目金额为零”。
 - D1 使用专门的关系表和索引，不把新增支出作为整个账户 JSON 快照读写。账单表与支出表物理隔离。对一个用户读/写一个资源时，在同一请求的授权检查与数据操作中维持一致快照/事务语义。
@@ -55,7 +55,7 @@ flowchart LR
 | `ledger_project_repositories` | `owner_id`, `project_id`, `github_repo_id`, GitHub 展示快照及 installation/account 元数据；`PRIMARY KEY(project_id, github_repo_id)`、`UNIQUE(owner_id, github_repo_id)`；同一项目 0–30 个显式关联 |
 | `workspace_members` | `workspace_id`, `user_id`, `role` (`admin`/`editor`/`viewer`), `revision`, 加入/更新/移除时间；`PRIMARY KEY(workspace_id, user_id)`；Owner 为隐式身份 |
 | `workspace_invites` / `workspace_events` | 固定接收人的 GitHub ID、邀请 hash、角色、期限、状态、revision 与邀请者权限版本；成员/邀请审计记录 workspace 和真实操作成员 |
-| `expense_categories` | `id`, `owner_id`, `name`, `color?`, `archived_at`；同账户有效名称唯一；公共池和项目共用账户类别，避免同名类别拆散统计 |
+| `expense_categories` | `id`, `owner_id`, `name`, `color?`, `archived_at`；同账本有效名称唯一；公共池和项目共用账本类别，避免同名类别拆散统计 |
 | `expenses` | `id`, `owner_id`, `target_kind` (`project`/`shared`), `project_id`（共享时必须 NULL）, `category_id`, `occurred_on` (`YYYY-MM-DD`), `amount_minor`, `currency`, `purpose`, `note?`, `quantity_decimal?`, `unit?`, `revision`, timestamps, `deleted_at?`；数据库 CHECK 保证归属二选一 |
 | `expense_events` | `expense_id`, `owner_id`, `actor_kind`, `actor_id`, `action`, `before_json`, `after_json`, `created_at`；记录金额/目标/类别修改与删除，以便对账 |
 | 既有身份/平台账单 | 保留用户、Session、API Key、GitHub 安装授权、Creem 交易/订阅历史；只迁移与新权益有关的投影，不将 `processing_usage_ledger` 误用为支出账本 |
@@ -80,7 +80,7 @@ flowchart LR
 | `GET/POST /api/v1/workspaces/{workspaceId}/invites`，`DELETE /{inviteId}` | 创建 24 小时邀请、查看待接受邀请、按版本撤销 | Cookie Session |
 | `POST /api/v1/workspace-invitations/preview`、`/accept` | 固定接收人预览/单次接受，body 为 token | Cookie Session |
 | `GET /api/v1/repositories` | 当前可授权仓库的分页列表 | `projects:read` |
-| `GET /api/v1/projects`、`GET /api/v1/projects/{id}` | 我的项目及描述、GitHub 状态、逐币总额摘要 | `projects:read` |
+| `GET /api/v1/projects`、`GET /api/v1/projects/{id}` | 所选账本内有权访问的项目、描述、GitHub 状态、逐币总额摘要 | `projects:read` |
 | `POST /api/v1/projects`、`PATCH /api/v1/projects/{id}` | 非空 `name` 创建独立项目，GitHub 关联选填；`githubRepoIds` 显式选择多仓库或用空数组解除关联；描述选填，组织只随非空仓库关联；修改或归档需 `If-Match` | `projects:write`，且 Owner/Admin |
 | `GET/POST /api/v1/categories`、`PATCH/DELETE /api/v1/categories/{id}` | 自定义类别与归档 | `categories:read/write` |
 | `GET/POST /api/v1/expenses`、`GET/PATCH/DELETE /api/v1/expenses/{id}` | 项目或公共池记录；PATCH 修改已记支出，DELETE 移除并从统计排除；列表支持 `target`, `projectId`, `categoryId`, `from`, `to`, `currency`, cursor、limit 过滤 | `expenses:read/write` |
@@ -97,33 +97,33 @@ workspace-scoped Key 绑定 `workspaceId` 与当前 `workspaceMemberRevision`；
 ## 6. 前端体验
 
 1. 首页、登录和引导：说明项目记账、公共支出池与独立平台支付；登录后可切换个人/已加入账本。Owner/Admin 默认填写项目名称和可选描述即可创建，GitHub 关联为按需展开选项；不展开时不枚举仓库。需要关联时从实际 actor 的已授权仓库中多选 1–30 个，可选 Organization。未授权/授权失效指引仅影响关联能力，不阻挡独立项目。
-2. 项目总览：卡片或列表显示仓库名称、用户描述、选定区间的逐币支出；进入项目可查看日期趋势、类别分布、可筛选的支出表与新增/编辑表单。每条已记支出提供“修改”“移除”；移除需确认，成功后当前明细与各图表同步刷新，失败时保持原值并显示错误。
+2. 项目总览：卡片或列表显示项目名称、用户描述、选定区间的逐币支出；关联项目可另显示当前成员有权访问的仓库名称。进入项目可查看日期趋势、类别分布、可筛选的支出表与新增/编辑表单。每条已记支出提供“修改”“移除”；移除需确认，成功后当前明细与各图表同步刷新，失败时保持原值并显示错误。
 3. 公共支出池：在导航中与项目并列，使用相同记账表单和报表，但没有项目归属选择后的隐式复制。账户总览分开展示项目与公共池，跨项目 agent 账单只出现一次。
-4. 类别管理：新增、改名、归档；表单可从账户类别选择。日期、用途、金额、货币为必填；Free/Pro 和编辑操作须指定类别，Max 新增可由后台可靠分类；备注、数量、单位可选；支持明确的空态、校验错误和保存冲突提示。
-5. 保留账户设置、API Key、平台账单、价格、法律和状态页，更新文案、导航、SEO、多语言与 API 文档。`Billing` 清楚标注为“Pullwise 订阅”，避免与项目“支出”混淆。Max 正常保存时自动享受 Jev 辅助，界面没有触发模型的功能按钮；分类不可靠时保留草稿并要求手工选择，重复与归属提示不阻挡保存。
+4. 类别管理：新增、改名、归档；表单可从账本类别选择。日期、用途、金额、货币为必填；Free/Pro 和编辑操作须指定类别。账本 Owner 为 Max 且辅助功能可用时，新增可由后台可靠分类；备注、数量、单位可选；支持明确的空态、校验错误和保存冲突提示。
+5. 保留账户设置、API Key、平台账单、价格、法律和状态页，更新文案、导航、SEO、多语言与 API 文档。`Billing` 清楚标注为“Pullwise 订阅”，避免与项目“支出”混淆。账本 Owner 为 Max、运行环境启用且额度允许时，正常保存自动尝试 Jev 辅助；界面没有单独触发模型的功能按钮。分类不可靠或辅助不可用时保留草稿并要求手工选择，已有明确类别时仍可手工保存；重复与归属提示不阻挡保存。
 6. 成员页面提供邀请、预览/接受、角色调整、移除和撤销；Owner/Admin 操作范围与服务端一致。分享前明确提示全部当前与未来账目会按角色可见。项目设置提供版本化仓库关联/Organization 编辑；绑定失权不遮蔽可读历史财务数据。
 
 前端只通过 REST 读写，不在浏览器计算权威总额；图表可使用 API 返回的日期桶和类别汇总。页面缓存按身份、workspace、membership revision、项目和过滤条件隔离，切换账本或失权时清除受保护数据、草稿及一次性凭证，取消旧请求并忽略迟到结果。保留现有硬边界布局、响应式和可访问性习惯。
 
 ## 7. Jev 的实际作用
 
-[TypeSafe 官方文档](https://docs.typesafe.ai/introduction)描述 Jev 输入为 `state` 与类型化问题，输出为 Choice/Score/Noul 及概率；它适合分类和判断，不负责算术或权限。Max 的普通 `POST/PATCH /api/v1/expenses` 已接入固定版本 `jev-1.13.0`，网页与 `expenses:write` API Key 共享实现，无须另加模型功能按钮或权限。模型收到的数据仅限本次提交的用途/备注和账户类别名称，不发送 GitHub Token、支付凭证或仓库代码。
+[TypeSafe 官方文档](https://docs.typesafe.ai/introduction)描述 Jev 输入为 `state` 与类型化问题，输出为 Choice/Score/Noul 及概率；它适合分类和判断，不负责算术或权限。账本 Owner 为 Max 的普通 `POST/PATCH /api/v1/expenses` 已接入固定版本 `jev-1.13.0`，在功能启用和预算允许时尝试辅助；网页与 `expenses:write` API Key 共享实现，无须另加模型功能按钮或权限。模型收到本次提交的用途/备注，以及问题中提供的账本类别 ID 和名称；不发送 GitHub Token、支付凭证或仓库代码。用户填写的用途/备注可能含私人信息，隐私说明应明确此数据流。
 
 | 场景 | Jev 输入/问题 | 输出如何使用 |
 | --- | --- | --- |
 | 自动分类 | `purpose`、备注、现有类别 ID/名称；Choice 含 `uncertain` | Max 新增未填类别时，只采用置信度至少 0.80 的有效类别；不确定则保留草稿要求手工选择，已填类别保持原值 |
 | 归属提示 | 用途/备注；Choice 判断项目专用、公共或不确定 | 返回建议供核对，不自动移动、复制或分摊支出 |
-| 疑似重复 | 同账户、同目标、同币种金额、前后七日内最多 30 条记录；本地精确用途匹配 | 普通保存响应提示记录 ID，不阻挡保存，不将历史记录发送给模型；幂等重放仍由 Idempotency-Key 精确保证 |
+| 疑似重复 | 同账本、同目标、同币种金额、前后七日内最多 30 条记录；本地精确用途匹配 | 普通保存响应提示记录 ID，不阻挡保存，不将历史记录发送给模型；幂等重放仍由 Idempotency-Key 精确保证 |
 
-类别 ID 必须由后端验证为该账户当前允许的类别；即使 Jev 高置信度也不能自行发起记账、创建类别、改金额、推断汇率或决定 GitHub/支付权限。用户正常保存时，后端将可靠类别与授权、版本、幂等和审计校验一起提交。服务端设请求大小、超时、费用/调用次数上限和故障降级，并保存问题版本、模型版本、概率与结果；高级建议接口另可记录接受/改选。先用标注后的中英文样本测量真实模型的准确率、误提示率和“不确定”覆盖率，再决定阈值；未通过评估时保持功能关闭。用户于 2026-10-02 授权本次预览评估使用自编测试样本，结果须明确标为合成数据验证，不能宣称已通过客户数据验收。建议问题和调用预算由 `cloudflare_ledger_suggestions.py` 定义；`typesafe_client.py` 验证固定模型、输入与响应，`cloudflare_jev_gateway.py` 提供固定端点的 Worker HTTP 传输。真实运行时验证仍须通过。服务端密钥使用 Cloudflare Secret。
+类别 ID 必须由后端验证为该账本当前允许的类别；即使 Jev 高置信度也不能自行发起记账、创建类别、改金额、推断汇率或决定 GitHub/支付权限。用户正常保存时，后端将可靠类别与授权、版本、幂等和审计校验一起提交。服务端设请求大小、超时、费用/调用次数上限和故障降级，并保存问题版本、模型版本、概率与结果；高级建议接口另可记录接受/改选。启用前须用标注后的中英文样本测量真实模型的准确率、误提示率和“不确定”覆盖率，并验证运行时传输；未通过门槛的环境保持关闭。用户于 2026-10-02 授权预览评估使用自编测试样本；2026-10-06 的 36 例真实模型质量与 Python Worker 传输检查已通过，Preview 现已启用，生产仍关闭。结果是合成数据验证，不能宣称已通过客户数据验收。建议问题和调用预算由 `cloudflare_ledger_suggestions.py` 定义；`typesafe_client.py` 验证固定模型、输入与响应，`cloudflare_jev_gateway.py` 提供固定端点的 Worker HTTP 传输。服务端密钥使用 Cloudflare Secret。
 
 ## 8. 验证与发布门槛
 
-当前（2026-10-06）：本版实现已在本地完成，最终 Server/Web 检查及 Preview 发布验收仍待记录。验证需覆盖 workspace 隔离、角色拒绝、固定身份邀请的过期/撤销/复用、权限 revision、Key 范围、成员真实审计、Owner 统一配额、多仓库并发关联和历史报表金额不变。原版本证据有自己的日期与范围，不能证明这些新路径。
+当前（2026-10-07）：多人账本、项目多仓库和独立项目均已记录本地检查、原生 Worker/浏览器与 Preview 发布证据。验证范围包括 workspace 隔离、角色拒绝、固定身份邀请的过期/撤销/复用、权限 revision、Key 范围、成员真实审计、Owner 统一配额、多仓库并发关联和历史报表金额不变。真实账号 REST 只读及临时 Key 撤销有单独记录；本地模拟角色结果不宣称双真实账号邀请验收。原版本证据有自己的日期与范围，不能证明这些新路径。
 
 两端各维护一份 `docs/validation/local-acceptance.md` 并互相链接，记录当前检查和剩余门槛；已完成阶段的临时交接不作为现行规则保留。
 
-0005 只追加四张成员/邀请/审计/仓库关联表及两列，并回填原单仓库映射；owner ID、project ID 和 expense/history 不重写。新 canonical schema 为五个 migrations、18 表/33 SQLite indexes。已存在 Preview 的精确 legacy-v4 一次性编译、原子升级已通过部署验收，沿用原 journal/namespace/database 并保留全部累计计数和证据；不重置、重试或添加 cron。最新用户要求正常可用的 Preview，因此普通产品流量不再受历史累计 100,000-read / 1,000-write 测试上限限制；有限验证计划保留原上限，每个产品 SQL batch 仍需边界预留和实际原生计量，商业配额和权限维持生效。详见 `docs/validation/d1-validation-budget.md` 当前策略。
+0005 追加四张成员/邀请/审计/仓库关联表及两列，并回填原单仓库映射；0006 允许独立项目的 GitHub anchor 为 NULL。owner ID、project ID 和 expense/history 不重写。当前 canonical schema 为六个 migrations、18 表/33 SQLite indexes。Preview 的 v4→v5 与 v5→v6 一次性编译、原子升级均有各自验收记录，沿用原 journal/namespace/database 并保留全部累计计数和证据；不重置、重试或添加 cron。最新用户要求正常可用的 Preview，因此普通产品流量不再受历史累计 100,000-read / 1,000-write 测试上限限制；有限验证计划保留原上限，每个产品 SQL batch 仍需边界预留和实际原生计量，商业配额和权限维持生效。详见 `docs/validation/d1-validation-budget.md` 当前策略。
 
 当前授权允许本地修复/检查、main 推送及 Preview 发布与有限远程验收；最终结果须补充到验证记录。Server/Web 环境配置及数据库保持隔离，生产 `PULLWISE_D1_ACCESS_ENABLED=0`，本轮远程验证仅限 Preview。部署脚本不执行远程 migration；发布代码、迁移成功和业务验收必须分别记录。
 

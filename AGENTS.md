@@ -104,11 +104,21 @@ Main pushes trigger production Builds, which must keep D1 access paused.
 Select preview-only deployments with the explicit preview config; never use
 branch separation as a substitute for runtime environment guards.
 
-The current product is the GitHub project expense ledger in
+The current product is Pullwise, the project expense ledger for developers and
+teams at pull-wise.com, described in
 `docs/design/github-project-ledger/README.md`. Use repository state, current
 user instructions, local documentation and tests as authority. Keep Web and
 Server separate and share `openapi/ledger-v1.yaml`. Do not use Notion or
 historical product plans to gate work.
+
+Keep public copy aligned with standalone named projects, optional GitHub
+repository/Organization associations, explicitly invited shared-ledger roles,
+user-entered expenses and separate per-currency reports. A shared expense pool
+is visible only to authorized ledger members/keys, not to the public. Pullwise
+subscription payments remain separate from ledger expenses. Qualify AI
+assistance by the ledger Owner's Max plan, current activation and usage budget;
+do not promise bank/vendor imports, exchange-rate conversion, automatic
+allocation, accounting/tax advice or permanent deletion through expense DELETE.
 
 ## Runtime and ownership
 

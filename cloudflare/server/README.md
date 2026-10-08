@@ -1,10 +1,11 @@
 # Pullwise Server Worker
 
-`src/entry.py` is the Cloudflare Python Worker for the project expense ledger. It routes GitHub sign-in and App authorization, workspace membership and invitations, account API keys, Creem subscription and webhook requests, multi-repository `/api/v1` ledger resources, per-currency reports, paginated CSV export, and optional Jev suggestions.
+`src/entry.py` is the Cloudflare Python Worker for Pullwise, the project expense ledger for developers and teams at [pull-wise.com](https://pull-wise.com). It routes GitHub sign-in and App authorization, workspace membership and invitations, account API keys, Creem subscription and webhook requests, standalone and optionally repository-linked `/api/v1` ledger resources, per-currency reports, paginated CSV export, and conditional Jev assistance. User-entered ledger expenses are separate from Pullwise subscription payments; no bank or vendor transaction import or currency conversion is provided.
 
 Named projects can operate without a GitHub repository or Organization.
-GitHub account sign-in remains the application identity, while repository
-authorization is required only when explicitly associating repositories.
+GitHub account sign-in remains the application identity. Repository
+authorization is required for explicit repository associations and for adding
+or moving expenses into linked projects; standalone projects do not require it.
 The blank-project implementation, native role/browser checks and controlled
 preview schema upgrade are recorded in
 [latest acceptance](../../docs/validation/local-acceptance.md).
@@ -88,7 +89,8 @@ continue to verify and persist their new counts. The user's roughly USD 200/mont
 total Cloudflare target does not introduce a hard day/month row budget.
 The capacity follow-up stores users, sessions, OAuth states and billing
 event/pending facts at exact `record:<kind>:<id>` keys in the existing
-`app_state` table. The canonical schema/fingerprint stays version 5. Under the
+`app_state` table. This storage cutover preserved the then-current v5 schema;
+the later blank-project upgrade advances the canonical schema to v6. Under the
 same coordinator lock, one bounded atomic batch copies legal legacy facts and
 empties their former containers, retaining all account/session fields, receipts,
 revisions and journal counters. A completed `stateStorageVersion: 1` status
@@ -128,8 +130,10 @@ to `https://pull-wise.com/api/integrations/github/callback`.
 ```
 
 Use actual distinct product IDs; omit unavailable intervals rather than
-inventing prices/products. Keep Jev enable/evaluated flags off; its optional
-`TYPESAFE_API_KEY` is not needed while disabled.
+inventing prices/products. Jev enable/evaluated flags are enabled in Preview
+after its recorded quality/runtime acceptance and remain off in production.
+Its optional `TYPESAFE_API_KEY` is not needed while disabled. Max entitlement
+alone does not establish assistance availability or remaining budget.
 
 The Web Worker removes its first `/api` prefix. The browser sends `/api/api/v1/*` on the production host, and this Worker receives `/api/v1/*`. The OAuth callback is the Web `/api/auth/github/callback` proxy to this Worker's `/auth/github/callback`.
 

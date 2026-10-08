@@ -1,8 +1,11 @@
 # Ledger plan policy
 
 User decisions, 2026-09-28: Free has 3 projects; Pro and Max have 100 each.
-Only Max has Jev, with a $5 budget per account per month, including annual
-subscriptions, without rollover. Core expense history remains separate from
+Only Max has Jev, with a $5 provider-cost reservation budget per ledger Owner
+per UTC calendar month, including annual subscriptions, without rollover.
+This is an assistance limit, not a redeemable balance or a payment credit.
+Members of a shared ledger use its Owner's plan and combined allowances;
+their personal subscriptions remain separate. Core expense history remains separate from
 Creem platform payment facts. On 2026-10-06 the actual 36-case en/zh quality and
 Python Worker transport checks passed: Preview enable/evaluated flags are now
 versioned as `1`, while production flags and production D1 access remain `0`.
@@ -10,16 +13,16 @@ Current evidence is in [local acceptance](../../validation/local-acceptance.md).
 
 ## Initial configurable defaults
 
-| Allowance per account | Free | Pro | Max |
+| Allowance per ledger Owner (shared by members) | Free | Pro | Max |
 | --- | ---: | ---: | ---: |
-| Stored GitHub projects | 3 | 100 | 100 |
+| Stored projects (standalone or GitHub-linked) | 3 | 100 | 100 |
 | Stored expense records | 500 | 20,000 | 20,000 |
 | Successful protected write batches per UTC minute | 10 | 60 | 60 |
 | Successful protected write batches per UTC calendar month | 1,000 | 10,000 | 10,000 |
 | Jev provider-cost reservation per UTC calendar month | $0 | $0 | $5 |
 
 Project/Jev decisions are user requirements. Record and write defaults are
-initial engineering recommendations, not validated production demand estimates.
+initial engineering defaults, not validated production demand estimates.
 500 records is roughly a year at 40 records/month; 20,000 is about 200 records
 per configured project when all 100 slots are used. These are aggregate account
 limits, not independent allowances per project. They are adjustable.
@@ -88,11 +91,11 @@ a new month replaces the period counters; it does not add unused old credit.
 Annual subscriptions use the same monthly periods. A named constraint rejects
 late requests that would move counters back to an older month/minute.
 
-The shared daily assistance guard (20/day) and
+The shared daily assistance guard (20 attempts per ledger Owner per UTC day) and
 request/response bounds remain additional safety controls. Free/Pro cannot
 invoke Jev even with suggestions scope. Max eligibility does not imply that
 Jev is active: public DTOs distinguish `eligible` and `available`. Preserve
-enable/evaluated flags at 0 until real quality, metering and provider gates pass.
+enable/evaluated flags at 0 in each environment until its quality, metering and provider gates pass.
 Those Preview gates passed on 2026-10-06; production activation remains separate.
 
 Max assistance is part of ordinary `POST /api/v1/expenses` and expense PATCH,
@@ -122,14 +125,17 @@ Migration `0004_ledger_plan_usage.sql` is included in the initialized Preview
 schema; production migrations remain a separate explicit operation. It adds a
 table, its implicit primary-key index and DDL cost. Every protected write adds a usage
 row write (and index effects on first insert); initialization adds count reads.
-These effects are included in the original cumulative validation accounting;
-active Preview retains the later-approved 1,000-write/100,000-read ceilings.
+These effects are included in cumulative validation accounting. Enabled ordinary
+Preview product traffic no longer uses the historical lifetime
+1,000-write/100,000-read test ceilings; generic finite validation retains its
+original ceilings. The same journal preserves all earlier counters and evidence.
 SQL batch/result counts are not billed row bounds. Existing imported data needs
 a reviewed initialization/cardinality bound. The active Preview product uses its
 reviewed per-SQL admission path; historical empty generic probe plans do not
 block ordinary product requests.
 
-The commercial quota is distinct from the global Preview validation hard cap.
+The commercial quota is distinct from Preview SQL admission, native metering
+and the finite validation plans' hard caps.
 Production's explicit normal application path retains commercial/authentication
 guards and does not require the temporary Preview coordinator. Its checked-in
 D1 pause and separate provider activation remain; see the

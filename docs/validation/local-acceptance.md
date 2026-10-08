@@ -1,6 +1,25 @@
 # Current local acceptance
 
-Updated 2026-10-07. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
+Updated 2026-10-08. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
+
+## Product copy and contract documentation audit (2026-10-08)
+
+Current product documentation uses Pullwise / pull-wise.com and describes a
+project expense ledger for developers and teams. Named standalone projects,
+optional repository associations, shared-ledger roles and Owner allowances,
+separate currencies and conditional Max assistance agree with the implementation.
+Current v6 and enabled Preview descriptions replace stale v5 and pending-release
+summaries; dated historical evidence remains intact. Ledger expenses remain
+separate from platform subscription payment facts.
+
+The OpenAPI changes affect only its title and descriptions. Server runtime,
+schema, migrations, deployment switches and provider settings are unchanged.
+Python 3.10.12 passes the complete **1,015-test** suite. S01 static checks,
+Worker-mirror verification, deployment shell syntax, diff whitespace checks and
+the pinned Preview Python Worker packaging dry run all pass. The initial
+sandbox test run lacked loopback socket permission; the complete suite passes
+with that permission enabled. No remote business request or database operation
+is part of this audit. Preview publication is recorded separately below.
 
 ## Final real REST and temporary-key acceptance (2026-10-07)
 

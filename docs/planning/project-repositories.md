@@ -1,8 +1,11 @@
-# 当前版本：多人账本、项目多仓库与 Organization
+# 当前版本：多人账本、独立项目与可选 GitHub 关联
 
-状态（2026-10-06）：Server/Web 已实现、验证、推送 main 并发布 Preview。
-原数据库在同一累计 journal 下完成 v4→v5 升级，schemaReady=true、stopped=null。
-本版角色通过 35 次真实本地 Worker HTTP 与模拟账号浏览器验证；线上访客
+状态（2026-10-07）：Server/Web 已实现、验证、推送 main 并发布 Preview。
+原数据库在同一累计 journal 下完成 v4→v5 和 v5→v6 升级，独立项目使用
+真实 nullable GitHub anchor，保留账本身份和财务历史。当前验收见
+[Server 验收](../validation/local-acceptance.md) 与
+[Web 验收](../../../pullwise-web/docs/validation/local-acceptance.md)。
+2026-10-06 的多人角色通过 35 次真实本地 Worker HTTP 与模拟账号浏览器验证；线上访客
 入口与实际升级/发布另有独立证据，不宣称双真实账号邀请验收。
 见 `docs/validation/workspaces-preview-release-2026-10-06.json`。
 
@@ -118,7 +121,13 @@ Web 提供账本切换、成员和邀请页面、组织筛选、仓库多选及�
 切换 workspace、membership revision 或权限时清除受保护数据、草稿和
 一次性凭证，取消旧请求并忽略迟到结果；Server 每次请求仍独立核对角色。
 
-## 迁移与当前发布状态
+## 迁移与发布证据
+
+当前 canonical schema 为六个 migrations、18 张表和 33 个 SQLite indexes。
+`0006_blank_projects.sql` 在同一原子 batch 内允许项目 anchor 为 NULL；
+Preview v5→v6 升级已验收，账本身份、关联项目及财务/审计记录保持原样。
+生产仍保持 `PULLWISE_D1_ACCESS_ENABLED=0`。以下是保留的
+2026-10-06 多人账本 v4→v5 升级证据，不作为当前 schema 版本。
 
 新增 `0005_workspaces_repositories.sql`，不修改已发布的 0001–0004。
 0005 新增四张表：`workspace_members`、`workspace_invites`、
@@ -127,7 +136,7 @@ Web 提供账本切换、成员和邀请页面、组织筛选、仓库多选及�
 关联，保留 owner ID、project ID、expense/category/event/idempotency
 记录及原 API-key 项目范围。迁移不重写任何支出或财务历史。
 
-新 canonical schema 为五个 migrations、18 张表和 33 个 SQLite indexes。
+当时 canonical schema 为五个 migrations、18 张表和 33 个 SQLite indexes。
 已存在的 Preview 保留精确 legacy-v4 schema/fingerprint，使用一次性编译
 的原子 0005 升级；不能重新初始化现有数据库。升级在原
 ValidationBudget namespace/name、数据库和累计 journal 中预留，继续使用

@@ -1,11 +1,13 @@
 openapi: 3.1.0
 info:
-  title: Pullwise GitHub Project Ledger API
+  title: Pullwise Project Expense Ledger API
   version: 0.3.0
   description: |
-    Target contract for the replacement ledger. S01-S05 provide identity,
-    billing, API keys, current profile and repository authorization; project,
-    expense and report routes begin at S06. Web uses its same-origin /api proxy; direct
+    Current ledger contract for Pullwise, the project expense tracker for
+    developers and teams at pull-wise.com. Users and authorized API clients
+    enter expenses; bank or vendor transactions are not imported. Platform
+    subscription payments remain separate from ledger expenses.
+    Web uses its same-origin /api proxy; direct
     clients call these paths on the Server Worker. All private responses are
     Cache-Control: no-store. Money is grouped by currency without conversion.
     Each user's existing personal ledger is an immutable workspace. Explicit
@@ -18,7 +20,10 @@ info:
     Account billing remains the signed-in user's own account service.
     Projects can be standalone with a nonblank name and no GitHub repository or
     organization association. Connecting repositories is optional and continues
-    to require the current actor's GitHub authorization.
+    to require the current actor's GitHub authorization. The shared expense pool
+    is shared across projects in a ledger, never publicly accessible. AI assistance
+    depends on the ledger owner's Max plan, current activation and usage budget;
+    an explicit category permits manual entry when assistance is unavailable.
 servers:
   - url: /
 security:
@@ -149,7 +154,7 @@ paths:
       x-pullwise-scope: projects:read
       parameters: [{$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/Limit'}, {$ref: '#/components/parameters/From'}, {$ref: '#/components/parameters/To'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       responses:
-        '200': {description: Owner projects and per-currency totals, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectPage'}}}}
+        '200': {description: Accessible projects in the selected ledger and per-currency totals, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectPage'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
     post:
       parameters: [{$ref: '#/components/parameters/WorkspaceHeader'}]
@@ -186,7 +191,7 @@ paths:
       operationId: listExpenseCategories
       x-pullwise-scope: categories:read
       responses:
-        '200': {description: Account categories including archived entries, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Category'}}}}}
+        '200': {description: Selected ledger categories including archived entries, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Category'}}}}}
     post:
       parameters: [{$ref: '#/components/parameters/WorkspaceHeader'}]
       operationId: createExpenseCategory
@@ -230,9 +235,10 @@ paths:
       operationId: createExpense
       x-pullwise-scope: expenses:write
       description: |
-        Max automatically receives Jev assistance within this ordinary write, for
-        Cookie sessions and expenses:write API keys alike. categoryId may be omitted
-        on create: a confident existing account category is then selected. Explicit
+        When the ledger owner's Max plan, activation gates and usage budget allow
+        it, this ordinary write attempts Jev assistance for Cookie sessions and
+        expenses:write API keys alike. categoryId may be omitted on create:
+        a confident existing ledger category is then selected. Explicit
         categories, targets, money and dates are never changed by inference. If a
         category cannot be selected, 422 CATEGORY_REQUIRED preserves the draft and
         returns assistance for manual completion. Provider failure or exhausted Jev
@@ -266,7 +272,7 @@ paths:
     patch:
       operationId: updateExpense
       x-pullwise-scope: expenses:write
-      description: Moving an expense checks write authority on both old and new targets. Max gets automatic advisory assistance; categoryId remains required and existing values are never changed by inference.
+      description: Moving an expense checks write authority on both old and new targets. Advisory assistance is attempted when the ledger owner's Max plan, activation gates and usage budget allow it; categoryId remains required and existing values are never changed by inference.
       parameters: [{$ref: '#/components/parameters/IfMatch'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ExpensePatchInput'}}}}
       responses:
@@ -282,7 +288,7 @@ paths:
       parameters: [{$ref: '#/components/parameters/IfMatch'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       responses:
         '429': {$ref: '#/components/responses/RateLimited'}
-        '204': {description: Removed or already removed by the same owner}
+        '204': {description: Removed or already removed within the same authorized ledger}
         '404': {$ref: '#/components/responses/NotFound'}
         '412': {$ref: '#/components/responses/PreconditionFailed'}
   /api/v1/reports/summary:
@@ -311,12 +317,12 @@ paths:
       parameters: [{$ref: '#/components/parameters/WorkspaceHeader'}]
       operationId: suggestExpense
       x-pullwise-scope: suggestions:use
-      description: Advanced draft advice only; ordinary expense writes already include Max assistance without this endpoint or its scope. Never writes an expense. Disabled unless evaluated and enabled. Shares the account limit of 20 attempts per UTC day and monthly Jev reservation with automatic assistance.
+      description: Advanced draft advice only; ordinary expense writes already attempt eligible Max assistance without this endpoint or its scope. Never writes an expense. Disabled unless evaluated and enabled. Shares the ledger owner's limit of 20 attempts per UTC day and monthly Jev reservation with automatic assistance.
       requestBody: {required: true, content: {application/json: {schema: {type: object, required: [purpose, target], properties: {purpose: {type: string, maxLength: 500}, note: {type: string, maxLength: 4000}, occurredOn: {type: string, format: date}, amount: {type: string, description: Decimal amount in selected currency}, currency: {type: string, pattern: "^[A-Z]{3}$"}, target: {$ref: '#/components/schemas/Target'}}}}}}
       responses:
         '200': {description: Status, optional suggestionId, candidates and probabilities; never an expense write, content: {application/json: {schema: {type: object, properties: {status: {type: string, enum: [available, uncertain, unavailable]}, suggestionId: {type: string}, questionVersion: {type: string}, modelVersion: {type: [string, 'null']}, suggestions: {type: object, properties: {categoryId: {type: string}, targetKind: {type: string}, duplicateExpenseId: {type: string}}}, probabilities: {type: object}}}}}}
         '403': {$ref: '#/components/responses/Forbidden'}
-        '429': {description: Account rate or daily/monthly suggestion budget exhausted}
+        '429': {description: Ledger owner rate or daily/monthly suggestion budget exhausted}
   /api/v1/expense-suggestions/{id}/decision:
     post:
       operationId: recordExpenseSuggestionDecision
@@ -354,11 +360,11 @@ components:
   responses:
     Unauthorized: {description: Authentication required}
     Forbidden: {description: Scope, target, GitHub authorization or plan capacity insufficient}
-    NotFound: {description: Resource absent or belongs to another account}
+    NotFound: {description: Resource absent or outside the authorized ledger}
     Conflict: {description: Idempotency conflict or a quota window changed; reload before retrying}
     PreconditionFailed: {description: Revision does not match If-Match}
-    InvalidInput: {description: Invalid or missing field. CATEGORY_REQUIRED on create may include top-level assistance when Max inference cannot confidently select an existing category. No expense is saved in that case.}
-    RateLimited: {description: Account write rate, monthly write allowance or Jev budget exhausted}
+    InvalidInput: {description: Invalid or missing field. CATEGORY_REQUIRED on create may include top-level assistance when eligible Max inference is unavailable or cannot confidently select an existing category. No expense is saved in that case.}
+    RateLimited: {description: Runtime request rate or ledger owner write allowance exhausted. Jev budget exhaustion falls back to manual completion for ordinary expense writes and does not block a write with an explicit category.}
   schemas:
     AssignableRole: {type: string, enum: [admin, editor, viewer]}
     Workspace:
@@ -411,8 +417,8 @@ components:
           properties:
             projects: {type: integer, minimum: 1}
             expenseRecords: {type: integer, minimum: 1, description: Stored records including soft deletion}
-            writesPerMinute: {type: integer, minimum: 1, description: Fixed UTC minute bucket per account}
-            writesPerMonth: {type: integer, minimum: 1, description: UTC calendar month per account}
+            writesPerMinute: {type: integer, minimum: 1, description: Fixed UTC minute bucket shared by the ledger owner's members and API keys}
+            writesPerMonth: {type: integer, minimum: 1, description: UTC calendar month shared by the ledger owner's members and API keys}
         jev:
           type: object
           required: [eligible, available, monthlyBudgetUsd, period, rollover]
