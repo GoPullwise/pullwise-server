@@ -1,6 +1,6 @@
 {
   "date": "2026-10-08",
-  "scope": "Project navigation URLs and recurring expense rules/generation; preview-only publication pending",
+  "scope": "Local project navigation URL and recurring expense rule/generation proof; actual preview publication recorded separately",
   "unitTests": {
     "passed": 1266,
     "subtestsPassed": 56,
@@ -108,5 +108,6 @@
     "database": "e9dc3b89-f81f-4fce-87ef-d8797d879fb4",
     "namespace": "0e0ce4946c5e4d5f81c606273ba94b5d",
     "singleton": "pullwise-s17-s18-2026-09-28"
-  }
+  },
+  "previewReleaseReceipt": "recurring-links-preview-release-2026-10-08.json"
 }

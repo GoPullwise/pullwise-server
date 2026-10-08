@@ -1,0 +1,474 @@
+{
+  "date": "2026-10-08",
+  "completedAt": "2026-10-08T13:06:42.040219+00:00",
+  "scope": "GitHub main publication and Cloudflare preview only: project development/product shortcuts and server-generated recurring expenses",
+  "server": {
+    "repository": "https://github.com/GoPullwise/pullwise-server",
+    "sourceCommit": "200a987955c1545f0542a4e30424967c85f70d66",
+    "worker": "pullwise-server-preview",
+    "domain": "https://preview-api.pull-wise.com",
+    "previousManagement": {
+      "versionId": "ead2b046-b7df-4869-b8d3-c5dbb84e33f1",
+      "deploymentId": "6a2fdc7a-c4e2-4c00-93d7-b608cab36c6c",
+      "createdOn": "2026-10-08T07:20:07.978138Z",
+      "snapshotSha256": "6a994a40c32aacf09c31437cbedca8a144550e2dd7d62d2d07f8e37c53880a26",
+      "originalDatabaseId": "e9dc3b89-f81f-4fce-87ef-d8797d879fb4",
+      "originalCoordinatorNamespaceId": "0e0ce4946c5e4d5f81c606273ba94b5d",
+      "originalJournalScope": "pullwise-s17-s18-2026-09-28",
+      "schedules": []
+    },
+    "publishedManagement": {
+      "deployment": {
+        "id": "6fc7793e-9da3-4e93-80fb-ab5c4ec6eedc",
+        "created_on": "2026-10-08T12:53:32.654813Z",
+        "source": "wrangler",
+        "versions": [
+          {
+            "version_id": "c402fee1-d2ea-4f97-836b-8fc6db5ee4f7",
+            "percentage": 100
+          }
+        ],
+        "annotations": {
+          "workers/message": "Project links and recurring expenses; source 200a987; native acceptance passed; preview only",
+          "workers/triggered_by": "deployment"
+        }
+      },
+      "settings": {
+        "compatibility_date": "2026-09-23",
+        "compatibility_flags": [
+          "python_workers"
+        ],
+        "annotations": {
+          "workers/message": "Project links and recurring expenses; source 200a987; native acceptance passed; preview only",
+          "workers/tag": "recurring-links-200a987",
+          "workers/triggered_by": "version_upload"
+        },
+        "bindings": [
+          {
+            "database_id": "e9dc3b89-f81f-4fce-87ef-d8797d879fb4",
+            "id": "e9dc3b89-f81f-4fce-87ef-d8797d879fb4",
+            "name": "DB",
+            "type": "d1"
+          },
+          {
+            "name": "PULLWISE_ALLOWED_ORIGINS",
+            "text": "https://preview.pull-wise.com",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_APP_URL",
+            "text": "https://preview.pull-wise.com",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_D1_ACCESS_ENABLED",
+            "text": "1",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_MODE",
+            "text": "preview",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_PRODUCT_ENABLED",
+            "text": "1",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V7_UPGRADE_ENABLED",
+            "text": "1",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_RECURRING_EXPENSES_ENABLED",
+            "text": "1",
+            "type": "plain_text"
+          },
+          {
+            "class_name": "ValidationBudget",
+            "name": "VALIDATION_BUDGET",
+            "namespace_id": "0e0ce4946c5e4d5f81c606273ba94b5d",
+            "type": "durable_object_namespace"
+          }
+        ]
+      },
+      "schedules": [
+        {
+          "cron": "0 * * * *",
+          "created_on": "2026-10-08T12:53:34.804419Z",
+          "modified_on": "2026-10-08T12:53:34.804419Z"
+        }
+      ],
+      "statuses": {
+        "deployments": 200,
+        "settings": 200,
+        "schedules": 200
+      }
+    },
+    "unitTests": {
+      "passed": 1266,
+      "subtestsPassed": 56
+    },
+    "nativeLocalScheduledDispatches": 4,
+    "nativeLocalGeneratedExpenses": 3,
+    "schema": {
+      "version": 7,
+      "tables": 20,
+      "indexes": 40,
+      "fingerprint": "cde5d88f7e7c0febfbe541a64645afba9141d189182e81479a466ecfe5fa1aab",
+      "atomicUpgradeStatements": 13,
+      "originalDatabaseRetained": "e9dc3b89-f81f-4fce-87ef-d8797d879fb4",
+      "originalCoordinatorNamespaceRetained": "0e0ce4946c5e4d5f81c606273ba94b5d",
+      "originalJournalScopeRetained": "pullwise-s17-s18-2026-09-28",
+      "runtimeSchemaReadyEvidence": "Canonical coordinator status after one eligible health GET; no independent remote SQL/table-inventory query"
+    },
+    "scheduled": {
+      "cron": "0 * * * *",
+      "timezonePolicy": "Rule IANA timezone; due rules checked hourly; original calendar anchors retained",
+      "managementScheduleConfirmed": true,
+      "remoteForcedTicks": 0,
+      "realCustomerGeneratedExpenseAcceptance": false
+    },
+    "budgetBefore": {
+      "productOperationMode": true,
+      "limits": {
+        "rowsRead": null,
+        "rowsWritten": null
+      },
+      "historicalCeilings": {
+        "rowsRead": 100000,
+        "rowsWritten": 1000
+      },
+      "reserved": {
+        "rowsRead": 116308,
+        "rowsWritten": 2301
+      },
+      "observed": {
+        "rowsRead": 51538,
+        "rowsWritten": 1339
+      },
+      "schemaReady": true,
+      "schemaVersion": 6,
+      "stateStorageVersion": 1,
+      "stopped": null
+    },
+    "budgetAfter": {
+      "productOperationMode": true,
+      "limits": {
+        "rowsRead": null,
+        "rowsWritten": null
+      },
+      "historicalCeilings": {
+        "rowsRead": 100000,
+        "rowsWritten": 1000
+      },
+      "reserved": {
+        "rowsRead": 159889,
+        "rowsWritten": 2997
+      },
+      "observed": {
+        "rowsRead": 52747,
+        "rowsWritten": 1430
+      },
+      "schemaReady": true,
+      "schemaVersion": 7,
+      "stateStorageVersion": 1,
+      "stopped": null
+    },
+    "intervalDelta": {
+      "reserved": {
+        "rowsRead": 43581,
+        "rowsWritten": 696
+      },
+      "observed": {
+        "rowsRead": 1209,
+        "rowsWritten": 91
+      }
+    },
+    "intervalDeltaLimitation": "Cumulative deltas may include concurrent ordinary product or scheduled traffic; they are not attributed exclusively to the upgrade. Counters remain nondecreasing and the journal is healthy.",
+    "postPublicationReadback": {
+      "startedAt": "2026-10-08T12:54:30.319945+00:00",
+      "requests": [
+        {
+          "path": "/health",
+          "status": 200,
+          "bytes": 90,
+          "sha256": "a66e46c07f6b1598ad752020c7c8d165307ca87cadc2445fae38401dfcaef949",
+          "at": "2026-10-08T12:54:32.894747+00:00",
+          "json": {
+            "ok": true,
+            "service": "pullwise-server",
+            "database": {
+              "type": "d1",
+              "configured": true
+            }
+          }
+        },
+        {
+          "path": "/_preview/budget",
+          "status": 200,
+          "bytes": 339,
+          "sha256": "56c74081819f6732bc5170833fedbab7e22409cad64c6664b1d1a7fdf4f91ec1",
+          "at": "2026-10-08T12:54:33.332549+00:00",
+          "json": {
+            "productOperationMode": true,
+            "limits": {
+              "rowsRead": null,
+              "rowsWritten": null
+            },
+            "historicalCeilings": {
+              "rowsRead": 100000,
+              "rowsWritten": 1000
+            },
+            "reserved": {
+              "rowsRead": 159889,
+              "rowsWritten": 2997
+            },
+            "observed": {
+              "rowsRead": 52747,
+              "rowsWritten": 1430
+            },
+            "schemaReady": true,
+            "schemaVersion": 7,
+            "stateStorageVersion": 1,
+            "stopped": null
+          }
+        }
+      ],
+      "retries": 0,
+      "redirectsFollowed": 0,
+      "authenticatedRequests": 0,
+      "syntheticBusinessMutations": 0,
+      "forcedRemoteTicks": 0
+    },
+    "deployLogSha256": "4e0fe5e6bd3ae1127a8f6fdcf09e03858bfb64088a35daf83b2c35c6a9c0bb14",
+    "excludedPackagingAttempt": {
+      "logSha256": "53f407620d82cb4fd61fcef7b50937a6efba9cb45cbfe303fdb97d99c401ff64",
+      "stage": "pywrangler dependency compilation before Wrangler upload",
+      "cause": "Default uv Python install directory was read-only; corrected to existing workspace-managed Python/cache paths",
+      "remoteUpload": false
+    }
+  },
+  "web": {
+    "repository": "https://github.com/GoPullwise/pullwise-web",
+    "sourceCommit": "6ae2a6284dc70edb58cce65809f9d010ef19b175",
+    "worker": "pullwise-web-preview",
+    "domain": "https://preview.pull-wise.com",
+    "previousManagement": {
+      "deployment": {
+        "id": "532e397c-840c-4ce2-85e3-8ff37a5b101b",
+        "created_on": "2026-10-08T10:16:21.605926Z",
+        "source": "wrangler",
+        "versions": [
+          {
+            "version_id": "5a37a81f-4d16-40d9-a352-2775709ac53c",
+            "percentage": 100
+          }
+        ],
+        "annotations": {
+          "workers/message": "Equal rows, contextual expense entry and visual reports; source 9dcd5dc0671f37360f1b6a657ee506a8695f1eed",
+          "workers/triggered_by": "deployment"
+        }
+      },
+      "settings": {
+        "compatibility_date": "2026-05-25",
+        "annotations": {
+          "workers/message": "Equal rows, contextual expense entry and visual reports; source 9dcd5dc0671f37360f1b6a657ee506a8695f1eed",
+          "workers/tag": "console-20261008-9dcd5dc",
+          "workers/triggered_by": "version_upload"
+        },
+        "bindings": [
+          {
+            "name": "ASSETS",
+            "type": "assets"
+          },
+          {
+            "name": "PULLWISE_API_ORIGIN",
+            "text": "https://preview-api.pull-wise.com",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_MODE",
+            "text": "preview",
+            "type": "plain_text"
+          },
+          {
+            "environment": "production",
+            "name": "PULLWISE_SERVER",
+            "service": "pullwise-server-preview",
+            "type": "service"
+          }
+        ]
+      },
+      "statuses": {
+        "deployments": 200,
+        "settings": 200
+      }
+    },
+    "publishedManagement": {
+      "deployment": {
+        "id": "00a6029e-2e11-4c12-b9f2-2fe6a10d3ff5",
+        "created_on": "2026-10-08T13:02:58.61614Z",
+        "source": "wrangler",
+        "versions": [
+          {
+            "version_id": "cd31aba4-195a-40e5-b2cc-3222bf6cea13",
+            "percentage": 100
+          }
+        ],
+        "annotations": {
+          "workers/message": "Project links and recurring expense management; source 6ae2a62; accepted frozen preview artifact",
+          "workers/triggered_by": "deployment"
+        }
+      },
+      "settings": {
+        "compatibility_date": "2026-05-25",
+        "annotations": {
+          "workers/message": "Project links and recurring expense management; source 6ae2a62; accepted frozen preview artifact",
+          "workers/tag": "recurring-links-6ae2a62",
+          "workers/triggered_by": "version_upload"
+        },
+        "bindings": [
+          {
+            "name": "ASSETS",
+            "type": "assets"
+          },
+          {
+            "name": "PULLWISE_API_ORIGIN",
+            "text": "https://preview-api.pull-wise.com",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_MODE",
+            "text": "preview",
+            "type": "plain_text"
+          },
+          {
+            "environment": "production",
+            "name": "PULLWISE_SERVER",
+            "service": "pullwise-server-preview",
+            "type": "service"
+          }
+        ]
+      },
+      "statuses": {
+        "deployments": 200,
+        "settings": 200
+      }
+    },
+    "checks": {
+      "testFiles": 42,
+      "testsPassed": 700
+    },
+    "freeze": {
+      "artifactEntry": "/assets/index-BeSRqE0G.js",
+      "artifactFiles": 46,
+      "sourceFiles": 66,
+      "artifactManifestSha256": "146b8333a3cb973a838ed1c82caad31fe520befdc18ab7f5c7c8ff9127ffefe2",
+      "sourceManifestSha256": "3583ca706f17422cd1a590b52113891f8c2ff93d44d9217f3cbc06d85c1e30b7",
+      "buildEnvironment": {
+        "VITE_APP_URL": "https://preview.pull-wise.com",
+        "VITE_API_BASE_URL": "/api",
+        "VITE_GITHUB_APP_SLUG": "gopullwise-preview"
+      }
+    },
+    "nativeBrowser": {
+      "completeContexts": 3,
+      "scenarios": 102,
+      "uniqueViewedNativeCaptures": 8,
+      "newCaptures": 7,
+      "retainedCaptureFromSeparatePartialContext": 1,
+      "businessWrites": 0,
+      "maxInterceptsPerContext": 97,
+      "capPerContext": 120,
+      "fontAttemptsBlocked": 3,
+      "externalDelivered": 0,
+      "compactReceiptSha256": "acf1a40391bf9755f45cc6d316999f0007d205cde8538fe29eab0d1c83317179",
+      "rootAllCapturesViewed": true
+    },
+    "staticReadback": {
+      "startedAt": "2026-10-08T13:03:28.458978+00:00",
+      "artifactEntry": "/assets/index-BeSRqE0G.js",
+      "requestCap": 4,
+      "retries": 0,
+      "redirectsFollowed": 0,
+      "credentials": 0,
+      "businessApiRequests": 0,
+      "pageJavaScriptExecuted": false,
+      "requests": [
+        {
+          "path": "/",
+          "status": 200,
+          "bytes": 5117,
+          "sha256": "305719fbf9cc2639dde07d88865ca283af11139db732fe31d66d40ca5faca266",
+          "contentType": "text/html",
+          "robotsTag": "noindex, nofollow",
+          "at": "2026-10-08T13:03:28.660578+00:00",
+          "referencesAcceptedEntry": true,
+          "previewNoindex": true
+        },
+        {
+          "path": "/assets/index-BeSRqE0G.js",
+          "status": 200,
+          "bytes": 42022,
+          "sha256": "e2606af9763520f3bedc59e3133929fc8cc97fc07948fef2dcec426ad50bcf1d",
+          "contentType": "text/javascript",
+          "robotsTag": null,
+          "at": "2026-10-08T13:03:28.944336+00:00",
+          "expectedSha256": "e2606af9763520f3bedc59e3133929fc8cc97fc07948fef2dcec426ad50bcf1d",
+          "matchesAcceptedAsset": true
+        },
+        {
+          "path": "/assets/ledger-BLDXOA05.css",
+          "status": 200,
+          "bytes": 13090,
+          "sha256": "f0a7314ad549be49547e60c88678c23da17576e70279faccb0233dcc50cfc352",
+          "contentType": "text/css",
+          "robotsTag": null,
+          "at": "2026-10-08T13:03:29.077407+00:00",
+          "expectedSha256": "f0a7314ad549be49547e60c88678c23da17576e70279faccb0233dcc50cfc352",
+          "matchesAcceptedAsset": true
+        },
+        {
+          "path": "/assets/ledger-BNWI6OcZ.js",
+          "status": 200,
+          "bytes": 82732,
+          "sha256": "82052ab75bf81ba4e5bcf2f8f33161f04d27334267dd30748e06cb330da86f51",
+          "contentType": "text/javascript",
+          "robotsTag": null,
+          "at": "2026-10-08T13:03:29.313608+00:00",
+          "expectedSha256": "82052ab75bf81ba4e5bcf2f8f33161f04d27334267dd30748e06cb330da86f51",
+          "matchesAcceptedAsset": true
+        }
+      ],
+      "passed": true
+    },
+    "deployLogSha256": "63f36ca7936cb6ba3447a69afec382593864413f9a25bdf12b8a51c2914e5370"
+  },
+  "remoteScope": {
+    "prePublicationDoOnlyBudgetGET": 1,
+    "postPublicationServerGETs": 2,
+    "postPublicationWebStaticGETs": 4,
+    "postPublicationPublicGETsTotal": 6,
+    "directD1CliOrConsoleCommands": 0,
+    "syntheticAccountsOrSessionsCreated": 0,
+    "syntheticBusinessMutations": 0,
+    "forcedScheduledTicks": 0,
+    "providerTests": 0,
+    "retries": 0,
+    "redirectsFollowed": 0
+  },
+  "production": {
+    "deploymentsPerformedForThisRelease": 0,
+    "d1ActivationPerformed": 0,
+    "checkedInD1Access": "0",
+    "checkedInCrons": []
+  },
+  "limitations": [
+    "Native local tests use synthetic accounts and are not real-session/provider/customer acceptance.",
+    "The actual preview schema upgrade and deployed hourly cron are confirmed; no remote forced tick or customer expense was created as a test.",
+    "Static readback executes no page JavaScript and sends no credentials or business API writes.",
+    "Documentation-only follow-up commits do not change deployed runtime or require another deployment."
+  ]
+}

@@ -1,5 +1,11 @@
 # Project links and recurring expenses
 
+Implemented and published to preview on 2026-10-08. Both repositories are pushed
+to GitHub main; production D1 stays paused without cron. Local/native evidence
+and actual publication are recorded separately in
+[current acceptance](../validation/local-acceptance.md) and the
+[preview release receipt](../validation/recurring-links-preview-release-2026-10-08.json).
+
 ## Project destinations
 
 Projects retain optional `developmentUrl` and `productUrl` independently of

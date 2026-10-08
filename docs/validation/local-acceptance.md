@@ -37,7 +37,29 @@ retained separately, never resumed or treated as acceptance. Native upgrade
 rollback is distinct from CPython generation revocation/atomic-fence tests;
 this run does not claim an injected failed native generation batch. No remote
 D1 test, provider request, real account, real payment or forced remote tick is
-part of these local receipts. Preview release gets a separate dated receipt.
+part of these local receipts. Preview publication is recorded separately below.
+
+[Preview publication](recurring-links-preview-release-2026-10-08.json) deploys
+Server source `200a987955c1545f0542a4e30424967c85f70d66` as version
+`c402fee1-d2ea-4f97-836b-8fc6db5ee4f7` and Web source
+`6ae2a6284dc70edb58cce65809f9d010ef19b175` as version
+`cd31aba4-195a-40e5-b2cc-3222bf6cea13`, each at 100% preview traffic.
+The original preview database, coordinator namespace and cumulative journal
+remain in use. One eligible health GET admits the reviewed v6-to-v7 upgrade;
+health and the separate DO-only status return 200, schema7/storage1, no stop
+and nondecreasing reservations/observations. Interval deltas can include
+concurrent product traffic and are not attributed exclusively to migration.
+Management confirms exactly the hourly `0 * * * *` trigger. Scheduled generation
+is proven natively locally; no remote forced tick or synthetic expense is created.
+
+The companion Web acceptance records 700 tests, three complete native browser
+contexts, 102 scenarios and eight visually reviewed captures, including one
+retained capture from a separate partial context. Four unauthenticated static
+GETs return 200, match the accepted entry/asset hashes and retain preview
+noindex. These are publication checks, not authenticated customer/provider
+acceptance. Production receives no deployment or D1 activation in this release,
+and its checked-in D1 pause and no-cron configuration remain. Receipt follow-up
+commits are documentation-only and need no redeployment.
 
 ## Product copy and contract documentation audit (2026-10-08)
 

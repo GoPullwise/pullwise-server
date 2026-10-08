@@ -23,7 +23,7 @@ business contract.
 Standalone named projects, optional repository/Organization associations and
 shared ledgers are implemented. The current source adds development/product
 links and server-generated weekly, monthly, calendar-quarterly and yearly
-expenses with schema v7. The [feature contract](docs/planning/recurring-expenses-project-links.md)
+expenses with schema v7, now published to preview. The [feature contract](docs/planning/recurring-expenses-project-links.md)
 describes timezone, month-end, permissions and duplicate prevention. Separate
 local role/browser evidence and actual remote publication checks are in
 [latest acceptance](docs/validation/local-acceptance.md). Original-version
