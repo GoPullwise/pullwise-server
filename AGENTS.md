@@ -1,5 +1,16 @@
 # Pullwise Server
 
+## Category removal (2026-10-09)
+
+Categories keep Archive for historical use and add explicit Remove for unused
+configuration, matching the Members confirmation flow. Preserve the existing
+category DELETE/archive contract. Removal requires current category-management
+authority and If-Match; atomically reject references from all expenses,
+durable expense audits, creation replays and every recurring-rule state.
+Never remove associated financial records or histories. Existing preview
+publication policy applies; retain the original database, journal and production
+pause. No schema migration or background cleanup is needed for this feature.
+
 ## Recent operation history (2026-10-09)
 
 The user requests project and Shared pool operation logs with actual actor,

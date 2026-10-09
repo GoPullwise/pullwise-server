@@ -454,6 +454,33 @@ paths:
         '204': {description: Archived}
         '404': {$ref: '#/components/responses/NotFound'}
         '412': {$ref: '#/components/responses/PreconditionFailed'}
+  /api/v1/categories/{id}/remove:
+    parameters: [{$ref: '#/components/parameters/Id'}]
+    post:
+      operationId: removeExpenseCategory
+      x-pullwise-scope: categories:write
+      description: |
+        Permanently remove an unused active or archived category. Any reference
+        in expenses (including deleted entries), durable expense history,
+        original creation responses, recurring rules or chosen/accepted Jev
+        suggestions prevents removal. Evaluated candidate probabilities alone
+        do not prevent removal.
+        Referenced categories must be archived instead; removal never deletes
+        or rewrites expenses, schedules, history or idempotency responses.
+      parameters: [{$ref: '#/components/parameters/IfMatch'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false}
+      responses:
+        '204': {description: Removed unused category}
+        '409': {description: CATEGORY_IN_USE; archive this category to retain its history}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '428': {description: If-Match is required}
+        '422': {$ref: '#/components/responses/InvalidInput'}
+        '429': {$ref: '#/components/responses/RateLimited'}
   /api/v1/expenses:
     get:
       operationId: listExpenses

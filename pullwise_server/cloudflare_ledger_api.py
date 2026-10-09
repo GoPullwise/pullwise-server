@@ -238,6 +238,15 @@ async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path
     if len(parts) < 3 or parts[:2] != ["api", "v1"] or parts[2] not in {"projects", "categories"}:
         return None
     kind = parts[2]
+    if kind == "categories" and len(parts) == 5 and parts[4] == "remove":
+        if not _valid_resource_id(parts[3]):
+            return _error(404, "NOT_FOUND")
+        if method != "POST":
+            return _error(405, "METHOD_NOT_ALLOWED")
+        try:
+            return await _remove_category(binding, parts[3], headers, body, now)
+        except PrincipalAuthError as exc:
+            return _error(exc.status, exc.code)
     if len(parts) > 4 or (len(parts) == 4 and not parts[3]):
         return _error(404, "NOT_FOUND")
     item_id = parts[3] if len(parts) == 4 else None
@@ -556,3 +565,81 @@ async def _categories(binding, method, item_id, headers, body, now, scope):
     return (204, None) if method == "DELETE" else (200, {
         "id": item_id, "name": name, "color": color, "revision": expected + 1,
         "archivedAt": None})
+
+
+# Keep every historical reference, including deleted expenses and creation
+# replays after a record changes category. Each EXISTS has an indexed owner
+# prefix and short-circuits; it returns no business records or JSON payloads.
+# JSON predicates can still traverse an owner's history in the worst case;
+# the preview meter reserves that bounded physical traversal without json_each.
+_CATEGORY_REFERENCES = """EXISTS(SELECT 1 FROM expenses WHERE owner_id=? AND category_id=?)
+    OR EXISTS(SELECT 1 FROM expense_events WHERE owner_id=? AND
+        (json_extract(before_json,'$.categoryId')=? OR json_extract(after_json,'$.categoryId')=?
+            OR json_extract(after_json,'$.assistance.suggestions.categoryId')=?))
+    OR EXISTS(SELECT 1 FROM expense_create_idempotency WHERE owner_id=?
+        AND (json_extract(response_json,'$.categoryId')=?
+            OR json_extract(response_json,'$.assistance.suggestions.categoryId')=?))
+    OR EXISTS(SELECT 1 FROM expense_recurring_rules WHERE owner_id=? AND
+        (json_extract(template_json,'$.category_id')=? OR json_extract(create_response_json,'$.categoryId')=?))
+    OR EXISTS(SELECT 1 FROM expense_suggestion_events WHERE owner_id=?
+        AND (category_id=? OR accepted_category_id=?))"""
+
+
+def _category_reference_values(owner, category):
+    return (owner, category, owner, category, category, category, owner, category, category,
+            owner, category, category, owner, category, category)
+
+
+def _category_reference_statement(binding, owner, category):
+    return binding.prepare("SELECT CASE WHEN " + _CATEGORY_REFERENCES +
+        " THEN 1 ELSE 0 END AS in_use").bind(*_category_reference_values(owner, category))
+
+
+async def _category_removal_snapshot(binding, item_id, headers, now):
+    proof = {}
+    user, _, auth, validate = await ledger_principal(
+        binding=binding, headers=headers, scope="categories:write", now=now, proof=proof)
+    parts = await binding.batch([*auth,
+        binding.prepare("SELECT * FROM expense_categories WHERE id=?").bind(item_id),
+        _category_reference_statement(binding, user["id"], item_id)])
+    validate([part.results for part in parts[:len(auth)]])
+    rows = parts[-2].results
+    existing = rows[0] if rows and rows[0]["owner_id"] == user["id"] else None
+    return user, proof, existing, parts[-1].results[0]["in_use"]
+
+
+async def _remove_category(binding, item_id, headers, body, now):
+    if body is not None and body != {}:
+        return _error(422, "INVALID_INPUT")
+    user, proof, existing, in_use = await _category_removal_snapshot(binding, item_id, headers, now)
+    if existing is None:
+        return _error(404, "NOT_FOUND")
+    expected = _revision(headers)
+    if expected is None:
+        return _error(428, "PRECONDITION_REQUIRED")
+    if expected < 0:
+        return _error(422, "INVALID_INPUT")
+    if expected != existing["revision"]:
+        return _error(412, "PRECONDITION_FAILED")
+    if in_use:
+        return _error(409, "CATEGORY_IN_USE")
+    commands = [_write_guard(binding, proof, user["id"], now),
+        binding.prepare("DELETE FROM expense_categories WHERE id=? AND owner_id=? AND revision=? AND NOT (" +
+            _CATEGORY_REFERENCES + ")").bind(item_id, user["id"], expected,
+                *_category_reference_values(user["id"], item_id)),
+        binding.prepare("INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN changes()=1 THEN 1 ELSE 0 END)"),
+        binding.prepare("DELETE FROM d1_command_guard")]
+    try:
+        await binding.batch(commands)
+    except PlanLimitError as error:
+        return error.response()
+    except Exception as error:
+        # Only a known, rolled-back CHECK fence may be reclassified. Unknown
+        # native outcomes and preview accounting stops must remain failures.
+        if "CHECK constraint failed: ok=1" not in str(error):
+            raise
+        _, _, row, in_use = await _category_removal_snapshot(binding, item_id, headers, now)
+        if row is None or row["revision"] != expected:
+            return _error(412, "PRECONDITION_FAILED")
+        return _error(409, "CATEGORY_IN_USE") if in_use else _error(412, "PRECONDITION_FAILED")
+    return 204, None
