@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from test_cloudflare_email_auth import Binding, Store, Gateway, NOW, SECRET
+from test_cloudflare_email_auth import Binding, Store, Gateway, NOW, SECRET, EMAIL, seed_user, records
 from test_worker_cost_pause import load_entry
 from pullwise_server.cloudflare_preview_rate import EmailRateLimit
 
@@ -57,6 +57,22 @@ def test_worker_registers_email_account_with_existing_session_contract(runtime):
     replay, replay_options = asyncio.run(runtime.app.fetch(incoming("/auth/email/verify-code",
         body={"email": email, "challengeId": payload["challengeId"], "code": code}, cookie=nonce)))
     assert replay_options["status"] == 400 and replay["error"]["code"] == "EMAIL_CODE_INVALID"
+
+
+def test_worker_link_send_reports_another_mailbox_owner_before_admission_and_preserves_challenge(runtime):
+    seed_user(runtime, email=EMAIL, verified=True, user_id="usr_mailbox_owner", session_id="ses-mailbox-owner")
+    _, cookie = seed_user(runtime)
+    _, issued = asyncio.run(runtime.app.fetch(incoming("/auth/email/request-code", body={"email": EMAIL, "purpose": "login"})))
+    assert issued["status"] == 202
+    before = {kind: records(runtime, kind) for kind in ("users", "sessions", "emailIdentities", "emailChallenges")}
+    admitted, sent, groups, reads = list(runtime.admitted), list(runtime.gateway.sent), list(runtime.binding.groups), runtime.binding.reads
+    payload, options = asyncio.run(runtime.app.fetch(incoming("/auth/email/request-code",
+        body={"email": " ALICE@EXAMPLE.TEST ", "purpose": "link"}, cookie=cookie)))
+    assert options["status"] == 409 and payload == {"error": {"code": "EMAIL_ALREADY_LINKED"}}
+    assert options["headers"] == {"Cache-Control": "no-store", "Vary": "Cookie"}
+    assert {kind: records(runtime, kind) for kind in before} == before
+    assert runtime.admitted == admitted and runtime.gateway.sent == sent
+    assert runtime.binding.groups == groups and runtime.binding.reads == reads + 3
 
 
 @pytest.mark.parametrize("raw,status", [(b"bad-json", 422), (b"\xff", 422),
