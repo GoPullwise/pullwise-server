@@ -1,5 +1,31 @@
 # Pullwise Server
 
+## REST API and browser parity (2026-10-09)
+
+The user requires the Web ledger to use the REST API and external Bearer API
+keys to cover project creation/editing/removal, ordinary and recurring expenses,
+and member invitation/review/role/removal operations. This supersedes older
+cookie-only project-removal, recurring-management and member-governance rules
+below. Browser sessions and keys share resource DTOs and business validation.
+Project removal still requires the actual ledger Owner plus projects:write and
+the key's current target permission. Member governance uses explicit
+members:read/write scopes; all roles can read members and only Owner/Admin can
+write. Governance keys must omit projectIds and remain bound to one ledger;
+global key workspace/inbox reads cannot reveal other ledgers. Preserve original
+inviter approval, Admin boundaries, current membership revisions, credential
+revocation and atomic CAS/audit/quota fences. Invitation preview/application
+requires the applicant's independent cookie-account identity.
+
+Recurring key grants store only the credential hash in internal template JSON,
+never a token or public DTO field. Every execution rechecks the original key's
+current expiry, revocation, scope, workspace/membership and target permission in
+the occurrence's atomic write. A full edit or explicit resume adopts the current
+actor and credential; a session edit/resume removes an old key grant. Expense
+activity reads include recurring-rule changes under expenses:read; project-setting
+activity also requires projects:read on a key. Apply filtering before pagination.
+Existing preview/local verification and publication authority remains; production
+D1 activation is still paused.
+
 ## Verification email language (2026-10-09)
 
 The user requires verification-code emails to use English only in the subject,

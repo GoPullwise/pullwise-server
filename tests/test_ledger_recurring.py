@@ -240,14 +240,227 @@ def test_viewer_can_read_but_cannot_create_and_other_workspace_has_no_access(app
     assert app.call("GET", rule["id"], actor="other")[0] == 404
 
 
-def test_api_key_cannot_create_persistent_schedule_authority(app):
-    token = "pwk_synthetic_recurrence"
+def api_auth(app, *, actor="owner", scopes=None, restrictions=None, expires=None, suffix="one"):
+    token = "pwk_synthetic_recurrence_" + actor + "_" + suffix
+    restriction = {"shared": True} if restrictions is None else restrictions
+    if actor != "owner":
+        restriction = {"workspaceId": "owner", "workspaceMemberRevision": 1, **restriction}
     with app.store._immediate() as db:
-        db.execute("INSERT INTO api_keys VALUES('key','owner','key','prefix',?,?,NULL,'{\"shared\":true}',?,NULL,NULL)", (
-            hashlib.sha256(token.encode()).hexdigest(), json.dumps(["expenses:read", "expenses:write"]), NOW))
-    status, payload = app.call("POST", body=draft(), headers={"Cookie": "", "Authorization": "Bearer " + token})
-    assert status == 403 and payload["error"]["code"] == "RECURRING_SESSION_REQUIRED"
-    assert app.rows("expense_recurring_rules") == []
+        db.execute("""INSERT INTO api_keys(id,user_id,name,key_prefix,key_hash,scopes,expires_at,
+            restrictions,created_at) VALUES(?,?,?,?,?,?,?,?,?)""", (
+                "key_" + actor + "_" + suffix, actor, "Synthetic recurring test", "prefix",
+                hashlib.sha256(token.encode()).hexdigest(),
+                json.dumps(["expenses:read", "expenses:write"] if scopes is None else scopes),
+                expires, json.dumps(restriction), NOW))
+    return {"Cookie": "", "Origin": "", "Authorization": "Bearer " + token}
+
+
+@pytest.mark.parametrize("project", [False, True])
+def test_api_key_manages_project_and_shared_rules_with_revocable_hidden_grants(app, project):
+    auth = api_auth(app)
+    body = draft(project=project, start="2026-09-01")
+    status, rule = app.call("POST", body=body, headers=auth, handler=handle_ledger_request)
+    assert status == 201
+    assert app.call("POST", body=body, headers=auth) == (201, rule)
+    saved = json.loads(app.rows("expense_recurring_rules")[0]["template_json"])
+    assert saved["_api_key_hash"] == hashlib.sha256(auth["Authorization"].split()[1].encode()).hexdigest()
+    assert "_api_key_hash" not in json.dumps(rule)
+    assert app.tick()["created"] == 1
+    status, current = app.call("GET", rule["id"], headers=auth)
+    assert status == 200 and current["revision"] == 2
+    status, edited = app.call("PATCH", rule["id"], {**body, "amount": "99.00"},
+                              headers=auth, revision=2)
+    assert status == 200 and edited["amount"] == "99.00"
+    status, paused = app.call("PATCH", rule["id"], {"status": "paused"}, headers=auth, revision=3)
+    assert status == 200 and paused["status"] == "paused"
+    assert app.tick()["created"] == 0
+    status, resumed = app.call("PATCH", rule["id"], {"status": "active"}, headers=auth, revision=4)
+    assert status == 200 and resumed["nextOccurrenceOn"] == "2026-10-31"
+    assert json.loads(app.rows("expense_recurring_rules")[0]["template_json"])["_api_key_hash"] == saved["_api_key_hash"]
+    assert app.call("DELETE", rule["id"], headers=auth, revision=5)[0] == 204
+    assert app.call("GET", headers=auth)[1]["items"] == []
+    assert len(app.rows("expenses")) == len(app.rows("expense_recurring_occurrences")) == 1
+    assert {row["actor_id"] for row in app.rows("expense_events")} == {rule["id"] + ":owner"}
+
+
+def test_api_lists_filter_target_restrictions_before_pagination_and_replays(app):
+    shared = create(app)
+    status, project = app.call("POST", body=draft(project=True), key="project")
+    assert status == 201
+    status, second = app.call("POST", body=draft(project=True), key="second")
+    assert status == 201
+    auth = api_auth(app, restrictions={"shared": False, "projectIds": ["prj_1"]})
+    cursor, collected = None, []
+    while True:
+        status, page = app.call("GET", headers=auth, params={"limit": "1", "cursor": cursor or ""})
+        assert status == 200
+        collected.extend(row["id"] for row in page["items"])
+        cursor = page["nextCursor"]
+        if cursor is None:
+            break
+    assert set(collected) == {project["id"], second["id"]}
+    assert shared["id"] not in collected
+    assert app.call("GET", shared["id"], headers=auth)[0] == 404
+    assert app.call("GET", headers=auth, params={"target": "shared"})[1]["error"]["code"] == "TARGET_FORBIDDEN"
+    assert app.call("GET", headers=auth, params={"projectId": "prj_other"})[0] == 403
+    # Same actor and raw idempotency key cannot reveal a prior restricted target.
+    assert app.call("POST", body=draft(project=True), headers=auth)[0] == 404
+    empty = api_auth(app, suffix="empty", restrictions={"shared": False, "projectIds": []})
+    assert app.call("GET", headers=empty)[1] == {"items": [], "nextCursor": None}
+    shared_only = api_auth(app, suffix="shared", restrictions={"shared": True, "projectIds": []})
+    assert app.call("GET", headers=shared_only)[1]["items"] == [shared]
+
+
+def test_recurring_keys_require_expense_scope_and_explicit_target_grants(app):
+    rule = create(app)
+    readonly = api_auth(app, scopes=["expenses:read"])
+    assert app.call("GET", rule["id"], headers=readonly)[0] == 200
+    assert app.call("POST", body=draft(), headers=readonly)[1]["error"]["code"] == "INSUFFICIENT_SCOPE"
+    assert app.call("PATCH", rule["id"], {"status": "paused"}, revision=1, headers=readonly)[0] == 403
+    assert app.call("DELETE", rule["id"], revision=1, headers=readonly)[0] == 403
+    writeonly = api_auth(app, suffix="write", scopes=["expenses:write"])
+    assert app.call("GET", headers=writeonly)[0] == 403
+    restricted = api_auth(app, suffix="restricted", restrictions={"shared": False, "projectIds": []})
+    assert app.call("POST", body=draft(), key="new-shared", headers=restricted)[1]["error"]["code"] == "TARGET_FORBIDDEN"
+    assert app.call("POST", body=draft(project=True), key="new-project", headers=restricted)[0] == 403
+    assert len(app.rows("expense_recurring_rules")) == 1
+
+
+@pytest.mark.parametrize("actor,project,mutation", [
+    ("owner", False, "UPDATE api_keys SET revoked_at=1"),
+    ("owner", False, "UPDATE api_keys SET expires_at=0"),
+    ("owner", False, "UPDATE api_keys SET scopes='[\"expenses:read\"]'"),
+    ("owner", False, "UPDATE api_keys SET restrictions='{\"shared\":false}'"),
+    ("owner", True, "UPDATE api_keys SET restrictions='{\"shared\":true,\"projectIds\":[]}'"),
+    ("owner", False, "UPDATE api_keys SET restrictions='{\"shared\":true,\"workspaceId\":\"other\"}'"),
+    ("owner", False, "UPDATE api_keys SET user_id='other'"),
+    ("editor", False, "UPDATE workspace_members SET revision=revision+1 WHERE user_id='editor'"),
+    ("editor", False, "UPDATE workspace_members SET role='viewer',revision=revision+1 WHERE user_id='editor'"),
+    ("editor", False, "UPDATE workspace_members SET removed_at='removed',revision=revision+1 WHERE user_id='editor'"),
+])
+def test_scheduled_api_grant_rechecks_key_and_member_authority_and_blocks_once(app, actor, project, mutation):
+    auth = api_auth(app, actor=actor)
+    status, rule = app.call("POST", body=draft(project=project), actor=actor, headers=auth)
+    assert status == 201
+    writes = app.rows("ledger_plan_usage")[0]["writes"]
+    with app.store._immediate() as db:
+        db.execute(mutation)
+    assert app.tick() == {"scanned": 1, "created": 0, "blocked": 1, "replayed": 0}
+    stored = app.rows("expense_recurring_rules")[0]
+    assert stored["id"] == rule["id"] and stored["blocked_code"] == "SCHEDULE_AUTHORIZATION_CHANGED"
+    assert stored["next_occurrence_on"] == "2026-07-31"
+    assert app.rows("expenses") == app.rows("expense_events") == app.rows("expense_recurring_occurrences") == []
+    assert app.rows("ledger_plan_usage")[0]["writes"] == writes
+    assert app.tick()["scanned"] == 0
+
+
+def test_api_rule_grant_expires_at_execution_and_owner_can_reauthorize_with_cookie(app):
+    auth = api_auth(app, expires=NOW + 60)
+    status, rule = app.call("POST", body=draft(start="2026-10-01"), headers=auth)
+    assert status == 201
+    october = int(datetime(2026, 10, 31, 12, tzinfo=timezone.utc).timestamp())
+    assert app.tick(now=october)["blocked"] == 1
+    blocked = app.call("GET", rule["id"])[1]
+    status, resumed = app.call("PATCH", rule["id"], {"status": "active"}, revision=blocked["revision"])
+    assert status == 200
+    assert "_api_key_hash" not in json.loads(app.rows("expense_recurring_rules")[0]["template_json"])
+    assert app.tick(now=october)["created"] == 1
+    assert len(app.rows("expenses")) == 1
+
+
+def test_replay_and_pause_keep_original_key_but_resume_transfers_to_new_key(app):
+    first, second = api_auth(app), api_auth(app, suffix="second")
+    body = draft(start="2026-09-01")
+    status, rule = app.call("POST", body=body, headers=first)
+    assert status == 201
+    grant = json.loads(app.rows("expense_recurring_rules")[0]["template_json"])["_api_key_hash"]
+    assert app.call("POST", body=body, headers=second) == (201, rule)
+    assert app.call("PATCH", rule["id"], {"status": "paused"}, revision=1)[0] == 200
+    assert json.loads(app.rows("expense_recurring_rules")[0]["template_json"])["_api_key_hash"] == grant
+    status, resumed = app.call("PATCH", rule["id"], {"status": "active"}, headers=second, revision=2)
+    assert status == 200
+    assert json.loads(app.rows("expense_recurring_rules")[0]["template_json"])["_api_key_hash"] != grant
+    with app.store._immediate() as db:
+        db.execute("UPDATE api_keys SET revoked_at=1 WHERE id='key_owner_one'")
+    october = int(datetime(2026, 10, 31, 12, tzinfo=timezone.utc).timestamp())
+    assert app.tick(now=october)["created"] == 1
+    with app.store._immediate() as db:
+        db.execute("UPDATE api_keys SET revoked_at=1 WHERE id='key_owner_second'")
+    november = int(datetime(2026, 11, 30, 12, tzinfo=timezone.utc).timestamp())
+    assert app.tick(now=november)["blocked"] == 1
+    assert len(app.rows("expenses")) == 1
+
+
+def test_member_api_edit_replaces_cookie_grant_and_runs_without_session(app):
+    rule = create(app, start="2026-09-01")
+    auth = api_auth(app, actor="editor")
+    status, changed = app.call("PATCH", rule["id"], draft(start="2026-09-01", amount="88.00"),
+                               revision=1, actor="editor", headers=auth)
+    assert status == 200
+    with app.store._immediate() as db:
+        db.execute("DELETE FROM app_state WHERE name=?", (record_name("sessions", "editor"),))
+    october = int(datetime(2026, 10, 31, 12, tzinfo=timezone.utc).timestamp())
+    assert app.tick(now=october)["created"] == 1
+    assert app.rows("expenses")[0]["amount_minor"] == 8800
+    assert app.rows("expense_events")[0]["actor_id"] == rule["id"] + ":editor"
+    with app.store._immediate() as db:
+        db.execute("UPDATE api_keys SET revoked_at=1")
+    november = int(datetime(2026, 11, 30, 12, tzinfo=timezone.utc).timestamp())
+    assert app.tick(now=november)["blocked"] == 1
+    assert len(app.rows("expenses")) == 1
+
+
+@pytest.mark.parametrize("grant", [None, "", "incorrect", "G" * 64])
+def test_malformed_persisted_key_grant_blocks_instead_of_becoming_session_authority(app, grant):
+    rule = create(app)
+    with app.store._immediate() as db:
+        stored = app.rows("expense_recurring_rules")[0]
+        template = json.loads(stored["template_json"])
+        template["_api_key_hash"] = grant
+        db.execute("UPDATE expense_recurring_rules SET template_json=? WHERE id=?", (json.dumps(template), rule["id"]))
+    assert app.tick()["blocked"] == 1
+    assert app.rows("expense_recurring_rules")[0]["blocked_code"] == "SCHEDULE_AUTHORIZATION_CHANGED"
+    assert app.rows("expenses") == []
+
+
+@pytest.mark.parametrize("mutation", [
+    "UPDATE api_keys SET revoked_at=1",
+    "UPDATE api_keys SET expires_at=0",
+    "UPDATE api_keys SET scopes='[]'",
+    "UPDATE api_keys SET restrictions='{\"shared\":false}'",
+])
+def test_key_change_between_schedule_read_and_commit_rolls_back_expense_audit_occurrence_and_quota(app, mutation):
+    auth = api_auth(app)
+    assert app.call("POST", body=draft(), headers=auth)[0] == 201
+    before = {table: app.rows(table) for table in (
+        "expense_recurring_rules", "expenses", "expense_events", "expense_recurring_occurrences",
+        "ledger_activity_events", "ledger_plan_usage")}
+    original_batch = app.raw.batch
+    async def raced_batch(statements):
+        if any("INSERT INTO expenses(" in statement.sql for statement in statements):
+            app.raw.batch = original_batch
+            with app.store._immediate() as db:
+                db.execute(mutation)
+        return await original_batch(statements)
+    app.raw.batch = raced_batch
+    with pytest.raises(Exception, match="CHECK constraint failed"):
+        app.tick()
+    assert {table: app.rows(table) for table in before} == before
+
+
+def test_revocation_before_http_rule_creation_rolls_back_rule_grant_activity_and_quota(app):
+    auth = api_auth(app)
+    original_batch = app.raw.batch
+    async def raced_batch(statements):
+        if any("INSERT INTO expense_recurring_rules(" in statement.sql for statement in statements):
+            app.raw.batch = original_batch
+            with app.store._immediate() as db:
+                db.execute("UPDATE api_keys SET revoked_at=1")
+        return await original_batch(statements)
+    app.raw.batch = raced_batch
+    with pytest.raises(Exception, match="CHECK constraint failed"):
+        app.call("POST", body=draft(), headers=auth)
+    assert app.rows("expense_recurring_rules") == app.rows("ledger_activity_events") == app.rows("ledger_plan_usage") == []
 
 
 def test_quota_block_keeps_pending_period_and_pause_cancel_remain_available(app):

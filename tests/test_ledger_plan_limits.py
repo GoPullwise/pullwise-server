@@ -14,9 +14,8 @@ from pullwise_server.cloudflare_state_records import record_name
 
 def test_defaults_override_and_paid_plan_jev():
     policy = default_policy()
-    assert [policy[p]["projects"] for p in ("free", "pro", "max")] == [3, 100, 100]
-    assert policy["pro"]["records"] == policy["max"]["records"] == 20_000
-    assert policy["free"]["records"] == 500
+    assert [policy[p]["projects"] for p in ("free", "pro", "max")] == [3, 20, 100]
+    assert [policy[p]["records"] for p in ("free", "pro", "max")] == [100, 20_000, 100_000]
     assert [policy[p]["jevMonthlyBudgetUsd"] for p in ("free", "pro", "max")] == ["0.00", "3.00", "5.00"]
     changed = parse_policy(json.dumps({"free": {"projects": 4}}))
     assert changed["free"]["projects"] == 4 and default_policy()["free"]["projects"] == 3
@@ -24,8 +23,8 @@ def test_defaults_override_and_paid_plan_jev():
                 {"max": {"records": True}}, {"max": {"recrods": 10}}):
         with pytest.raises(ValueError):
             parse_policy(json.dumps(raw))
-    with pytest.raises(ValueError):
-        parse_policy(json.dumps({"pro": {"records": 30000}}))
+    assert parse_policy(json.dumps({"pro": {"records": 30000}}))["pro"]["records"] == 30000
+    assert parse_policy(json.dumps({"max": {"projects": 600, "records": 300000}}))["max"]["records"] == 300000
     for plan in ("pro", "max"):
         changed = parse_policy(json.dumps({plan: {"jevMonthlyBudgetUsd": "100.00"}}))
         assert changed[plan]["jevMonthlyBudgetUsd"] == "100.00"
@@ -74,6 +73,38 @@ def write(binding, frozen, fixture, number, *, kind="project", now=None):
         change = binding.prepare("UPDATE ledger_projects SET description=? WHERE id=?").bind(str(number), "p1")
     binding.now = fixture.now if now is None else now
     return asyncio.run(binding.batch([fence, change, binding.prepare("DELETE FROM d1_command_guard")]))
+
+
+def test_max_capacity_accepts_final_project_and_record_and_downgrade_keeps_history(setup):
+    fixture, _ = setup
+    frozen = account_plan(fixture, "max", currentPeriodEnd=fixture.now + 864000)
+    raw = D1ShapedSQLite(fixture.store)
+    limited = PlanLimitedD1(raw, now=fixture.now)
+    write(limited, frozen, fixture, 1)
+    with fixture.store._immediate() as db:
+        db.execute("INSERT INTO expense_categories VALUES('category','owner','Hosting',NULL,NULL,1,'created','updated')")
+        # The committed cumulative counters are quota authority. Synthetic
+        # boundary values avoid seeding 100,000 financial rows for this test.
+        db.execute("UPDATE ledger_plan_usage SET projects=99,records=99999 WHERE owner_id='owner'")
+    write(limited, frozen, fixture, 2)
+    calls = raw.batch_count
+    with pytest.raises(PlanLimitError, match="PROJECT_LIMIT"):
+        write(limited, frozen, fixture, 3)
+    assert raw.batch_count == calls
+    write(limited, frozen, fixture, 4, kind="record")
+    calls = raw.batch_count
+    with pytest.raises(PlanLimitError, match="RECORD_LIMIT"):
+        write(limited, frozen, fixture, 5, kind="record")
+    assert raw.batch_count == calls
+    frozen = account_plan(fixture, "free")
+    write(limited, frozen, fixture, 6, kind="edit")
+    with pytest.raises(PlanLimitError, match="RECORD_LIMIT"):
+        write(limited, frozen, fixture, 7, kind="record")
+    with fixture.store._immediate() as db:
+        assert db.execute("SELECT projects,records FROM ledger_plan_usage").fetchone()[:] == (100, 100000)
+        assert db.execute("SELECT COUNT(*) FROM ledger_projects").fetchone()[0] == 2
+        assert db.execute("SELECT COUNT(*) FROM expenses").fetchone()[0] == 1
+        assert db.execute("SELECT description FROM ledger_projects WHERE id='p1'").fetchone()[0] == "6"
 
 
 def test_atomic_project_limit_and_config_change_do_not_reset_usage(setup):

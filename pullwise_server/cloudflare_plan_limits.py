@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from .account_cycle_rules import PAID_PLAN_IDS, effective_user_plan
-from .ledger_plan_policy import default_policy, usd_micros, JEV_RESERVATION_MICROUSD
+from .ledger_plan_policy import default_policy, entitlements, usd_micros, JEV_RESERVATION_MICROUSD
 from .cloudflare_state_records import record_name
 
 
@@ -21,6 +21,35 @@ class PlanLimitError(Exception):
 
     def response(self):
         return self.status, {"error": {"code": self.code}}
+
+
+def capacity_usage_statement(binding, owner_id):
+    """Reuse committed cumulative capacity; reads never initialize its counter.
+
+    Before the first metered mutation, the bounded owner-indexed fallback has
+    exactly the same stored-row semantics as the quota initialization itself.
+    Archived/removed projects and soft-deleted expenses retain their slots.
+    """
+    return binding.prepare("""SELECT
+        COALESCE((SELECT projects FROM ledger_plan_usage WHERE owner_id=?),
+            (SELECT COUNT(*) FROM ledger_projects WHERE owner_id=?)) AS projects,
+        COALESCE((SELECT records FROM ledger_plan_usage WHERE owner_id=?),
+            (SELECT COUNT(*) FROM expenses WHERE owner_id=?)) AS records""").bind(
+                owner_id, owner_id, owner_id, owner_id)
+
+
+def capacity_usage_payload(user, rows, *, now, policy=None):
+    if len(rows) != 1:
+        raise PlanLimitError(503, "USAGE_GUARD_UNAVAILABLE")
+    limits = entitlements(user, now=now, policy=policy)["limits"]
+    payload = {"workspaceId": user["id"]}
+    for field, column in (("projects", "projects"), ("expenseRecords", "records")):
+        used = rows[0][column]
+        if type(used) is not int or not 0 <= used <= 1000000:
+            raise PlanLimitError(503, "USAGE_GUARD_UNAVAILABLE")
+        limit = limits[field]
+        payload[field] = {"used": used, "limit": limit, "remaining": max(0, limit - used)}
+    return payload
 
 
 _ERRORS = {"plan_project_limit": (403, "PROJECT_LIMIT"),

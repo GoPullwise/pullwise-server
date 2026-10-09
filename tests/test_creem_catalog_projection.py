@@ -25,7 +25,8 @@ def test_verified_catalog_binds_configured_ids_intervals_and_product_capacity():
     from pullwise_server.billing_catalog_rules import catalog_payload
     import json
     projected = catalog_payload([{"payload_json": json.dumps(result), "expires_at": 100, "source_revision": 1}], 10)
-    assert [plan["entitlements"]["limits"]["projects"] for plan in projected["plans"]] == [3, 100, 100]
+    assert [plan["entitlements"]["limits"]["projects"] for plan in projected["plans"]] == [3, 20, 100]
+    assert [plan["entitlements"]["limits"]["expenseRecords"] for plan in projected["plans"]] == [100, 20000, 100000]
     for index, budget in ((1, "3.00"), (2, "5.00")):
         assert projected["plans"][index]["entitlements"]["jev"] == {
             "eligible": True, "available": False, "monthlyBudgetUsd": budget,

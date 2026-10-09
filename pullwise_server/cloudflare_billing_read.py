@@ -9,6 +9,7 @@ from .cloudflare_principal import (
 )
 from .billing_projection import billing_account_dto
 from .account_cycle_rules import effective_user_plan
+from .cloudflare_plan_limits import capacity_usage_payload, capacity_usage_statement
 
 
 
@@ -27,7 +28,7 @@ async def read_billing(*, binding: Any, headers: Mapping[str, object],
         return failure.status, {"error": {"code": failure.code}}
     auth, validate = _resource_auth_snapshot(binding, headers, user, {}, now,
         "profile:read")
-    result = await binding.batch(auth)
+    result = await binding.batch([*auth, capacity_usage_statement(binding, user["id"])])
     try:
         validate([part.results for part in result[:len(auth)]])
     except PrincipalAuthError as failure:
@@ -35,4 +36,6 @@ async def read_billing(*, binding: Any, headers: Mapping[str, object],
     return 200, {"page": {"id": "billing",
         "subscriptionAction": {"label": "View pricing", "href": "/pricing"},
         "checkoutAction": None},
-        "account": billing_account_dto(user, effective_user_plan(user, timestamp=now), timestamp=now)}
+        "account": billing_account_dto(user, effective_user_plan(user, timestamp=now), timestamp=now),
+        "ledgerUsage": capacity_usage_payload(user, result[-1].results, now=now,
+                                             policy=getattr(binding, "plan_policy", None))}

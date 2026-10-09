@@ -1,20 +1,23 @@
 """Persisted calendar rules and trusted, bounded ordinary-expense generation.
 
-HTTP management authenticates real sessions. The internal runner uses each
-rule's explicit grant and current user/member facts, never a fabricated session.
+HTTP management shares ordinary expense session/API-key authorization. The
+internal runner rechecks each rule's real actor and, for API-created grants,
+the original key's current validity and restrictions, never a fabricated session.
 Its caller must serialize preview execution through the existing coordinator.
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
 from datetime import timedelta
 
 from .cloudflare_ledger_api import (
     _error, _page_inputs, _param, _revision, _timestamp, _valid_resource_id, _write_guard,
 )
-from .cloudflare_ledger_auth import ROLE_SCOPES, target_allowed
+from .api_key_dto_rules import parse_api_key_restrictions
+from .cloudflare_ledger_auth import ROLE_SCOPES, ledger_principal, target_allowed
 from .cloudflare_ledger_activity import activity_commands, retention_commands
 from .cloudflare_ledger_expenses import (
     _creation_key, _decimal_amount, _dto as expense_dto, _input as expense_input, _snapshot,
@@ -22,7 +25,7 @@ from .cloudflare_ledger_expenses import (
 )
 from .cloudflare_github_gateway import GitHubFailure
 from .cloudflare_plan_limits import PlanLimitError
-from .cloudflare_principal import PrincipalAuthError, _header
+from .cloudflare_principal import PrincipalAuthError, _header, _timestamp as auth_timestamp
 from .cloudflare_state_records import record_name
 from .json_input import validate_json_unicode
 from .ledger_recurrence_calendar import (
@@ -60,6 +63,22 @@ def _input(body):
     _json(template)
     _json(schedule, 2048)
     return template, schedule
+
+
+def _template(row):
+    # This hash identifies a revocable grant, not a credential. Keep it private
+    # inside the existing bounded JSON, without changing public expense fields.
+    template = json.loads(row["template_json"])
+    template.pop("_api_key_hash", None)
+    return template
+
+
+def _grant_template(template, proof):
+    saved = dict(template)
+    saved.pop("_api_key_hash", None)
+    if proof.get("key") is not None:
+        saved["_api_key_hash"] = hashlib.sha256(proof["token"].encode("utf-8")).hexdigest()
+    return saved
 
 
 def rule_dto(row):
@@ -143,23 +162,28 @@ async def _http(binding, gateway, method, identifier, headers, params, body, now
         if project:
             clauses.append("project_id=?")
             values.append(project)
-        user, restrictions, proof, found = await _snapshot(binding, headers, now, "expenses:read",
-            lambda owner: [binding.prepare("SELECT * FROM expense_recurring_rules WHERE " +
-                " AND ".join(clauses) + " ORDER BY id LIMIT ?").bind(owner, *values, limit + 1)])
-        if proof.get("key") is not None or not _header(headers, "Cookie"):
-            return _error(403, "RECURRING_SESSION_REQUIRED")
-        items = found[0][:limit]
+        from .cloudflare_ledger_reports import restriction_filter
+        user, restrictions, auth, validate = await ledger_principal(
+            binding=binding, headers=headers, scope="expenses:read", now=now)
+        if ((target == "shared" and not restrictions.get("shared"))
+                or (project and not target_allowed(restrictions, "project", project))):
+            return _error(403, "TARGET_FORBIDDEN")
+        restricted, restricted_values = restriction_filter(restrictions)
+        parts = await binding.batch([*auth, binding.prepare("SELECT * FROM expense_recurring_rules WHERE " +
+            " AND ".join(clauses) + " " + restricted + " ORDER BY id LIMIT ?").bind(
+                user["id"], *values, *restricted_values, limit + 1)])
+        validate([part.results for part in parts[:len(auth)]])
+        found = parts[-1].results
+        items = found[:limit]
         return 200, {"items": [rule_dto(row) for row in items],
-                     "nextCursor": items[-1]["id"] if len(found[0]) > limit else None}
+                     "nextCursor": items[-1]["id"] if len(found) > limit else None}
     user, restrictions, proof, found = await _snapshot(binding, headers, now,
         "expenses:read" if method == "GET" else "expenses:write",
         lambda owner, actor: [binding.prepare("SELECT * FROM expense_recurring_rules WHERE owner_id=? AND id=? AND " +
                 _VISIBLE_TARGET).bind(owner, identifier or ""),
-            binding.prepare("SELECT create_sha256,create_response_json," + _VISIBLE_TARGET + """ AS target_visible
+            binding.prepare("SELECT create_sha256,create_response_json,target_kind,project_id," + _VISIBLE_TARGET + """ AS target_visible
                 FROM expense_recurring_rules WHERE owner_id=? AND create_key=?""").bind(owner, _creation_key(owner, actor, key))
             if key else binding.prepare("SELECT id FROM expense_recurring_rules WHERE 0")], actor_queries=True)
-    if proof.get("key") is not None or not _header(headers, "Cookie"):
-        return _error(403, "RECURRING_SESSION_REQUIRED")
     current = found[0][0] if found[0] else None
     if identifier and (current is None or not target_allowed(restrictions, current["target_kind"], current["project_id"])):
         return _error(404, "NOT_FOUND")
@@ -191,7 +215,7 @@ async def _http(binding, gateway, method, identifier, headers, params, body, now
         return _error(409, "REVISION_LIMIT")
     resuming = method == "PATCH" and body == {"status": "active"}
     if resuming:
-        template, schedule = json.loads(current["template_json"]), json.loads(current["schedule_json"])
+        template, schedule = _template(current), json.loads(current["schedule_json"])
     else:
         template, schedule = _input(body)
     if current and (template["target_kind"] != current["target_kind"] or template["project_id"] != current["project_id"]):
@@ -199,7 +223,8 @@ async def _http(binding, gateway, method, identifier, headers, params, body, now
     digest = hashlib.sha256(_json({"template": template, "schedule": schedule}, 16384).encode("utf-8")).hexdigest()
     if method == "POST" and found[1]:
         saved = found[1][0]
-        if not saved["target_visible"]:
+        if not saved["target_visible"] or not target_allowed(
+                restrictions, saved["target_kind"], saved["project_id"]):
             return _error(404, "NOT_FOUND")
         return (201, json.loads(saved["create_response_json"])) if digest == saved["create_sha256"] else _error(409, "IDEMPOTENCY_CONFLICT")
     denied, evidence = await _validate_template(binding, gateway, user, restrictions, template)
@@ -219,7 +244,7 @@ async def _http(binding, gateway, method, identifier, headers, params, body, now
     row = {**(current or {}), "id": identifier or "rec_" + uuid.uuid4().hex,
         "owner_id": user["id"], "actor_user_id": proof["actor_user_id"],
         "target_kind": template["target_kind"], "project_id": template["project_id"],
-        "template_json": _json(template), "schedule_json": _json(schedule, 2048), "status": status,
+        "template_json": _json(_grant_template(template, proof)), "schedule_json": _json(schedule, 2048), "status": status,
         "revision": expected + 1 if current else 1, **next_fields(schedule, occurrence),
         "blocked_code": current["blocked_code"] if current and status == "blocked" else None,
         "created_at": current["created_at"] if current else stamp, "updated_at": stamp}
@@ -250,13 +275,20 @@ async def _http(binding, gateway, method, identifier, headers, params, body, now
     return (200 if current else 201), rule_dto(row)
 
 
-async def scheduled_authority(binding, row):
+async def scheduled_authority(binding, row, now):
     """Current persisted authority of the real person who granted this rule."""
     owner, actor = row["owner_id"], row["actor_user_id"]
     statements = [binding.prepare("SELECT payload AS snapshot FROM app_state WHERE name=?").bind(record_name("users", owner))]
     if actor != owner:
         statements.extend([binding.prepare("SELECT payload AS snapshot FROM app_state WHERE name=?").bind(record_name("users", actor)),
             binding.prepare("SELECT role,revision,removed_at FROM workspace_members WHERE workspace_id=? AND user_id=?").bind(owner, actor)])
+    stored_template = json.loads(row["template_json"])
+    key_hash = stored_template.get("_api_key_hash")
+    if "_api_key_hash" in stored_template:
+        if not isinstance(key_hash, str) or not re.fullmatch(r"[a-f0-9]{64}", key_hash):
+            raise PrincipalAuthError(403, "SCHEDULE_AUTHORIZATION_CHANGED", "Rule key grant is invalid.")
+        statements.append(binding.prepare("""SELECT user_id,scopes,expires_at,restrictions,revoked_at
+            FROM api_keys WHERE key_hash=?""").bind(key_hash))
     rows = [part.results for part in await binding.batch(statements)]
     if not rows[0]:
         raise PrincipalAuthError(403, "SCHEDULE_AUTHORIZATION_CHANGED", "Rule owner is unavailable.")
@@ -270,12 +302,32 @@ async def scheduled_authority(binding, row):
             raise PrincipalAuthError(403, "SCHEDULE_AUTHORIZATION_CHANGED", "Rule actor no longer writes expenses.")
     if owner_user.get("id") != owner or actor_user.get("id") != actor:
         raise PrincipalAuthError(403, "SCHEDULE_AUTHORIZATION_CHANGED", "Rule actor is unavailable.")
+    key, restrictions = None, {"shared": True}
+    if key_hash is not None:
+        key = rows[-1][0] if len(rows[-1]) == 1 else None
+        expiry = auth_timestamp(key["expires_at"]) if key else None
+        if (not key or key["user_id"] != actor or key["revoked_at"] is not None
+                or (key["expires_at"] is not None and (expiry is None or expiry < now))):
+            raise PrincipalAuthError(403, "SCHEDULE_AUTHORIZATION_CHANGED", "Rule API key is unavailable.")
+        try:
+            scopes = json.loads(key["scopes"])
+            raw_restrictions = json.loads(key["restrictions"])
+            restrictions = parse_api_key_restrictions(raw_restrictions)
+        except (TypeError, ValueError):
+            raise PrincipalAuthError(403, "SCHEDULE_AUTHORIZATION_CHANGED", "Rule API key authority is invalid.") from None
+        if (not isinstance(scopes, list) or "expenses:write" not in scopes
+                or restrictions != raw_restrictions
+                or restrictions.get("workspaceId", actor) != owner
+                or (member is not None and restrictions.get("workspaceMemberRevision") != member["revision"])
+                or not target_allowed(restrictions, row["target_kind"], row["project_id"])):
+            raise PrincipalAuthError(403, "SCHEDULE_AUTHORIZATION_CHANGED", "Rule API key no longer grants this target.")
     effective = {**owner_user, "_actor": actor_user}
     return effective, {"owner_snapshot": rows[0][0]["snapshot"],
-        "actor_snapshot": rows[1][0]["snapshot"] if actor != owner else rows[0][0]["snapshot"], "member": member}
+        "actor_snapshot": rows[1][0]["snapshot"] if actor != owner else rows[0][0]["snapshot"],
+        "member": member, "key_hash": key_hash, "key": key, "restrictions": restrictions}
 
 
-def _schedule_guard(binding, row, authority):
+def _schedule_guard(binding, row, authority, now):
     checks = ["EXISTS(SELECT 1 FROM app_state u WHERE u.name=? AND u.payload=?)",
               "EXISTS(SELECT 1 FROM expense_recurring_rules WHERE id=? AND owner_id=? AND actor_user_id=? AND revision=? AND status='active' AND " +
                   _VISIBLE_TARGET + ")"]
@@ -287,6 +339,12 @@ def _schedule_guard(binding, row, authority):
             "EXISTS(SELECT 1 FROM workspace_members WHERE workspace_id=? AND user_id=? AND role=? AND revision=? AND removed_at IS NULL)"])
         values.extend([record_name("users", row["actor_user_id"]), authority["actor_snapshot"],
             row["owner_id"], row["actor_user_id"], member["role"], member["revision"]])
+    if authority["key"] is not None:
+        key = authority["key"]
+        checks.append("""EXISTS(SELECT 1 FROM api_keys WHERE key_hash=? AND user_id=?
+            AND scopes=? AND restrictions=? AND revoked_at IS NULL
+            AND (expires_at IS NULL OR expires_at>=?))""")
+        values.extend([authority["key_hash"], row["actor_user_id"], key["scopes"], key["restrictions"], now])
     return binding.prepare("INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN " + " AND ".join(checks) + " THEN 1 ELSE 0 END)").bind(*values)
 
 
@@ -322,10 +380,10 @@ async def generate_occurrence(*, binding, maintenance_binding, gateway, row, now
     existing = await binding.prepare("SELECT expense_id FROM expense_recurring_occurrences WHERE rule_id=? AND period_key=?").bind(row["id"], row["next_period_key"]).first()
     if existing:
         return await _maintenance(maintenance_binding, row, now=now, following=following), "replayed"
-    template = json.loads(row["template_json"])
+    template = _template(row)
     try:
-        user, authority = await scheduled_authority(binding, row)
-        denied, evidence = await _validate_template(binding, gateway, user, {"shared": True}, template)
+        user, authority = await scheduled_authority(binding, row, now)
+        denied, evidence = await _validate_template(binding, gateway, user, authority["restrictions"], template)
         if denied:
             return await _maintenance(maintenance_binding, row, now=now, code=denied[1]["error"]["code"]), "blocked"
     except (PrincipalAuthError, GitHubFailure) as error:
@@ -340,7 +398,7 @@ async def generate_occurrence(*, binding, maintenance_binding, gateway, row, now
     fields = next_fields(schedule, following)
     columns = ("id", "owner_id", "target_kind", "project_id", "category_id", "occurred_on", "amount_minor",
                "currency", "purpose", "note", "quantity_decimal", "unit", "revision", "created_at", "updated_at", "deleted_at")
-    commands = [_schedule_guard(binding, row, authority), _category_guard(binding, row["owner_id"], template["category_id"])]
+    commands = [_schedule_guard(binding, row, authority, now), _category_guard(binding, row["owner_id"], template["category_id"])]
     if row["target_kind"] == "project":
         commands.append(_target_guard(binding, row["owner_id"], evidence))
     commands.extend([binding.prepare("INSERT INTO expenses(" + ",".join(columns) + ") VALUES(" + ",".join("?" for _ in columns) + ")").bind(*(record[name] for name in columns)),

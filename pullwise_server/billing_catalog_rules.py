@@ -28,7 +28,7 @@ def catalog_payload(rows: list[dict], now: int, *, policy=None, jev_available=Fa
     if {plan["id"] for plan in plans} != PLANS or len(plans) != 3:
         return None
     payload = {key: value for key, value in saved.items()
-               if key not in {"account", "agentConfigs"}}
+               if key not in {"account", "ledgerUsage", "agentConfigs"}}
     payload["plans"] = plans
     payload["page"] = {"id": "pricing",
         "checkoutAction": {"method": "POST", "href": "/billing/checkout-sessions"},

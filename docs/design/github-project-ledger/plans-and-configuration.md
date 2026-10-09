@@ -1,8 +1,9 @@
 # Ledger plan policy
 
-User decisions, 2026-09-28: Free has 3 projects; Pro and Max have 100 each.
-Only Max has Jev, with a $5 provider-cost reservation budget per ledger Owner
-per UTC calendar month, including annual subscriptions, without rollover.
+Current user decisions, 2026-10-09: Free has 3 projects and 100 expense records;
+Pro has 20 projects and 20,000 records; Max has 100 projects and 100,000 records.
+Pro and Max include Jev, with respective $3/$5 provider-cost reservation budgets
+per ledger Owner per UTC calendar month, including annual subscriptions, without rollover.
 This is an assistance limit, not a redeemable balance or a payment credit.
 Members of a shared ledger use its Owner's plan and combined allowances;
 their personal subscriptions remain separate. Core expense history remains separate from
@@ -11,28 +12,36 @@ Python Worker transport checks passed: Preview enable/evaluated flags are now
 versioned as `1`, while production flags and production D1 access remain `0`.
 Current evidence is in [local acceptance](../../validation/local-acceptance.md).
 
-## Initial configurable defaults
+## Current configurable defaults
 
 | Allowance per ledger Owner (shared by members) | Free | Pro | Max |
 | --- | ---: | ---: | ---: |
-| Stored projects (standalone or GitHub-linked) | 3 | 100 | 100 |
-| Stored expense records | 500 | 20,000 | 20,000 |
+| Stored projects (standalone or GitHub-linked) | 3 | 20 | 100 |
+| Stored expense records | 100 | 20,000 | 100,000 |
 | Successful protected write batches per UTC minute | 10 | 60 | 60 |
 | Successful protected write batches per UTC calendar month | 1,000 | 10,000 | 10,000 |
-| Jev provider-cost reservation per UTC calendar month | $0 | $0 | $5 |
+| Jev provider-cost reservation per UTC calendar month | $0 | $3 | $5 |
 
-Project/Jev decisions are user requirements. Record and write defaults are
-initial engineering defaults, not validated production demand estimates.
-500 records is roughly a year at 40 records/month; 20,000 is about 200 records
-per configured project when all 100 slots are used. These are aggregate account
-limits, not independent allowances per project. They are adjustable.
+Project and record capacities are user requirements. Write defaults remain
+configurable engineering allowances, not validated production demand estimates.
+These are aggregate ledger limits shared by its projects and shared pool, not
+independent allowances per project. They are adjustable.
 
-Stored project counts include archived projects; stored record counts include
+Stored project counts include archived and removed projects; stored record counts include
 soft-deleted expenses because their rows, audits and idempotency remain stored.
 Archival/deletion does not refund capacity. Idempotent replay and repeat removal
 do not increment usage. Downgrade never deletes history: reads, exports and edits
 remain available subject to write protection; above-cap new creations are denied.
 Existing counters are not reset when limits change or the user changes plan.
+
+Authenticated `GET /billing`, `GET /billing/plan` and `GET /api/v1/me` return
+`ledgerUsage` with `workspaceId` and `projects`/`expenseRecords` objects containing
+`used`, the current effective-plan `limit`, and `remaining` clamped at zero.
+Billing always shows the caller's personal ledger; `/api/v1/me` uses the selected
+workspace and its Owner's plan. The same authorization batch reads committed
+`ledger_plan_usage` counters; before their first initialization it counts only
+that owner's stored rows. Reads never initialize, reset or update the counters.
+Public pricing and revoked sessions never disclose personal capacity usage.
 
 "Write rate" means how many changes an account may make in one minute, including
 API-key clients. It protects against runaway scripts and rapid duplicate edits;
@@ -53,14 +62,22 @@ Worker variable named `PULLWISE_PLAN_LIMITS_JSON` to override selected fields.
 `config/ledger-plans.example.json` gives the full shape. For example:
 
 ```json
-{"free":{"records":800},"pro":{"records":30000},"max":{"records":30000,"jevMonthlyBudgetUsd":"4.00"}}
+{"free":{"records":800},"pro":{"records":30000},"max":{"records":300000,"jevMonthlyBudgetUsd":"4.00"}}
 ```
 
 Unknown fields, duplicate JSON keys, invalid/nonpositive limits and nonzero
-Free/Pro Jev budgets are rejected. USD budgets use decimal strings, converted
+Free Jev budgets are rejected. USD budgets use decimal strings, converted
 to integer millionths of a dollar; never float currency arithmetic. Operational
-limits must stay within the parser's bounded integer range. Pro/Max record
-allowances must match; change both explicitly or the configuration is rejected.
+limits must stay within the parser's bounded integer range of 1 through
+1,000,000. Every plan's project and record overrides are independent.
+
+The Max default remains below the existing 1,000,000-row operator envelope.
+Quota counters, D1 parameter bounds and native Number conversion accept these
+integer capacities without storing financial data inside account JSON. Money
+reports use split integer aggregates proven through 1,000,000 records; project
+and expense lists retain bounded pagination and CSV retains its streaming path.
+This establishes compatibility of the configured capacity, not a load or latency
+benchmark at 100,000 records.
 
 This is an operator binding, not a public settings endpoint or browser variable.
 Editing an example file alone does not update Cloudflare. Any remote settings

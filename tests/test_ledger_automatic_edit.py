@@ -258,6 +258,8 @@ def test_expense_edit_contract_and_recurring_inputs_keep_distinct_category_rules
     schemas = contract["components"]["schemas"]
     patch = schemas["ExpensePatchInput"]
     assert patch["allOf"] == [{"$ref": "#/components/schemas/ExpenseInput"}]
-    assert "categoryId" not in schemas["ExpenseInput"]["required"]
+    assert schemas["ExpenseInput"]["allOf"] == [{"$ref": "#/components/schemas/ExpenseFields"}]
+    assert schemas["ExpenseInput"]["unevaluatedProperties"] is False
+    assert "categoryId" not in schemas["ExpenseFields"]["required"]
     assert "categoryId" in schemas["RecurringExpenseFields"]["required"]
     assert "explicit" in schemas["RecurringExpenseFields"]["properties"]["categoryId"]["description"].lower()

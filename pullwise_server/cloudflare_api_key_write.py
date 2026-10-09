@@ -94,6 +94,8 @@ async def create_api_key(*, binding: Any, headers: Mapping[str, object],
         restrictions = parse_api_key_restrictions(body.get("restrictions"))
     except ValueError:
         return 400, {"error": {"code": "INVALID_RESTRICTION"}}
+    if "projectIds" in restrictions and any(scope.startswith("members:") for scope in scopes):
+        return 400, {"error": {"code": "INVALID_RESTRICTION"}}
     raw_expiry = body.get("expiresAt", body.get("expires_at"))
     expires_at = None
     if raw_expiry is not None:

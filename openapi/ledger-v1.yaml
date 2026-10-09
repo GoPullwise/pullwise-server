@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Pullwise Project Expense Ledger API
-  version: 0.8.0
+  version: 0.9.0
   description: |
     Current ledger contract for Pullwise, the project expense tracker for
     developers and teams at pull-wise.com. Users and authorized API clients
@@ -27,15 +27,18 @@ info:
     depends on the ledger owner's Pro or Max plan, current activation and usage budget;
     an explicit category permits manual entry when assistance is unavailable.
     Project development and product links are optional absolute HTTP(S) URLs.
-    Only the selected ledger Owner using a current cookie session may remove a
+    Only the selected ledger Owner using a current cookie session or an API key
+    with projects:write and permission for that project may remove a
     project. Removal is a soft tombstone, distinct from reversible archiving:
     the project and its expenses disappear from resource reads, reports and
     exports, and its recurring plans cannot generate further expenses. Stored
     financial records, audit history and commercial capacity accounting remain
     intact. Repository associations are released atomically; removed projects
-    cannot be restored through PATCH. API keys cannot remove projects.
-    Recurring expense rules require a cookie session and explicit expense-write
-    authority; API keys cannot create persistent background authority. Each
+    cannot be restored through PATCH.
+    Recurring expense rules use the same REST resource for browser sessions and
+    API keys with explicit expense authority. A key-created or key-resumed rule
+    retains only a credential hash; execution rechecks its current key scopes,
+    expiration, revocation, ledger binding and target restrictions. Each
     generated occurrence uses the current ledger owner's plan and the rule
     saved execution actor's current membership and GitHub access. A rule records one ordinary
     expense per calendar period without making a payment or extending a
@@ -49,8 +52,19 @@ info:
     operation time and exact changed record. Only the latest rolling 24 hours
     are visible, using the Server clock. History starts when activity logging
     is enabled; old financial audit events are not backfilled or deleted.
+    Member governance requires explicit members:read or members:write scopes.
+    Governance keys must omit projectIds, and every key remains bound to its
+    one ledger and issuer's current role. Owner/Admin can manage members; only
+    Owner can manage Admin, and only an invitation's original inviter can review
+    its applicants. Previewing or applying to an invitation uses the applicant's
+    browser account session rather than a ledger-bound key.
 servers:
+  - url: https://preview-api.pull-wise.com
+    description: Preview environment; use keys created in preview.pull-wise.com
+  - url: https://api.pull-wise.com
+    description: Production endpoint; ledger access is currently paused
   - url: /
+    description: Relative Server paths; Web proxies these through its /api prefix
 security:
   - cookieSession: []
   - bearerKey: []
@@ -58,7 +72,90 @@ tags:
   - name: Authentication
   - name: Ledger
   - name: Reports
+  - name: API Keys
+  - name: Account Billing
 paths:
+  /billing:
+    get:
+      operationId: getAccountBilling
+      x-pullwise-scope: account:billing
+      tags: [Account Billing]
+      security: [{cookieSession: []}]
+      description: Read the signed-in actor's own platform subscription account and personal-ledger capacity. API keys and Bearer session tokens are rejected. A workspace selector does not change billing ownership. Platform payments never create ledger expenses; ledgerUsage includes retained archived or removed records and uses the actor's personal effective plan.
+      responses:
+        '200': {description: Private account billing and personal-ledger capacity, content: {application/json: {schema: {$ref: '#/components/schemas/BillingPage'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {description: SERVER_UNAVAILABLE, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /billing/plan:
+    get:
+      operationId: getPublicBillingPlan
+      x-pullwise-scope: account:billing
+      tags: [Account Billing]
+      security: []
+      description: |
+        Read the fresh verified public plan catalog and current configured
+        entitlements. A current cookie session may additionally receive account
+        and ledgerUsage for that actor's personal ledger. Bearer credentials are
+        ignored for personalization, even if a cookie is also sent; invalid or
+        concurrently revoked cookie authentication falls back to public data.
+        Public responses omit account and ledgerUsage entirely. A missing or
+        expired trusted catalog returns BILLING_CATALOG_UNAVAILABLE rather than
+        inventing provider prices. This endpoint never calls the payment provider,
+        initializes capacity or grants a subscription through a GET.
+      responses:
+        '200': {description: Public catalog with optional cookie-only personal account and capacity, content: {application/json: {schema: {$ref: '#/components/schemas/BillingCatalog'}}}}
+        '503': {description: BILLING_CATALOG_UNAVAILABLE, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /api-keys:
+    get:
+      operationId: listAccountApiKeys
+      x-pullwise-scope: account:keys
+      tags: [API Keys]
+      security: [{cookieSession: []}]
+      description: List the signed-in actor's unrevoked key metadata. Bearer keys cannot manage credentials. An optional workspace selector filters keys to that accessible ledger; without a selector the actor's keys across ledgers are listed. Reads never return tokens or hashes.
+      parameters: [{$ref: '#/components/parameters/WorkspaceHeader'}, {$ref: '#/components/parameters/WorkspaceQuery'}]
+      responses:
+        '200': {description: Key metadata; apiKeys is a compatibility alias of items, content: {application/json: {schema: {type: object, required: [items, apiKeys], properties: {items: {type: array, items: {$ref: '#/components/schemas/ApiKey'}}, apiKeys: {type: array, items: {$ref: '#/components/schemas/ApiKey'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '422': {$ref: '#/components/responses/InvalidInput'}
+    post:
+      operationId: createAccountApiKey
+      x-pullwise-scope: account:keys
+      tags: [API Keys]
+      security: [{cookieSession: []}]
+      description: |
+        Use the signed-in actor's browser session and a trusted app Origin.
+        Select a ledger with X-Pullwise-Workspace or restrictions.workspaceId;
+        selectors must agree. Omission binds to the actor's personal ledger.
+        Scopes cannot exceed the actor's current selected-ledger role.
+        Explicit members scopes require omitting projectIds, including an empty
+        allowlist; conflicting scopes/restrictions return INVALID_RESTRICTION.
+        A selected team ledger's current membership revision is stored by the
+        Server; role or membership changes invalidate its existing keys.
+        The response displays key once. Store it in your application's secret
+        storage; the Server stores only its hash and cannot recover the token.
+      parameters: [{$ref: '#/components/parameters/WorkspaceHeader'}, {$ref: '#/components/parameters/AuthOrigin'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ApiKeyInput'}}}}
+      responses:
+        '201': {description: Metadata and one-time Bearer token, content: {application/json: {schema: {allOf: [{$ref: '#/components/schemas/ApiKey'}, {type: object, required: [key], properties: {key: {type: string, pattern: '^pwk_[A-Za-z0-9_-]{43}$'}}}]}}}}
+        '400': {description: INVALID_SCOPE or INVALID_RESTRICTION; malformed input or expiry, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+  /api-keys/{id}:
+    parameters: [{$ref: '#/components/parameters/Id'}]
+    delete:
+      operationId: revokeAccountApiKey
+      x-pullwise-scope: account:keys
+      tags: [API Keys]
+      security: [{cookieSession: []}]
+      description: Revoke one key issued by the signed-in actor using its real browser session and a trusted Origin. Revocation is immediate and remains available after commercial write quota exhaustion. Other actors cannot revoke this key. This route returns 200 with JSON rather than 204.
+      parameters: [{$ref: '#/components/parameters/AuthOrigin'}]
+      responses:
+        '200': {description: Key revoked, content: {application/json: {schema: {type: object, required: [ok, id, revoked], properties: {ok: {const: true}, id: {type: string}, revoked: {const: true}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
   /auth/session:
     get:
       operationId: getAccountSession
@@ -84,8 +181,8 @@ paths:
           description: Session revoked; pw_session is cleared with Max-Age 0
           headers: {Cache-Control: {$ref: '#/components/headers/NoStore'}, Set-Cookie: {$ref: '#/components/headers/AuthCookie'}}
           content: {application/json: {schema: {type: object, required: [ok], properties: {ok: {type: boolean, const: true}}}}}
-        '401': {description: UNAUTHENTICATED; a current cookie session is required}
-        '403': {description: UNTRUSTED_ORIGIN}
+        '401': {description: UNAUTHENTICATED; a current cookie session is required, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '403': {description: UNTRUSTED_ORIGIN, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /auth/email/request-code:
     post:
       operationId: requestEmailCode
@@ -118,15 +215,16 @@ paths:
           description: Code request accepted; only challenge metadata is returned
           headers: {Cache-Control: {$ref: '#/components/headers/NoStore'}, Set-Cookie: {$ref: '#/components/headers/AuthCookie'}}
           content: {application/json: {schema: {$ref: '#/components/schemas/EmailCodeChallenge'}}}
-        '401': {description: UNAUTHENTICATED for link without a current cookie session}
-        '403': {description: UNTRUSTED_ORIGIN}
-        '409': {description: EMAIL_ALREADY_LINKED for authenticated linking to another account's email before code sending or cooldown; EMAIL_CHANGE_NOT_SUPPORTED when replacing a different verified login email}
-        '413': {description: REQUEST_TOO_LARGE; JSON exceeds 8 KiB}
-        '422': {description: INVALID_INPUT; unknown fields, invalid email or unsupported purpose}
+        '401': {description: UNAUTHENTICATED for link without a current cookie session, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '403': {description: UNTRUSTED_ORIGIN, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '409': {description: EMAIL_ALREADY_LINKED for authenticated linking to another account's email before code sending or cooldown; EMAIL_CHANGE_NOT_SUPPORTED when replacing a different verified login email, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: REQUEST_TOO_LARGE; JSON exceeds 8 KiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '422': {description: "INVALID_INPUT; unknown fields, invalid email or unsupported purpose", content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '429':
           description: EMAIL_RATE_LIMIT; email and source admission or the 60-second resend interval was exceeded
           headers: {Retry-After: {$ref: '#/components/headers/AuthRetryAfter'}}
-        '503': {description: EMAIL_AUTH_NOT_CONFIGURED, EMAIL_AUTH_UNAVAILABLE or EMAIL_SEND_UNAVAILABLE; no automatic resend}
+          content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}
+        '503': {description: "EMAIL_AUTH_NOT_CONFIGURED, EMAIL_AUTH_UNAVAILABLE or EMAIL_SEND_UNAVAILABLE; no automatic resend", content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /auth/email/verify-code:
     post:
       operationId: verifyEmailCode
@@ -155,16 +253,17 @@ paths:
           description: Verified account session; login sets pw_session, link keeps it and clears the challenge cookie
           headers: {Cache-Control: {$ref: '#/components/headers/NoStore'}, Set-Cookie: {$ref: '#/components/headers/AuthCookie'}}
           content: {application/json: {schema: {$ref: '#/components/schemas/AccountSession'}}}
-        '400': {description: EMAIL_CODE_INVALID for wrong, replayed or browser-unbound proof; EMAIL_CODE_EXPIRED at the exact 600-second deadline}
-        '401': {description: UNAUTHENTICATED; the original link session was changed, revoked or expired}
-        '403': {description: UNTRUSTED_ORIGIN}
-        '409': {description: EMAIL_ALREADY_LINKED or ACCOUNT_CHANGED; no account merge or overwrite of concurrent account facts}
-        '413': {description: REQUEST_TOO_LARGE; JSON exceeds 8 KiB}
-        '422': {description: INVALID_INPUT; unknown fields or malformed email, challenge ID or code}
+        '400': {description: "EMAIL_CODE_INVALID for wrong, replayed or browser-unbound proof; EMAIL_CODE_EXPIRED at the exact 600-second deadline", content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '401': {description: "UNAUTHENTICATED; the original link session was changed, revoked or expired", content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '403': {description: UNTRUSTED_ORIGIN, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '409': {description: EMAIL_ALREADY_LINKED or ACCOUNT_CHANGED; no account merge or overwrite of concurrent account facts, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: REQUEST_TOO_LARGE; JSON exceeds 8 KiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '422': {description: "INVALID_INPUT; unknown fields or malformed email, challenge ID or code", content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '429':
           description: EMAIL_RATE_LIMIT or EMAIL_ATTEMPTS_EXCEEDED; no account or session write
           headers: {Retry-After: {$ref: '#/components/headers/AuthRetryAfter'}}
-        '503': {description: EMAIL_AUTH_NOT_CONFIGURED, EMAIL_AUTH_UNAVAILABLE or EMAIL_IDENTITY_UNAVAILABLE; no implicit identity repair}
+          content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}
+        '503': {description: "EMAIL_AUTH_NOT_CONFIGURED, EMAIL_AUTH_UNAVAILABLE or EMAIL_IDENTITY_UNAVAILABLE; no implicit identity repair", content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /auth/github/authorize:
     get:
       operationId: authorizeGithubAccount
@@ -188,10 +287,10 @@ paths:
       responses:
         '200': {description: OAuth authorization URL, headers: {Cache-Control: {$ref: '#/components/headers/NoStore'}}, content: {application/json: {schema: {type: object, required: [url, mode], properties: {url: {type: string, format: uri}, mode: {type: string, const: github}}}}}}
         '302': {description: Redirect to the GitHub OAuth authorization URL}
-        '401': {description: UNAUTHENTICATED for explicit link without a current cookie session}
-        '403': {description: UNTRUSTED_ORIGIN for explicit link}
-        '422': {description: INVALID_INPUT; unsupported intent}
-        '503': {description: GITHUB_NOT_CONFIGURED}
+        '401': {description: UNAUTHENTICATED for explicit link without a current cookie session, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '403': {description: UNTRUSTED_ORIGIN for explicit link, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '422': {description: INVALID_INPUT; unsupported intent, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '503': {description: GITHUB_NOT_CONFIGURED, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /auth/github/callback:
     get:
       operationId: completeGithubAccountAuthorization
@@ -205,16 +304,16 @@ paths:
         - {name: error, in: query, schema: {type: string}}
       responses:
         '302': {description: Trusted app redirect after sign-in or linking, headers: {Cache-Control: {$ref: '#/components/headers/NoStore'}, Set-Cookie: {$ref: '#/components/headers/AuthCookie'}}}
-        '400': {description: OAUTH_STATE_INVALID; absent, expired or consumed state}
-        '401': {description: UNAUTHENTICATED; original link session is missing or changed}
-        '409': {description: GITHUB_IDENTITY_CONFLICT or ACCOUNT_CHANGED; account IDs and billing are preserved}
-        '502': {description: GITHUB_PROFILE_INVALID; no trusted numeric identity}
+        '400': {description: "OAUTH_STATE_INVALID; absent, expired or consumed state", content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '401': {description: UNAUTHENTICATED; original link session is missing or changed, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '409': {description: GITHUB_IDENTITY_CONFLICT or ACCOUNT_CHANGED; account IDs and billing are preserved, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '502': {description: GITHUB_PROFILE_INVALID; no trusted numeric identity, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /api/v1/workspaces:
     get:
       operationId: listWorkspaces
-      x-pullwise-scope: profile:read
-      security: [{cookieSession: []}]
-      description: Personal ledger first, then explicitly joined ledgers; no GET-side initialization.
+      x-pullwise-scope: members:read
+      security: [{cookieSession: []}, {bearerKey: []}]
+      description: Cookie sessions list the personal ledger first and explicitly joined ledgers. A members:read key lists only its bound ledger. Reads never initialize data.
       responses:
         '200': {description: Current accessible ledgers, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Workspace'}}}}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
@@ -222,8 +321,8 @@ paths:
     parameters: [{$ref: '#/components/parameters/WorkspacePath'}]
     get:
       operationId: listWorkspaceMembers
-      x-pullwise-scope: profile:read
-      security: [{cookieSession: []}]
+      x-pullwise-scope: members:read
+      security: [{cookieSession: []}, {bearerKey: []}]
       responses:
         '200': {description: Owner and current members, content: {application/json: {schema: {type: object, required: [items, workspace], properties: {items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/WorkspaceMember'}}, workspace: {$ref: '#/components/schemas/Workspace'}}}}}}
         '404': {$ref: '#/components/responses/NotFound'}
@@ -231,8 +330,8 @@ paths:
     parameters: [{$ref: '#/components/parameters/WorkspacePath'}, {name: userId, in: path, required: true, schema: {type: string}}]
     patch:
       operationId: updateWorkspaceMember
-      x-pullwise-scope: profile:read
-      security: [{cookieSession: []}]
+      x-pullwise-scope: members:write
+      security: [{cookieSession: []}, {bearerKey: []}]
       description: Owner can grant Admin/Editor/Viewer. Admin can manage only Editor/Viewer. Owner cannot be changed or removed.
       parameters: [{$ref: '#/components/parameters/IfMatch'}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [role], properties: {role: {$ref: '#/components/schemas/AssignableRole'}}}}}}
@@ -242,8 +341,8 @@ paths:
         '412': {$ref: '#/components/responses/PreconditionFailed'}
     delete:
       operationId: removeWorkspaceMember
-      x-pullwise-scope: profile:read
-      security: [{cookieSession: []}]
+      x-pullwise-scope: members:write
+      security: [{cookieSession: []}, {bearerKey: []}]
       parameters: [{$ref: '#/components/parameters/IfMatch'}]
       responses:
         '204': {description: Removed; subsequent resource and key requests fail current membership checks}
@@ -253,16 +352,16 @@ paths:
     parameters: [{$ref: '#/components/parameters/WorkspacePath'}]
     get:
       operationId: listWorkspaceInvites
-      x-pullwise-scope: profile:read
-      security: [{cookieSession: []}]
+      x-pullwise-scope: members:read
+      security: [{cookieSession: []}, {bearerKey: []}]
       description: Owner/Admin only. Tokens and hashes are never returned by reads.
       responses:
         '200': {description: Pending unexpired invitations, content: {application/json: {schema: {type: object, properties: {items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/WorkspaceInvitation'}}}}}}}
         '403': {$ref: '#/components/responses/Forbidden'}
     post:
       operationId: inviteWorkspaceMember
-      x-pullwise-scope: profile:read
-      security: [{cookieSession: []}]
+      x-pullwise-scope: members:write
+      security: [{cookieSession: []}, {bearerKey: []}]
       description: Create an unassigned 24-hour invitation link with a role. The token is displayed once; the original inviter must approve an authenticated applicant before membership is granted. Financial roles do not grant GitHub access.
       requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [role], properties: {role: {$ref: '#/components/schemas/AssignableRole'}}}}}}
       responses:
@@ -273,8 +372,8 @@ paths:
     parameters: [{$ref: '#/components/parameters/WorkspacePath'}, {$ref: '#/components/parameters/Id'}]
     delete:
       operationId: revokeWorkspaceInvitation
-      x-pullwise-scope: profile:read
-      security: [{cookieSession: []}]
+      x-pullwise-scope: members:write
+      security: [{cookieSession: []}, {bearerKey: []}]
       parameters: [{$ref: '#/components/parameters/IfMatch'}]
       responses:
         '204': {description: Invitation permanently revoked}
@@ -291,7 +390,7 @@ paths:
         '200': {description: Invitation and applicant request or current approved membership, content: {application/json: {schema: {$ref: '#/components/schemas/WorkspaceInvitationPreview'}}}}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
-        '410': {description: INVITATION_EXPIRED, INVITATION_REVOKED, or INVITATION_ACCEPTED without a current active membership}
+        '410': {description: "INVITATION_EXPIRED, INVITATION_REVOKED, or INVITATION_ACCEPTED without a current active membership", content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /api/v1/workspace-invitations/accept:
     post:
       operationId: acceptWorkspaceInvitation
@@ -305,23 +404,23 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
-        '410': {description: INVITATION_ACCEPTED, INVITATION_REVOKED, or INVITATION_EXPIRED; no request or membership write}
+        '410': {description: "INVITATION_ACCEPTED, INVITATION_REVOKED, or INVITATION_EXPIRED; no request or membership write", content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /api/v1/workspace-invitation-requests:
     get:
       operationId: listWorkspaceInvitationRequests
-      x-pullwise-scope: profile:read
-      security: [{cookieSession: []}]
-      description: Durable cross-ledger inbox for the current original inviter. Returns up to 100 oldest actionable pending requests plus hasMore; expiry, revocation, consumed links and lost inviter authority remove requests from the actionable inbox. Reads never mark notifications or mutate data.
+      x-pullwise-scope: members:read
+      security: [{cookieSession: []}, {bearerKey: []}]
+      description: Durable inbox for the current original inviter. Cookie sessions can read across currently authorized ledgers; a members:read key sees only its bound ledger. Returns up to 100 oldest actionable pending requests plus hasMore; expiry, revocation, consumed links and lost inviter authority remove requests from the actionable inbox. Reads never mark notifications or mutate data.
       responses:
-        '200': {description: Pending requests with applicant identity, invitation and ledger, content: {application/json: {schema: {type: object, required: [items, hasMore], properties: {items: {type: array, maxItems: 100, items: {allOf: [{$ref: '#/components/schemas/WorkspaceJoinRequest'}, {type: object, required: [invitation, workspace], properties: {invitation: {$ref: '#/components/schemas/WorkspaceInvitation'}, workspace: {$ref: '#/components/schemas/Workspace'}}}]}}, hasMore: {type: boolean}}}}}}
+        '200': {description: "Pending requests with applicant identity, invitation and ledger", content: {application/json: {schema: {type: object, required: [items, hasMore], properties: {items: {type: array, maxItems: 100, items: {allOf: [{$ref: '#/components/schemas/WorkspaceJoinRequest'}, {type: object, required: [invitation, workspace], properties: {invitation: {$ref: '#/components/schemas/WorkspaceInvitation'}, workspace: {$ref: '#/components/schemas/Workspace'}}}]}}, hasMore: {type: boolean}}}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
   /api/v1/workspaces/{workspaceId}/join-requests:
     parameters: [{$ref: '#/components/parameters/WorkspacePath'}]
     get:
       operationId: listWorkspaceJoinRequests
-      x-pullwise-scope: profile:read
-      security: [{cookieSession: []}]
+      x-pullwise-scope: members:read
+      security: [{cookieSession: []}, {bearerKey: []}]
       description: Current Owner/Admin only. Durable inbox scoped to this ledger and invitations created by the current actor. Returns up to 100 oldest actionable pending requests plus hasMore.
       responses:
         '200': {description: Pending requests with applicant identity and ledger invitation, content: {application/json: {schema: {type: object, required: [items, hasMore], properties: {items: {type: array, maxItems: 100, items: {allOf: [{$ref: '#/components/schemas/WorkspaceJoinRequest'}, {type: object, required: [invitation, workspace], properties: {invitation: {$ref: '#/components/schemas/WorkspaceInvitation'}, workspace: {$ref: '#/components/schemas/Workspace'}}}]}}, hasMore: {type: boolean}}}}}}
@@ -331,8 +430,8 @@ paths:
     parameters: [{$ref: '#/components/parameters/WorkspacePath'}, {$ref: '#/components/parameters/Id'}]
     get:
       operationId: listWorkspaceInvitationJoinRequests
-      x-pullwise-scope: profile:read
-      security: [{cookieSession: []}]
+      x-pullwise-scope: members:read
+      security: [{cookieSession: []}, {bearerKey: []}]
       description: Current original inviter only. List up to 100 actionable pending applicants for this invitation.
       responses:
         '200': {description: Pending join requests, content: {application/json: {schema: {type: object, required: [items, hasMore], properties: {items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/WorkspaceJoinRequest'}}, hasMore: {type: boolean}}}}}}
@@ -342,8 +441,8 @@ paths:
     parameters: [{$ref: '#/components/parameters/WorkspacePath'}, {$ref: '#/components/parameters/Id'}, {$ref: '#/components/parameters/JoinRequestPath'}]
     post:
       operationId: approveWorkspaceJoinRequest
-      x-pullwise-scope: profile:read
-      security: [{cookieSession: []}]
+      x-pullwise-scope: members:write
+      security: [{cookieSession: []}, {bearerKey: []}]
       parameters: [{$ref: '#/components/parameters/IfMatch'}]
       description: Current original inviter only. Atomically approve one pending request, grant the link's role, consume the link and append the audit event. Other pending applicants become unavailable. If-Match is the request revision; stale authority, membership or invitation revisions cannot commit partial changes.
       requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
@@ -352,14 +451,14 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
-        '410': {description: Invitation no longer actionable}
+        '410': {description: Invitation no longer actionable, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '412': {$ref: '#/components/responses/PreconditionFailed'}
   /api/v1/workspaces/{workspaceId}/invites/{id}/requests/{requestId}/reject:
     parameters: [{$ref: '#/components/parameters/WorkspacePath'}, {$ref: '#/components/parameters/Id'}, {$ref: '#/components/parameters/JoinRequestPath'}]
     post:
       operationId: rejectWorkspaceJoinRequest
-      x-pullwise-scope: profile:read
-      security: [{cookieSession: []}]
+      x-pullwise-scope: members:write
+      security: [{cookieSession: []}, {bearerKey: []}]
       parameters: [{$ref: '#/components/parameters/IfMatch'}]
       description: Current original inviter only. Reject a pending applicant and append the audit event without granting membership or consuming the invitation. The rejected applicant cannot resubmit on the same link. If-Match is the request revision.
       requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
@@ -368,7 +467,7 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
-        '410': {description: Invitation no longer actionable}
+        '410': {description: Invitation no longer actionable, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '412': {$ref: '#/components/responses/PreconditionFailed'}
   /api/v1/me:
     get:
@@ -376,7 +475,7 @@ paths:
       operationId: getLedgerMe
       x-pullwise-scope: profile:read
       responses:
-        '200': {description: Current identity, ledger capabilities and entitlements, content: {application/json: {schema: {$ref: '#/components/schemas/Me'}}}}
+        '200': {description: "Current identity, ledger capabilities and entitlements", content: {application/json: {schema: {$ref: '#/components/schemas/Me'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
   /api/v1/repositories:
     get:
@@ -387,8 +486,8 @@ paths:
         '200': {description: Current actor GitHub App repositories ordered by stable numeric ID; cursor is the last repository ID. No automatic binding or installation expansion, content: {application/json: {schema: {$ref: '#/components/schemas/RepositoryPage'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
-        '502': {description: Invalid bounded GitHub response; error code GITHUB_RESPONSE_INVALID}
-        '503': {description: GitHub temporarily unavailable, rate limited, or credential decryption/configuration failure; no automatic retry or token refresh}
+        '502': {description: Invalid bounded GitHub response; error code GITHUB_RESPONSE_INVALID, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '503': {description: "GitHub temporarily unavailable, rate limited, or credential decryption/configuration failure; no automatic retry or token refresh", content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /api/v1/projects:
     get:
       operationId: listLedgerProjects
@@ -414,7 +513,7 @@ paths:
       operationId: getLedgerProject
       x-pullwise-scope: projects:read
       responses:
-        '200': {description: Project, including authorization state and totals, content: {application/json: {schema: {$ref: '#/components/schemas/Project'}}}}
+        '200': {description: "Project, including authorization state and totals", content: {application/json: {schema: {$ref: '#/components/schemas/Project'}}}}
         '404': {$ref: '#/components/responses/NotFound'}
     patch:
       operationId: updateLedgerProject
@@ -429,18 +528,18 @@ paths:
     delete:
       operationId: removeLedgerProject
       x-pullwise-scope: projects:write
-      security: [{cookieSession: []}]
-      description: Current cookie-session Owner of the selected ledger only; Admin, Editor, Viewer and every API key are rejected. Requires a trusted app Origin and the current If-Match revision. Atomically tombstones the project, releases at most 30 repository associations and records the actual actor. Retains all financial, recurring and audit rows without a bulk cascade. The removed project's expenses and recurring rules become inaccessible, leave list/report/export results and cannot generate new expenses. Shared-pool expenses are unchanged. Capacity totals are not reclaimed. Repeating removal of the same authorized tombstone is read-only; PATCH cannot resurrect it.
+      security: [{cookieSession: []}, {bearerKey: []}]
+      description: Current Owner of the selected ledger only. An Owner API key requires projects:write and permission for this project; Admin, Editor and Viewer cannot remove projects. Cookie writes require a trusted app Origin. Both forms require the current If-Match revision. Atomically tombstones the project, releases at most 30 repository associations and records the actual actor. Retains all financial, recurring and audit rows without a bulk cascade. The removed project's expenses and recurring rules become inaccessible, leave list/report/export results and cannot generate new expenses. Shared-pool expenses are unchanged. Capacity totals are not reclaimed. Repeating removal of the same authorized tombstone is read-only; PATCH cannot resurrect it.
       parameters: [{$ref: '#/components/parameters/IfMatch'}, {$ref: '#/components/parameters/WorkspaceHeader'}, {$ref: '#/components/parameters/AuthOrigin'}]
       responses:
         '204': {description: Project removed or already removed within the same authorized ledger}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
-        '409': {description: Revision or repository-binding limit reached}
+        '409': {description: Revision or repository-binding limit reached, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '412': {$ref: '#/components/responses/PreconditionFailed'}
         '422': {$ref: '#/components/responses/InvalidInput'}
-        '428': {description: If-Match is required}
+        '428': {description: If-Match is required, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '429': {$ref: '#/components/responses/RateLimited'}
   /api/v1/categories:
     get:
@@ -463,6 +562,7 @@ paths:
     patch:
       operationId: updateExpenseCategory
       x-pullwise-scope: categories:write
+      description: Replace the category label with a required nonblank name. Omitted color becomes null. Archived categories cannot be renamed.
       parameters: [{$ref: '#/components/parameters/IfMatch'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CategoryInput'}}}}
       responses:
@@ -501,10 +601,10 @@ paths:
             schema: {type: object, additionalProperties: false}
       responses:
         '204': {description: Removed unused category}
-        '409': {description: CATEGORY_IN_USE; archive this category to retain its history}
+        '409': {description: CATEGORY_IN_USE; archive this category to retain its history, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '404': {$ref: '#/components/responses/NotFound'}
         '412': {$ref: '#/components/responses/PreconditionFailed'}
-        '428': {description: If-Match is required}
+        '428': {description: If-Match is required, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '422': {$ref: '#/components/responses/InvalidInput'}
         '429': {$ref: '#/components/responses/RateLimited'}
   /api/v1/expenses:
@@ -557,6 +657,9 @@ paths:
       operationId: updateExpense
       x-pullwise-scope: expenses:write
       description: |
+        Send the complete editable expense input, including target, occurredOn,
+        amount, currency and purpose. This endpoint replaces those fields; it
+        does not merge a partial body. Omitted note, quantity and unit become null.
         Requires the current If-Match revision before inference. Moving an
         expense checks write authority on both old and new targets. When the
         ledger owner's Pro or Max plan, activation gates and usage budget allow it,
@@ -622,18 +725,18 @@ paths:
       responses:
         '200': {description: Structured dimension checks for the unchanged saved revision, content: {application/json: {schema: {$ref: '#/components/schemas/ExpenseReview'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
-        '403': {description: JEV_PLAN_REQUIRED for a noncurrent paid Owner plan, or current actor/scope/target authority forbidden}
+        '403': {description: "JEV_PLAN_REQUIRED for a noncurrent paid Owner plan, or current actor/scope/target authority forbidden", content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '404': {$ref: '#/components/responses/NotFound'}
         '412': {$ref: '#/components/responses/PreconditionFailed'}
         '422': {$ref: '#/components/responses/InvalidInput'}
-        '428': {description: If-Match is required before model admission}
-        '429': {description: SUGGESTION_LIMIT at the existing daily attempt limit or JEV_BUDGET_LIMIT at the shared monthly reservation limit}
+        '428': {description: If-Match is required before model admission, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '429': {description: SUGGESTION_LIMIT at the existing daily attempt limit or JEV_BUDGET_LIMIT at the shared monthly reservation limit, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /api/v1/expense-recurring-rules:
     get:
       operationId: listRecurringExpenseRules
       x-pullwise-scope: expenses:read
-      security: [{cookieSession: []}]
-      description: Current ledger rules excluding canceled entries. Reads never generate expenses. All current ledger members with expense-read authority can inspect rules.
+      security: [{cookieSession: []}, {bearerKey: []}]
+      description: Current ledger rules excluding canceled entries. Reads never generate expenses. Session and expenses:read key readers use the same DTO; keys see only targets permitted by their current restrictions.
       parameters: [{$ref: '#/components/parameters/Target'}, {$ref: '#/components/parameters/ProjectId'}, {$ref: '#/components/parameters/Limit'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       responses:
         '200': {description: Paginated rules, content: {application/json: {schema: {$ref: '#/components/schemas/RecurringExpensePage'}}}}
@@ -642,11 +745,14 @@ paths:
     post:
       operationId: createRecurringExpenseRule
       x-pullwise-scope: expenses:write
-      security: [{cookieSession: []}]
+      security: [{cookieSession: []}, {bearerKey: []}]
       description: |
         Create an automation with an explicit existing active category and a
-        currently authorized project/shared target. The creating session user
-        is initially its execution actor; session tokens are never stored in the rule.
+        currently authorized project/shared target. The authenticated key issuer
+        or session user is initially its execution actor. Session and key tokens
+        are never stored in the rule. Key grants retain a credential hash and
+        recheck expiration, revocation, expenses:write, ledger binding, membership
+        revision and project/shared restrictions before every generated expense.
         At most 100 noncanceled rules per ledger is an operational bound,
         independent of the owner's paid plan. An exact repeated creation key
         replays its original DTO; different input with that key conflicts.
@@ -665,7 +771,7 @@ paths:
     get:
       operationId: getRecurringExpenseRule
       x-pullwise-scope: expenses:read
-      security: [{cookieSession: []}]
+      security: [{cookieSession: []}, {bearerKey: []}]
       parameters: [{$ref: '#/components/parameters/WorkspaceHeader'}]
       responses:
         '200': {description: Authorized rule, content: {application/json: {schema: {$ref: '#/components/schemas/RecurringExpenseRule'}}}}
@@ -673,12 +779,14 @@ paths:
     patch:
       operationId: updateRecurringExpenseRule
       x-pullwise-scope: expenses:write
-      security: [{cookieSession: []}]
+      security: [{cookieSession: []}, {bearerKey: []}]
       description: |
         Pause or resume with a status-only body, or replace the complete
         template and calendar. The target is immutable. A complete edit or
-        explicit resume rechecks the current session user's write and project
-        access, then makes that user the saved execution actor. The original
+        explicit resume rechecks the current actor's write and project
+        access, then makes that actor the saved execution actor and adopts the
+        credential used for that write. A session edit/resume removes an old key
+        grant; a key edit/resume binds the automation to that key. The original
         creation key and replay response remain immutable.
         Canceled rules cannot resume. Changes affect future occurrences only;
         after an edit/resume the next occurrence is strictly after the current
@@ -692,13 +800,13 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
         '412': {$ref: '#/components/responses/PreconditionFailed'}
-        '428': {description: If-Match is required}
+        '428': {description: If-Match is required, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '422': {$ref: '#/components/responses/InvalidInput'}
         '429': {$ref: '#/components/responses/RateLimited'}
     delete:
       operationId: cancelRecurringExpenseRule
       x-pullwise-scope: expenses:write
-      security: [{cookieSession: []}]
+      security: [{cookieSession: []}, {bearerKey: []}]
       description: Permanently cancel automation while retaining all generated expense and occurrence history. This remains available after commercial quota exhaustion.
       parameters: [{$ref: '#/components/parameters/IfMatch'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       responses:
@@ -706,7 +814,7 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '412': {$ref: '#/components/responses/PreconditionFailed'}
-        '428': {description: If-Match is required}
+        '428': {description: If-Match is required, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /api/v1/activity:
     get:
       tags: [Ledger]
@@ -721,8 +829,9 @@ paths:
         cannot extend the window with dates or their own clock. GET performs no
         cleanup writes and makes no external provider requests.
         Cookie members see expense, project settings and recurring-rule activity.
-        Expense-read API keys see only expense activity within their current
-        workspace and target restrictions. A move appears in both affected pools;
+        Expense-read API keys see expense and recurring-rule activity within
+        their current workspace and target restrictions. Project-setting activity
+        additionally requires projects:read on the same key. A move appears in both affected pools;
         a restricted key sees only the target change and the permitted-side
         record label when the opposite pool is outside its allowlist.
         Actors are immutable name/GitHub-login/user-ID snapshots. Email-only
@@ -754,7 +863,7 @@ paths:
       x-pullwise-scope: reports:read
       parameters: [{$ref: '#/components/parameters/Target'}, {$ref: '#/components/parameters/ProjectId'}, {$ref: '#/components/parameters/CategoryId'}, {$ref: '#/components/parameters/From'}, {$ref: '#/components/parameters/To'}, {$ref: '#/components/parameters/Currency'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       responses:
-        '200': {description: Separate project, shared and account totals by currency, content: {application/json: {schema: {$ref: '#/components/schemas/Report'}}}}
+        '200': {description: "Separate project, shared and account totals by currency", content: {application/json: {schema: {$ref: '#/components/schemas/Report'}}}}
   /api/v1/reports/timeseries:
     get:
       operationId: getLedgerTimeseries
@@ -777,9 +886,9 @@ paths:
       description: Advanced draft advice only; ordinary expense writes already attempt eligible Pro or Max assistance without this endpoint or its scope. Never writes an expense. Disabled unless evaluated and enabled. Requires the ledger owner's current paid plan, irrespective of the actor's personal plan. Shares the ledger owner's limit of 20 attempts per UTC day and monthly Jev reservation with automatic assistance; defaults are USD 3 for Pro and USD 5 for Max per UTC calendar month, without rollover.
       requestBody: {required: true, content: {application/json: {schema: {type: object, required: [purpose, target], properties: {purpose: {type: string, maxLength: 500}, note: {type: string, maxLength: 4000}, occurredOn: {type: string, format: date}, amount: {type: string, description: Decimal amount in selected currency}, currency: {type: string, pattern: "^[A-Z]{3}$"}, target: {$ref: '#/components/schemas/Target'}}}}}}
       responses:
-        '200': {description: Status, optional suggestionId, candidates and probabilities; never an expense write, content: {application/json: {schema: {type: object, properties: {status: {type: string, enum: [available, uncertain, unavailable]}, suggestionId: {type: string}, questionVersion: {type: string}, modelVersion: {type: [string, 'null']}, suggestions: {type: object, properties: {categoryId: {type: string}, targetKind: {type: string}, duplicateExpenseId: {type: string}}}, probabilities: {type: object}}}}}}
-        '403': {description: JEV_PLAN_REQUIRED when the ledger owner has no current Pro or Max plan, or current scope/target authority is forbidden}
-        '429': {description: Ledger owner rate or daily/monthly suggestion budget exhausted}
+        '200': {description: "Status, optional suggestionId, candidates and probabilities; never an expense write", content: {application/json: {schema: {type: object, properties: {status: {type: string, enum: [available, uncertain, unavailable]}, suggestionId: {type: string}, questionVersion: {type: string}, modelVersion: {type: [string, 'null']}, suggestions: {type: object, properties: {categoryId: {type: string}, targetKind: {type: string}, duplicateExpenseId: {type: string}}}, probabilities: {type: object}}}}}}
+        '403': {description: "JEV_PLAN_REQUIRED when the ledger owner has no current Pro or Max plan, or current scope/target authority is forbidden", content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '429': {description: Ledger owner rate or daily/monthly suggestion budget exhausted, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /api/v1/expense-suggestions/{id}/decision:
     post:
       operationId: recordExpenseSuggestionDecision
@@ -794,7 +903,7 @@ paths:
 components:
   headers:
     NoStore: {description: Authentication responses are never cached, schema: {type: string, const: no-store}}
-    AuthCookie: {description: Secure HttpOnly cookie with Path / and the configured SameSite policy; pw_email_challenge lasts 600 seconds, pw_session lasts 604800 seconds, and explicit clearing uses Max-Age 0, schema: {type: string}}
+    AuthCookie: {description: "Secure HttpOnly cookie with Path / and the configured SameSite policy; pw_email_challenge lasts 600 seconds, pw_session lasts 604800 seconds, and explicit clearing uses Max-Age 0", schema: {type: string}}
     AuthRetryAfter: {description: Minimum whole seconds before another request is admitted, schema: {type: integer, minimum: 1}}
   requestBodies:
     InvitationToken:
@@ -822,14 +931,189 @@ components:
     Cursor: {name: cursor, in: query, schema: {type: string, pattern: '^[A-Za-z0-9_-]{1,120}$'}}
     Limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
   responses:
-    Unauthorized: {description: Authentication required}
-    Forbidden: {description: Scope, target, GitHub authorization or plan capacity insufficient}
-    NotFound: {description: Resource absent or outside the authorized ledger}
-    Conflict: {description: Idempotency conflict or a quota window changed; reload before retrying}
-    PreconditionFailed: {description: Revision does not match If-Match}
-    InvalidInput: {description: Invalid or missing field. CATEGORY_REQUIRED on create or edit may include top-level assistance when eligible Pro or Max inference is unavailable or cannot confidently select an existing active category. No expense is created or updated in that case.}
-    RateLimited: {description: Runtime request rate or ledger owner write allowance exhausted. Jev budget exhaustion falls back to manual completion for ordinary expense writes and does not block a write with an explicit category.}
+    Unauthorized: {description: Authentication required, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    Forbidden: {description: "Scope, target, GitHub authorization or plan capacity insufficient", content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    NotFound: {description: Resource absent or outside the authorized ledger, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    Conflict: {description: Idempotency conflict or a quota window changed; reload before retrying, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    PreconditionFailed: {description: Revision does not match If-Match, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    InvalidInput: {description: Invalid or missing field. CATEGORY_REQUIRED on create or edit may include top-level assistance when eligible Pro or Max inference is unavailable or cannot confidently select an existing active category. No expense is created or updated in that case., content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    RateLimited: {description: Runtime request rate or ledger owner write allowance exhausted. Jev budget exhaustion falls back to manual completion for ordinary expense writes and does not block a write with an explicit category., content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   schemas:
+    BillingPage:
+      type: object
+      required: [page, account, ledgerUsage]
+      properties:
+        page:
+          type: object
+          required: [id, subscriptionAction, checkoutAction]
+          properties:
+            id: {const: billing}
+            subscriptionAction: {type: object, required: [label, href], properties: {label: {const: View pricing}, href: {const: /pricing}}}
+            checkoutAction: {type: 'null'}
+        account: {$ref: '#/components/schemas/BillingAccount'}
+        ledgerUsage: {$ref: '#/components/schemas/LedgerUsage'}
+    BillingCatalog:
+      type: object
+      required: [provider, enabled, currency, plans, page]
+      properties:
+        provider: {type: string, enum: [creem, disabled]}
+        enabled: {type: boolean}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        plans: {type: array, minItems: 3, maxItems: 3, items: {$ref: '#/components/schemas/BillingPlan'}}
+        page:
+          type: object
+          required: [id, checkoutAction, billingRoute]
+          properties:
+            id: {const: pricing}
+            checkoutAction: {type: object, required: [method, href], properties: {method: {const: POST}, href: {const: /billing/checkout-sessions}}}
+            billingRoute: {const: /billing}
+        account: {$ref: '#/components/schemas/BillingAccount'}
+        ledgerUsage: {$ref: '#/components/schemas/LedgerUsage'}
+        name: {type: string, description: Optional compatibility label for the Pro plan}
+        description: {type: string}
+        interval: {type: string, enum: [month, year]}
+        amount: {type: [string, 'null'], description: Optional compatibility Pro monthly price; use the plan's explicit prices instead}
+    BillingPlan:
+      type: object
+      required: [id, name, description, entitlements, prices]
+      properties:
+        id: {type: string, enum: [free, pro, max]}
+        name: {type: string}
+        description: {type: string}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        entitlements: {$ref: '#/components/schemas/Entitlements'}
+        prices:
+          type: object
+          required: [month]
+          properties:
+            month: {$ref: '#/components/schemas/BillingPrice'}
+            year: {$ref: '#/components/schemas/BillingPrice'}
+    BillingPrice:
+      type: object
+      required: [amount, currency, interval, configured]
+      properties:
+        amount: {type: [string, 'null'], description: Verified decimal price; null means unavailable rather than zero}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        interval: {type: string, enum: [month, year]}
+        configured: {type: boolean}
+        productId: {type: [string, 'null']}
+        billingPeriod: {type: [string, 'null'], enum: [every-month, every-year, null]}
+    BillingAccount:
+      type: object
+      required: [provider, status, plan, interval, customerId, subscriptionId, subscriptionItemId, customerEmail, currentPeriodStart, currentPeriodEnd, cancelAtPeriodEnd, canceledAt, lastEventId, lastEventType, lastEventCreated, updatedAt, entitlements, previewPlanGrant, pendingChange, subscriptionEvents]
+      properties:
+        provider: {type: [string, 'null']}
+        status: {type: string, enum: [none, active, trialing, canceling, past_due, unpaid, paused, canceled]}
+        plan: {type: string, enum: [free, pro, max]}
+        interval: {type: string, enum: [month, year]}
+        customerId: {type: [string, 'null']}
+        subscriptionId: {type: [string, 'null']}
+        subscriptionItemId: {type: [string, 'null']}
+        customerEmail: {type: [string, 'null'], description: Billing contact; does not prove a login identity}
+        currentPeriodStart: {$ref: '#/components/schemas/NullableEpochSeconds'}
+        currentPeriodEnd: {$ref: '#/components/schemas/NullableEpochSeconds'}
+        cancelAtPeriodEnd: {type: [boolean, 'null']}
+        canceledAt: {$ref: '#/components/schemas/NullableEpochSeconds'}
+        lastEventId: {type: [string, 'null']}
+        lastEventType: {type: [string, 'null']}
+        lastEventCreated: {$ref: '#/components/schemas/NullableEpochSeconds'}
+        updatedAt: {$ref: '#/components/schemas/NullableEpochSeconds'}
+        entitlements: {type: 'null', description: Account compatibility field; read ledger entitlements through /api/v1/me or catalog plans}
+        previewPlanGrant:
+          oneOf:
+            - {type: 'null'}
+            - type: object
+              required: [grantId, plan, startsAt, expiresAt, issuedAt, active]
+              properties:
+                grantId: {type: string}
+                plan: {type: string, enum: [pro, max]}
+                startsAt: {type: integer}
+                expiresAt: {type: integer}
+                issuedAt: {type: integer}
+                active: {type: boolean}
+        pendingChange:
+          oneOf:
+            - {type: 'null'}
+            - {type: object, required: [plan, interval, requestedAt], properties: {plan: {type: string, enum: [pro, max]}, interval: {type: string, enum: [month, year]}, requestedAt: {$ref: '#/components/schemas/NullableEpochSeconds'}}}
+        subscriptionEvents: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/BillingSubscriptionEvent'}}
+    BillingSubscriptionEvent:
+      type: object
+      required: [provider, customerId, customerEmail, subscriptionId, subscriptionItemId, status, plan, interval, currentPeriodStart, currentPeriodEnd, cancelAtPeriodEnd, canceledAt, eventType, eventId, eventCreated, processedAt, stale]
+      properties:
+        provider: {type: [string, 'null']}
+        customerId: {type: [string, 'null']}
+        customerEmail: {type: [string, 'null']}
+        subscriptionId: {type: [string, 'null']}
+        subscriptionItemId: {type: [string, 'null']}
+        status: {type: string, enum: [none, active, trialing, canceling, past_due, unpaid, paused, canceled]}
+        plan: {type: [string, 'null'], enum: [free, pro, max, null]}
+        interval: {type: string, enum: [month, year]}
+        currentPeriodStart: {$ref: '#/components/schemas/NullableEpochSeconds'}
+        currentPeriodEnd: {$ref: '#/components/schemas/NullableEpochSeconds'}
+        cancelAtPeriodEnd: {type: [boolean, 'null']}
+        canceledAt: {$ref: '#/components/schemas/NullableEpochSeconds'}
+        eventType: {type: [string, 'null']}
+        eventId: {type: [string, 'null']}
+        eventCreated: {$ref: '#/components/schemas/NullableEpochSeconds'}
+        processedAt: {$ref: '#/components/schemas/NullableEpochSeconds'}
+        stale: {type: boolean}
+    NullableEpochSeconds:
+      type: [integer, 'null']
+      description: UTC epoch seconds or null when the provider has not supplied a fact
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code]
+          properties:
+            code: {type: string, minLength: 1}
+            message: {type: string, description: Optional human-readable detail; branch client logic on code}
+        assistance: {$ref: '#/components/schemas/ExpenseAssistance'}
+      examples: [{error: {code: PRECONDITION_FAILED}}, {error: {code: CATEGORY_REQUIRED}, assistance: {status: unavailable, categorySource: null, suggestions: {}}}]
+    ApiKeyScope:
+      type: string
+      enum: [profile:read, projects:read, projects:write, categories:read, categories:write, expenses:read, expenses:write, reports:read, suggestions:use, members:read, members:write]
+    ApiKeyRestrictions:
+      type: object
+      additionalProperties: false
+      properties:
+        projectIds:
+          type: array
+          maxItems: 100
+          items: {type: string, pattern: '^prj_[A-Za-z0-9_-]{1,100}$'}
+          description: Omit for all projects; an empty array grants no project access. Does not grant shared access. Cannot be supplied with members scopes.
+        shared: {type: boolean, default: false, description: Explicit shared-pool permission; project access never implies shared access}
+        workspaceId: {type: string, pattern: '^[A-Za-z0-9_-]{1,120}$', description: Bound ledger; cannot be overridden by a later request header}
+        workspaceMemberRevision: {type: integer, minimum: 1, maximum: 9007199254740991, description: Server records the current selected-ledger membership revision; changing membership invalidates team keys}
+    ApiKeyInput:
+      type: object
+      properties:
+        name: {type: string, description: Optional display label; omission or blank uses API key}
+        scopes:
+          oneOf:
+            - {$ref: '#/components/schemas/ApiKeyScope'}
+            - {type: array, minItems: 1, maxItems: 11, items: {$ref: '#/components/schemas/ApiKeyScope'}}
+          description: Explicit scope or list. Omission uses the five read-only defaults and excludes members scopes. Names are trimmed and lowercased; duplicates are normalized.
+          default: [profile:read, projects:read, categories:read, expenses:read, reports:read]
+        restrictions: {$ref: '#/components/schemas/ApiKeyRestrictions'}
+        expiresAt: {type: [integer, 'null'], minimum: 1, maximum: 9007199254740991, description: Optional UTC epoch seconds; must be after Server time}
+        expiresInSeconds: {type: integer, minimum: 0, maximum: 9007199254740991, description: Positive values set expiry relative to Server time; zero leaves expiresAt unchanged}
+    ApiKey:
+      type: object
+      required: [id, name, userId, prefix, scopes, createdAt, expiresAt, lastUsedAt, revokedAt, restrictions]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        userId: {type: string}
+        prefix: {type: string, description: Public token prefix; never a usable credential}
+        scopes: {type: array, maxItems: 11, items: {$ref: '#/components/schemas/ApiKeyScope'}}
+        createdAt: {type: integer, minimum: 0, description: UTC epoch seconds}
+        expiresAt: {type: [integer, 'null'], minimum: 0}
+        lastUsedAt: {type: [integer, 'null'], minimum: 0}
+        revokedAt: {type: [integer, 'null'], minimum: 0}
+        restrictions: {$ref: '#/components/schemas/ApiKeyRestrictions'}
     AccountSession:
       type: object
       additionalProperties: false
@@ -878,7 +1162,7 @@ components:
       properties:
         email: {type: string, minLength: 3, maxLength: 254}
         challengeId: {type: string, pattern: '^[A-Za-z0-9_-]{43}$'}
-        code: {type: string, pattern: '^[0-9]{6}$', description: Six ASCII digits, including leading zeros}
+        code: {type: string, pattern: '^[0-9]{6}$', description: "Six ASCII digits, including leading zeros"}
     AssignableRole: {type: string, enum: [admin, editor, viewer]}
     Workspace:
       type: object
@@ -948,12 +1232,28 @@ components:
         workspace: {$ref: '#/components/schemas/Workspace'}
     Me:
       type: object
-      required: [id, scopes, entitlements, workspace]
+      required: [id, scopes, entitlements, workspace, ledgerUsage]
       properties:
         id: {type: string}
         workspace: {$ref: '#/components/schemas/Workspace'}
         scopes: {type: array, items: {type: string}}
         entitlements: {$ref: '#/components/schemas/Entitlements'}
+        ledgerUsage: {$ref: '#/components/schemas/LedgerUsage'}
+    LedgerUsage:
+      type: object
+      required: [workspaceId, projects, expenseRecords]
+      description: Read-only selected-ledger capacity. Counts include archived or removed projects and soft-deleted or generated expenses; deletion does not reclaim capacity. Current effective plan and operator configuration set the limits.
+      properties:
+        workspaceId: {type: string}
+        projects: {$ref: '#/components/schemas/CapacityUsage'}
+        expenseRecords: {$ref: '#/components/schemas/CapacityUsage'}
+    CapacityUsage:
+      type: object
+      required: [used, limit, remaining]
+      properties:
+        used: {type: integer, minimum: 0}
+        limit: {type: integer, minimum: 1}
+        remaining: {type: integer, minimum: 0, description: max(0; limit minus used)}
     Entitlements:
       type: object
       required: [plan, limits, jev]
@@ -982,7 +1282,7 @@ components:
       properties:
         githubRepoId: {type: integer, minimum: 1, maximum: 9007199254740991}
         fullName: {type: string}
-        isBound: {type: boolean, description: A repository binding exists in the selected ledger, including archived projects. API keys consider only their explicitly allowed projects. No project ID or cached metadata is disclosed.}
+        isBound: {type: boolean, description: "A repository binding exists in the selected ledger, including archived projects. API keys consider only their explicitly allowed projects. No project ID or cached metadata is disclosed."}
         installationId: {type: string, pattern: '^[1-9][0-9]{0,15}$'}
         account:
           oneOf: [{$ref: '#/components/schemas/GitHubAccount'}, {type: 'null'}]
@@ -1044,7 +1344,7 @@ components:
         description: {type: string, maxLength: 2000}
         developmentUrl: {$ref: '#/components/schemas/ProjectUrl'}
         productUrl: {$ref: '#/components/schemas/ProjectUrl'}
-        githubOrganizationId: {type: [integer, 'null'], minimum: 1, maximum: 9007199254740991, description: Optional association on a repository-backed project, verified against current actor installation account metadata; never selects all organization repositories. Must be absent or null on standalone creation.}
+        githubOrganizationId: {type: [integer, 'null'], minimum: 1, maximum: 9007199254740991, description: "Optional association on a repository-backed project, verified against current actor installation account metadata; never selects all organization repositories. Must be absent or null on standalone creation."}
     ProjectPatch:
       type: object
       additionalProperties: false
@@ -1112,8 +1412,8 @@ components:
         developmentUrl: {$ref: '#/components/schemas/ProjectUrl'}
         productUrl: {$ref: '#/components/schemas/ProjectUrl'}
         status: {type: string, enum: [active, archived]}
-        githubAccess: {type: string, enum: [not_linked, authorized, partial, lost, reauthorization_required, unavailable], description: not_linked identifies an explicitly standalone project, with null GitHub anchor and organization and empty repository arrays; loss or unavailability of a bound grant never implicitly disconnects a project.}
-        canCreateExpense: {type: boolean, description: Active standalone project, or an active repository-backed project with at least one bound repository currently authorized to the actor. Ledger role, key target scopes and plan limits still apply. Historical edits and deletion do not require a live GitHub grant.}
+        githubAccess: {type: string, enum: [not_linked, authorized, partial, lost, reauthorization_required, unavailable], description: "not_linked identifies an explicitly standalone project, with null GitHub anchor and organization and empty repository arrays; loss or unavailability of a bound grant never implicitly disconnects a project."}
+        canCreateExpense: {type: boolean, description: "Active standalone project, or an active repository-backed project with at least one bound repository currently authorized to the actor. Ledger role, key target scopes and plan limits still apply. Historical edits and deletion do not require a live GitHub grant."}
         revision: {type: integer, minimum: 1}
         totals: {type: array, items: {$ref: '#/components/schemas/MoneyTotal'}}
     ProjectPage:
@@ -1124,6 +1424,7 @@ components:
         nextCursor: {type: [string, 'null']}
     CategoryInput:
       type: object
+      additionalProperties: false
       required: [name]
       properties:
         name: {type: string, minLength: 1, maxLength: 80}
@@ -1137,19 +1438,26 @@ components:
         color: {type: [string, 'null']}
         revision: {type: integer, minimum: 1}
         archivedAt: {type: [string, 'null'], format: date-time}
-    ExpenseInput:
+    CurrencyCode:
+      type: string
+      enum: [AED, AFN, ALL, AMD, ANG, AOA, ARS, AUD, AWG, AZN, BAM, BBD, BDT, BGN, BHD, BIF, BMD, BND, BOB, BOV, BRL, BSD, BTN, BWP, BYN, BZD, CAD, CDF, CHE, CHF, CHW, CLF, CLP, CNY, COP, COU, CRC, CUC, CUP, CVE, CZK, DJF, DKK, DOP, DZD, EGP, ERN, ETB, EUR, FJD, FKP, GBP, GEL, GHS, GIP, GMD, GNF, GTQ, GYD, HKD, HNL, HRK, HTG, HUF, IDR, ILS, INR, IQD, IRR, ISK, JMD, JOD, JPY, KES, KGS, KHR, KMF, KPW, KRW, KWD, KYD, KZT, LAK, LBP, LKR, LRD, LSL, LYD, MAD, MDL, MGA, MKD, MMK, MNT, MOP, MRU, MUR, MVR, MWK, MXN, MXV, MYR, MZN, NAD, NGN, NIO, NOK, NPR, NZD, OMR, PAB, PEN, PGK, PHP, PKR, PLN, PYG, QAR, RON, RSD, RUB, RWF, SAR, SBD, SCR, SDG, SEK, SGD, SHP, SLE, SLL, SOS, SRD, SSP, STN, SVC, SYP, SZL, THB, TJS, TMT, TND, TOP, TRY, TTD, TWD, TZS, UAH, UGX, USD, USN, UYI, UYU, UYW, UZS, VED, VES, VND, VUV, WST, YER, ZAR, ZMW, ZWL]
+      description: Supported uppercase currencies. Writes use decimal strings and fixed currency exponents; JPY has zero fractional digits, USD has two, KWD has three, and CLF has four. Amount minor units must not exceed 9007199254740991. Values across currencies are never combined or converted.
+    ExpenseFields:
       type: object
       required: [target, occurredOn, amount, currency, purpose]
       properties:
         target: {$ref: '#/components/schemas/Target'}
         occurredOn: {type: string, format: date}
         amount: {type: string, pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$', description: Currency exponent and safe integer bound enforced by server}
-        currency: {type: string, pattern: '^[A-Z]{3}$'}
-        categoryId: {type: [string, 'null'], description: Required for a Free ledger. Omit on create or edit when the ledger owner's Pro or Max plan and assistance gates permit automatic classification; a confident existing active category is selected. Unavailable or uncertain inference returns CATEGORY_REQUIRED. An explicit nonempty value is preserved, including the previous archived category on edit.}
+        currency: {$ref: '#/components/schemas/CurrencyCode'}
+        categoryId: {type: [string, 'null'], description: "Required for a Free ledger. Omit on create or edit when the ledger owner's Pro or Max plan and assistance gates permit automatic classification; a confident existing active category is selected. Unavailable or uncertain inference returns CATEGORY_REQUIRED. An explicit nonempty value is preserved, including the previous archived category on edit."}
         purpose: {type: string, minLength: 1, maxLength: 500}
         note: {type: [string, 'null'], maxLength: 4000}
-        quantity: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$'}
+        quantity: {type: [string, 'null'], maxLength: 40, pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$'}
         unit: {type: [string, 'null'], maxLength: 40}
+    ExpenseInput:
+      allOf: [{$ref: '#/components/schemas/ExpenseFields'}]
+      unevaluatedProperties: false
     RecurringExpenseSchedule:
       type: object
       additionalProperties: false
@@ -1165,7 +1473,7 @@ components:
         a bounded hourly tick without charging a card or polling the client.
       properties:
         frequency: {type: string, enum: [weekly, monthly, quarterly, yearly]}
-        timezone: {type: string, minLength: 1, maxLength: 100, description: Valid IANA zone available to the runtime, for example Asia/Shanghai or UTC}
+        timezone: {type: string, minLength: 1, maxLength: 100, description: "Valid IANA zone available to the runtime, for example Asia/Shanghai or UTC"}
         startOn: {type: string, format: date}
         endOn: {type: [string, 'null'], format: date, description: Inclusive last eligible business date; must be on or after startOn}
         weekday: {type: integer, minimum: 1, maximum: 7}
@@ -1187,11 +1495,11 @@ components:
       properties:
         target: {$ref: '#/components/schemas/Target'}
         amount: {type: string, pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$', description: Same currency-exponent and integer bounds as an ordinary expense}
-        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        currency: {$ref: '#/components/schemas/CurrencyCode'}
         categoryId: {type: string, minLength: 1, description: Explicit existing active category; no automatic model selection during background execution}
         purpose: {type: string, minLength: 1, maxLength: 500}
         note: {type: [string, 'null'], maxLength: 4000}
-        quantity: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$'}
+        quantity: {type: [string, 'null'], maxLength: 40, pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$'}
         unit: {type: [string, 'null'], maxLength: 40}
         schedule: {$ref: '#/components/schemas/RecurringExpenseSchedule'}
     RecurringExpenseInput:
@@ -1208,7 +1516,7 @@ components:
             revision: {type: integer, minimum: 1, maximum: 9007199254740991}
             nextOccurrenceOn: {type: [string, 'null'], format: date}
             nextRunAt: {type: [integer, 'null'], minimum: 0, maximum: 9007199254740991, description: UTC epoch seconds for the next due occurrence}
-            blockedCode: {type: [string, 'null'], maxLength: 80, description: Current authorization, target, category or plan stop reason; blocked rules do not keep executing automatically}
+            blockedCode: {type: [string, 'null'], maxLength: 80, description: "Current authorization, target, category or plan stop reason; blocked rules do not keep executing automatically"}
             createdAt: {type: string, format: date-time}
             updatedAt: {type: string, format: date-time}
     RecurringExpensePage:
@@ -1241,7 +1549,7 @@ components:
               required: [status, current]
               properties:
                 status: {type: string, enum: [checked, issue, uncertain, unavailable]}
-                current: {type: string, description: Saved category ID, including historical archived categories}
+                current: {type: string, description: "Saved category ID, including historical archived categories"}
                 suggested: {type: string, description: Confident currently active category; never automatically assigned}
                 confidence: {type: number, minimum: 0, maximum: 1, description: Validated choice confidence; uncertainty never establishes correctness}
                 reason: {type: string, enum: [disabled, provider_unavailable, invalid_context, no_categories]}
@@ -1265,7 +1573,7 @@ components:
               additionalProperties: false
               required: [status]
               properties:
-                status: {type: string, enum: [checked, issue], description: Bounded local same-target rule, independent of provider availability}
+                status: {type: string, enum: [checked, issue], description: "Bounded local same-target rule, independent of provider availability"}
                 candidate:
                   type: object
                   additionalProperties: false
@@ -1288,11 +1596,11 @@ components:
           properties:
             categoryId: {type: string, description: Confident existing active category; assigned on create or edit when caller omits categoryId}
             targetKind: {type: string, enum: [project, shared], description: Advice only; never moves an expense}
-            duplicateExpenseId: {type: string, description: Matching active expense on the same authorized target, currency and amount within seven days, excluding the expense being edited; advisory only}
+            duplicateExpenseId: {type: string, description: "Matching active expense on the same authorized target, currency and amount within seven days, excluding the expense being edited; advisory only"}
         probabilities: {type: object}
     Expense:
       allOf:
-        - {$ref: '#/components/schemas/ExpenseInput'}
+        - {$ref: '#/components/schemas/ExpenseFields'}
         - {type: object, required: [id, categoryId, amountMinor, revision, createdAt, updatedAt], properties: {id: {type: string}, categoryId: {type: string, minLength: 1}, amountMinor: {type: integer, minimum: 0, maximum: 9007199254740991}, revision: {type: integer, minimum: 1}, createdAt: {type: string, format: date-time}, updatedAt: {type: string, format: date-time}, assistance: {$ref: '#/components/schemas/ExpenseAssistance'}}}
     ExpensePage:
       type: object
@@ -1355,7 +1663,7 @@ components:
       properties:
         items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/ActivityEvent'}}
         nextCursor: {type: [string, 'null'], maxLength: 256}
-        windowStart: {type: string, format: date-time, description: Exclusive Server-clock 24-hour floor, refreshed on every page}
+        windowStart: {type: string, format: date-time, description: "Exclusive Server-clock 24-hour floor, refreshed on every page"}
         windowEnd: {type: string, format: date-time, description: Inclusive upper window boundary anchored by the first page}
     MoneyTotal:
       type: object

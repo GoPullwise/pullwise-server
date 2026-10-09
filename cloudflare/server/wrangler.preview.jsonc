@@ -29,7 +29,7 @@
     "PULLWISE_CREEM_PRODUCT_IDS_JSON": "{\"pro\":{\"month\":\"prod_2kANs8l1anpnmBrUUUH1YD\",\"year\":\"prod_ZzDm2l5pwY6Jf8Ye6Mxe1\"},\"max\":{\"month\":\"prod_5DCXPWArAWG9i8NPcFGkbE\",\"year\":\"prod_UZzZ6JSNwziS7857f28k9\"}}",
     "PULLWISE_ALLOWED_ORIGINS": "https://preview.pull-wise.com",
     "PULLWISE_COOKIE_SAME_SITE": "None",
-    "PULLWISE_PLAN_LIMITS_JSON": "{\"free\":{\"projects\":3,\"records\":500,\"writesPerMinute\":10,\"writesPerMonth\":1000,\"jevMonthlyBudgetUsd\":\"0.00\"},\"pro\":{\"projects\":100,\"records\":20000,\"writesPerMinute\":60,\"writesPerMonth\":10000,\"jevMonthlyBudgetUsd\":\"3.00\"},\"max\":{\"projects\":100,\"records\":20000,\"writesPerMinute\":60,\"writesPerMonth\":10000,\"jevMonthlyBudgetUsd\":\"5.00\"}}",
+    "PULLWISE_PLAN_LIMITS_JSON": "{\"free\":{\"projects\":3,\"records\":100,\"writesPerMinute\":10,\"writesPerMonth\":1000,\"jevMonthlyBudgetUsd\":\"0.00\"},\"pro\":{\"projects\":20,\"records\":20000,\"writesPerMinute\":60,\"writesPerMonth\":10000,\"jevMonthlyBudgetUsd\":\"3.00\"},\"max\":{\"projects\":100,\"records\":100000,\"writesPerMinute\":60,\"writesPerMonth\":10000,\"jevMonthlyBudgetUsd\":\"5.00\"}}",
     "PULLWISE_JEV_SUGGESTIONS_ENABLED": "1",
     "PULLWISE_JEV_SUGGESTIONS_EVALUATED": "1"
   },

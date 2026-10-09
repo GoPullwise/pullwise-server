@@ -8,11 +8,11 @@ from .account_cycle_rules import PAID_PLAN_IDS, effective_user_plan
 
 
 _DEFAULT = {
-    "free": {"projects": 3, "records": 500, "writesPerMinute": 10,
+    "free": {"projects": 3, "records": 100, "writesPerMinute": 10,
              "writesPerMonth": 1000, "jevMonthlyBudgetUsd": "0.00"},
-    "pro": {"projects": 100, "records": 20000, "writesPerMinute": 60,
+    "pro": {"projects": 20, "records": 20000, "writesPerMinute": 60,
             "writesPerMonth": 10000, "jevMonthlyBudgetUsd": "3.00"},
-    "max": {"projects": 100, "records": 20000, "writesPerMinute": 60,
+    "max": {"projects": 100, "records": 100000, "writesPerMinute": 60,
             "writesPerMonth": 10000, "jevMonthlyBudgetUsd": "5.00"},
 }
 JEV_MODEL = "jev-1.13.0"
@@ -62,8 +62,6 @@ def parse_policy(raw=None):
         budget = usd_micros(values["jevMonthlyBudgetUsd"])
         if plan not in PAID_PLAN_IDS and budget:
             raise ValueError("Jev requires a paid plan")
-    if policy["pro"]["records"] != policy["max"]["records"]:
-        raise ValueError("Pro and Max record allowances must match")
     return policy
 
 

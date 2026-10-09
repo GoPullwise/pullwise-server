@@ -18,6 +18,9 @@ class LedgerApiKeyHttpTests(unittest.TestCase):
         fixture, _, _ = seed(Path(self.directory.name) / "domain.db")
         self.store, self.now = fixture.store, fixture.now
         with self.store.connect() as db:
+            migrations = Path(__file__).resolve().parents[1] / "cloudflare/server/migrations"
+            for name in ("0001_ledger.sql", "0004_ledger_plan_usage.sql"):
+                db.executescript((migrations / name).read_text())
             db.execute("""CREATE TABLE api_keys(id TEXT PRIMARY KEY,user_id TEXT,name TEXT,
                 key_prefix TEXT,key_hash TEXT UNIQUE,scopes TEXT,expires_at INTEGER,
                 restrictions TEXT,created_at INTEGER,last_used_at INTEGER,revoked_at INTEGER)""")
@@ -118,6 +121,31 @@ class LedgerApiKeyHttpTests(unittest.TestCase):
             "GET", "/api/v1/repositories", headers={"Authorization": "Bearer " + limited["key"]})
         self.assertEqual(status, 403)
         self.assertEqual(payload["error"]["code"], "INSUFFICIENT_SCOPE")
+
+    def test_member_scopes_are_explicit_and_reject_project_allowlists(self):
+        cookie = {"Cookie": self.cookie}
+        for scope in ("members:read", "members:write"):
+            with self.subTest(scope=scope):
+                status, key = self.run_async(create_api_key(binding=self.binding, headers=cookie,
+                    body={"scopes": [scope], "restrictions": {"shared": False}}, now=self.now + 2))
+                self.assertEqual(status, 201)
+                self.assertEqual(self.authorize({"Authorization": "Bearer " + key["key"]}, scope)[0]["id"], "usr_github_77")
+                for projects in ([], ["prj_a"]):
+                    status, denied = self.run_async(create_api_key(binding=self.binding, headers=cookie,
+                        body={"scopes": [scope], "restrictions": {"projectIds": projects}}, now=self.now + 2))
+                    self.assertEqual((status, denied["error"]["code"]), (400, "INVALID_RESTRICTION"))
+
+    def test_member_authorization_rejects_a_persisted_project_allowlist(self):
+        cookie = {"Cookie": self.cookie}
+        status, key = self.run_async(create_api_key(binding=self.binding, headers=cookie,
+            body={"scopes": ["members:read"]}, now=self.now + 2))
+        self.assertEqual(status, 201)
+        with self.store.connect() as db:
+            db.execute("UPDATE api_keys SET restrictions=? WHERE id=?",
+                       (json.dumps({"shared": False, "projectIds": []}), key["id"]))
+        with self.assertRaises(PrincipalAuthError) as denied:
+            self.authorize({"Authorization": "Bearer " + key["key"]}, "members:read")
+        self.assertEqual((denied.exception.status, denied.exception.code), (403, "TARGET_FORBIDDEN"))
 
 
 if __name__ == "__main__":

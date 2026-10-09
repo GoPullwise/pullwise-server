@@ -483,18 +483,20 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
 
 
 async def _remove_project(binding, item_id, headers, now, scope):
-    """Owner-cookie-only tombstone and bounded unlink, never financial cascade."""
+    """Owner-authorized tombstone and bounded unlink, never financial cascade."""
     user, _, proof, rows = await _authorized(binding, headers, scope, now,
         [binding.prepare("SELECT * FROM ledger_projects WHERE id=?").bind(item_id),
          binding.prepare("SELECT * FROM ledger_project_repositories WHERE project_id=? ORDER BY github_repo_id LIMIT 31").bind(item_id)],
         "project", item_id)
-    # The effective user is the selected ledger Owner even for members. Check
-    # the actual actor and selected role, and require the used session cookie.
-    if (proof.get("key") is not None or proof.get("workspace_role") != "owner"
+    # The effective user is the selected ledger Owner even for members. Both
+    # API keys and browser sessions must belong to the actual ledger Owner.
+    if (proof.get("workspace_role") != "owner"
             or proof.get("actor_user_id") != user["id"]
-            or proof.get("workspace_id") != user["id"]
-            or _header(headers, "Authorization") or _header(headers, "X-Pullwise-Api-Key")
-            or proof.get("session_id") not in _cookie_sessions(headers)):
+            or proof.get("workspace_id") != user["id"]):
+        return _error(403, "PROJECT_OWNER_REQUIRED")
+    if (proof.get("key") is None and (
+            _header(headers, "Authorization") or _header(headers, "X-Pullwise-Api-Key")
+            or proof.get("session_id") not in _cookie_sessions(headers))):
         return _error(403, "PROJECT_OWNER_SESSION_REQUIRED")
     expected = _revision(headers)
     if expected is None:

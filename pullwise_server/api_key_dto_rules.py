@@ -9,7 +9,7 @@ from typing import Any
 
 ALLOWED_SCOPES = frozenset({"profile:read", "projects:read", "projects:write",
     "categories:read", "categories:write", "expenses:read", "expenses:write",
-    "reports:read", "suggestions:use"})
+    "reports:read", "suggestions:use", "members:read", "members:write"})
 DEFAULT_SCOPES = ["profile:read", "projects:read", "categories:read",
                   "expenses:read", "reports:read"]
 

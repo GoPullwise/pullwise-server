@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import base64
 from copy import deepcopy
+import hashlib
 import json
 import re
 import uuid
 from datetime import datetime, timezone
 
+from .api_key_dto_rules import ALLOWED_SCOPES
 from .cloudflare_ledger_auth import ledger_principal, target_allowed
 from .cloudflare_principal import PrincipalAuthError, _bearer, _header
 
@@ -207,9 +209,22 @@ async def handle_activity_request(*, binding, gateway, method, path, headers, pa
         clauses = ["owner_id=?", "target_kind=?", "project_id IS ?", "created_at>?", "created_at<=?"]
         values = [user["id"], target, project, _stamp(now - WINDOW_SECONDS), anchor]
         if key_only:
-            # An expense-read key cannot gain access to session-only recurring
-            # settings or project settings through their companion history.
-            clauses.append("resource_kind='expense'")
+            # Recurring reads use expense authority, while project settings
+            # additionally need projects:read. Check the same credential inside
+            # this read snapshot and apply the filter before cursor pagination.
+            token = _bearer(headers) if _bearer(headers).startswith("pwk_") else _header(headers, "X-Pullwise-Api-Key")
+            # Issuance normalizes to distinct supported scopes. Fixed JSON paths
+            # keep this unique-key check bounded without an array table scan;
+            # nested or oversized forged scope lists cannot grant project reads.
+            project_scope = " OR ".join(
+                "json_extract(activity_key.scopes,'$[" + str(index) + "]')='projects:read'"
+                for index in range(len(ALLOWED_SCOPES)))
+            clauses.append("""(resource_kind IN ('expense','recurring_rule') OR
+                (resource_kind='project' AND EXISTS(SELECT 1 FROM api_keys AS activity_key
+                    WHERE activity_key.key_hash=? AND json_type(activity_key.scopes)='array'
+                        AND json_array_length(activity_key.scopes)<=""" + str(len(ALLOWED_SCOPES)) +
+                " AND (" + project_scope + "))))")
+            values.append(hashlib.sha256(token.encode("utf-8")).hexdigest())
         if cursor:
             clauses.append("(created_at,id)<(?,?)")
             values.extend(cursor[1:])

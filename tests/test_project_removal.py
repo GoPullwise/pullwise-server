@@ -1,4 +1,4 @@
-"""Project removal requires the actual cookie Owner and retains financial facts."""
+"""Project removal requires the actual Owner and retains financial facts."""
 import asyncio
 import json
 
@@ -77,17 +77,69 @@ def test_only_selected_ledger_owner_can_remove_project(ledger, role):
 
 
 @pytest.mark.parametrize("transport", ["Authorization", "X-Pullwise-Api-Key"])
-def test_every_owner_api_key_is_rejected_even_with_project_write_scope(ledger, transport):
+def test_owner_api_key_with_project_write_scope_removes_only_allowed_project(ledger, transport):
     project = blank(ledger)
+    outside = blank(ledger, "Outside key allowlist")
     status, result = asyncio.run(create_api_key(binding=ledger.binding, headers=ledger.headers,
         body={"name": "Owner client", "scopes": ["projects:write"],
             "restrictions": {"projectIds": [project["id"]]}}, now=ledger.now + 3))
     assert status == 201
     value = "Bearer " + result["key"] if transport == "Authorization" else result["key"]
+    headers = {transport: value}
     before = rows(ledger)
-    assert remove(ledger, project, headers={transport: value, "Origin": "https://app.example.test"}) == (
-        403, {"error": {"code": "PROJECT_OWNER_SESSION_REQUIRED"}})
+    assert remove(ledger, outside, headers=headers) == (403, {"error": {"code": "TARGET_FORBIDDEN"}})
     assert rows(ledger) == before
+    assert remove(ledger, project, headers=headers) == (204, None)
+    with ledger.store.connect() as db:
+        assert db.execute("SELECT deleted_at FROM ledger_projects WHERE id=?", (project["id"],)).fetchone()[0]
+        actor = json.loads(db.execute("SELECT actor_json FROM ledger_activity_events WHERE action='delete'").fetchone()[0])
+        assert actor["userId"] == OWNER and actor["kind"] == "api_key"
+
+
+def test_admin_api_key_cannot_remove_project(ledger):
+    project = blank(ledger)
+    admin = member(ledger, "admin")
+    status, result = asyncio.run(create_api_key(binding=ledger.binding,
+        headers={**admin, "X-Pullwise-Workspace": OWNER}, body={"scopes": ["projects:write"]}, now=ledger.now + 3))
+    assert status == 201
+    before = rows(ledger)
+    assert remove(ledger, project, headers={"Authorization": "Bearer " + result["key"]}) == (
+        403, {"error": {"code": "PROJECT_OWNER_REQUIRED"}})
+    assert rows(ledger) == before
+
+
+@pytest.mark.parametrize("race", ["revoke", "expire", "restriction", "scope"])
+def test_owner_key_removal_rechecks_credential_in_atomic_write(ledger, race):
+    project = blank(ledger)
+    status, result = asyncio.run(create_api_key(binding=ledger.binding, headers=ledger.headers,
+        body={"scopes": ["projects:write"], "restrictions": {"projectIds": [project["id"]]}}, now=ledger.now + 3))
+    assert status == 201
+    before = rows(ledger)
+
+    class Racing(D1ShapedSQLite):
+        raced = False
+        async def batch(self, statements):
+            statements = list(statements)
+            if not self.raced and any(item.sql.lstrip().startswith("UPDATE ledger_projects SET deleted_at=") for item in statements):
+                self.raced = True
+                with self.store.connect() as db:
+                    if race == "revoke":
+                        db.execute("UPDATE api_keys SET revoked_at=? WHERE id=?", (ledger.now, result["id"]))
+                    elif race == "expire":
+                        db.execute("UPDATE api_keys SET expires_at=? WHERE id=?", (ledger.now - 1, result["id"]))
+                    elif race == "restriction":
+                        db.execute("UPDATE api_keys SET restrictions=? WHERE id=?", (json.dumps({"shared": False, "projectIds": []}), result["id"]))
+                    else:
+                        db.execute("UPDATE api_keys SET scopes='[]' WHERE id=?", (result["id"],))
+            return await super().batch(statements)
+
+    binding = Racing(ledger.store)
+    add_usage_meter(ledger, binding)
+    assert remove(ledger, project, headers={"Authorization": "Bearer " + result["key"]})[0] == 412
+    assert binding.raced
+    assert rows(ledger) == before
+    with ledger.store.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM ledger_plan_usage").fetchone()[0] == 0
 
 
 def test_bearer_session_without_actual_cookie_cannot_remove(ledger):

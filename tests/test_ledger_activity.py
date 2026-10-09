@@ -1,6 +1,7 @@
 """Shared history proves real identity, atomic publication, scope and expiry."""
 import asyncio
 import json
+import sqlite3
 from contextlib import closing
 
 import pytest
@@ -162,6 +163,87 @@ def test_project_settings_and_recurring_rule_edits_publish_specific_before_after
     _, page = history(app)
     assert {row["action"] for row in page["items"]} == {"create", "pause", "resume", "cancel"}
     assert {row["resource"]["id"] for row in page["items"]} == {rule["id"]}
+
+
+def test_key_history_includes_authorized_recurring_rules_and_project_scope_controls_settings(app):
+    _, project = request(app, "POST", "/api/v1/projects", {"name": "Visible settings"})
+    _, rule = app.call("POST", body=draft(target={"kind": "project", "projectId": project["id"]}))
+    assert app.call("PATCH", rule["id"], {"status": "paused"}, revision=1)[0] == 200
+    _, expense_row = request(app, "POST", "/api/v1/expenses",
+        expense(target={"kind": "project", "projectId": project["id"]}))
+    read_auth, _ = key_for(app, [project["id"]])
+    status, first = history(app, target="project", project=project["id"], auth=read_auth,
+        params={"limit": "1"})
+    assert status == 200 and first["nextCursor"]
+    pages = first["items"]
+    cursor = first["nextCursor"]
+    while cursor:
+        status, page = history(app, target="project", project=project["id"], auth=read_auth,
+            params={"limit": "1", "cursor": cursor})
+        assert status == 200
+        pages += page["items"]
+        cursor = page["nextCursor"]
+    assert {row["resource"]["kind"] for row in pages} == {"expense", "recurring_rule"}
+    assert {row["resource"]["id"] for row in pages} == {expense_row["id"], rule["id"]}
+    complete_auth, key = key_for(app, [project["id"]], scopes=["expenses:read", "projects:read"])
+    _, complete = history(app, target="project", project=project["id"], auth=complete_auth)
+    assert {row["resource"]["kind"] for row in complete["items"]} == {"expense", "recurring_rule", "project"}
+    with closing(app.store.connect()) as db:
+        db.execute("UPDATE api_keys SET scopes=? WHERE id=?", (json.dumps(["expenses:read"]), key["id"]))
+        db.commit()
+    _, limited = history(app, target="project", project=project["id"], auth=complete_auth)
+    assert all(row["resource"]["kind"] != "project" for row in limited["items"])
+
+
+@pytest.mark.parametrize("scopes", [
+    ["expenses:read", {"nested": "projects:read"}],
+    ["expenses:read"] * 11 + ["projects:read"],
+])
+def test_key_project_history_uses_only_bounded_top_level_scope_strings(app, scopes):
+    _, project = request(app, "POST", "/api/v1/projects", {"name": "Protected settings"})
+    auth, key = key_for(app, [project["id"]], scopes=["expenses:read", "projects:read"])
+    with closing(app.store.connect()) as db:
+        db.execute("UPDATE api_keys SET scopes=? WHERE id=?", (json.dumps(scopes), key["id"]))
+        db.commit()
+    status, page = history(app, target="project", project=project["id"], auth=auth)
+    assert status == 200 and page["items"] == []
+
+
+def test_key_activity_query_has_finite_meter_reservation_with_large_record_array_envelope(app):
+    from test_d1_validation_budget import LocalSql, RawD1
+    from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initial_data
+    from pullwise_server.cloudflare_state_records import USER_RECORD_BYTES
+    from pullwise_server.cloudflare_validation_budget import BudgetJournal
+
+    _, project = request(app, "POST", "/api/v1/projects", {"name": "Metered settings"})
+    auth, _ = key_for(app, [project["id"]], scopes=["expenses:read", "projects:read"])
+    captured = []
+    original = app.raw.batch
+
+    async def capture(statements):
+        statements = list(statements)
+        captured.extend(item for item in statements if "SELECT * FROM ledger_activity_events" in item.sql)
+        return await original(statements)
+
+    app.raw.batch = capture
+    assert history(app, target="project", project=project["id"], auth=auth)[0] == 200
+    assert len(captured) == 1
+    query = captured[0]
+    with closing(sqlite3.connect(":memory:")) as connection:
+        journal = BudgetJournal(LocalSql(connection))
+        state = journal.snapshot()
+        data = initial_data()
+        data["rows"].update(ledger_activity_events=20, api_keys=5)
+        data["arrays"] = USER_RECORD_BYTES // 2
+        state["product_data"] = data
+        journal._save(state)
+        ticket = journal.begin_product(now=10)
+        raw = RawD1(reads=1, writes=0)
+        meter = ProductMeteredD1(raw, journal, ticket, clock=lambda: 11)
+        asyncio.run(meter.batch([meter.prepare(query.sql).bind(*query.params)]))
+        assert raw.calls == 1
+        assert journal.snapshot()["reserved_read"] < 1000
+        assert journal.snapshot()["stopped"] is None
 
 
 def test_generated_expense_identifies_automation_and_real_rule_creator(app):

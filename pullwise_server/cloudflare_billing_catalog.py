@@ -10,6 +10,7 @@ from .cloudflare_principal import (
     _resource_auth_snapshot,
 )
 from .billing_catalog_rules import catalog_payload as _catalog_payload
+from .cloudflare_plan_limits import capacity_usage_payload, capacity_usage_statement
 
 
 _CATALOG_SQL = """SELECT payload_json,expires_at,source_revision
@@ -36,8 +37,8 @@ async def read_public_plan(*, binding: Any, headers: Mapping[str, object],
     auth, validate = _resource_auth_snapshot(binding, headers, user, {}, now,
         "profile:read")
     result = await binding.batch([*auth,
-        binding.prepare(_CATALOG_SQL)])
-    catalog = _catalog_payload(result[-1].results, now, policy=getattr(binding, "plan_policy", None),
+        binding.prepare(_CATALOG_SQL), capacity_usage_statement(binding, user["id"])])
+    catalog = _catalog_payload(result[len(auth)].results, now, policy=getattr(binding, "plan_policy", None),
                                jev_available=getattr(binding, "jev_available", False))
     if catalog is None:
         return 503, {"error": {"code": "BILLING_CATALOG_UNAVAILABLE"}}
@@ -46,4 +47,6 @@ async def read_public_plan(*, binding: Any, headers: Mapping[str, object],
     except PrincipalAuthError:
         return 200, catalog
     catalog["account"] = billing_account_dto(user, effective_user_plan(user, timestamp=now))
+    catalog["ledgerUsage"] = capacity_usage_payload(user, result[-1].results, now=now,
+                                                   policy=getattr(binding, "plan_policy", None))
     return 200, catalog

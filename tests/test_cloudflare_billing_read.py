@@ -94,7 +94,8 @@ def test_public_plan_uses_fresh_saved_catalog_and_cookie_account_snapshot(tmp_pa
     assert "account" not in public
     status, personal = asyncio.run(read({"Cookie": "pw_session=session-local"}))
     assert status == 200 and personal["account"]["plan"] == "pro"
-    assert [plan["entitlements"]["limits"]["projects"] for plan in personal["plans"]] == [3, 100, 100]
+    assert [plan["entitlements"]["limits"]["projects"] for plan in personal["plans"]] == [3, 20, 100]
+    assert [plan["entitlements"]["limits"]["expenseRecords"] for plan in personal["plans"]] == [100, 20000, 100000]
     assert [plan["entitlements"]["jev"]["monthlyBudgetUsd"] for plan in personal["plans"]] == ["0.00", "3.00", "5.00"]
     assert [plan["entitlements"]["jev"]["eligible"] for plan in personal["plans"]] == [False, True, True]
     assert binding.batch_count == 2

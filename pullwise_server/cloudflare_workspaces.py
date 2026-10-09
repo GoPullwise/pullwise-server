@@ -1,7 +1,8 @@
-"""Cookie-only workspace governance over existing, immutable ledger owners.
+"""Workspace governance over existing, immutable ledger owners.
 
 Invitation links create identity-backed join requests. Only the original
 inviter's approval grants finance access; GitHub rights are never shared.
+API keys govern their bound ledger; applicants use their own cookie identity.
 """
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ from .cloudflare_github_gateway import GitHubFailure
 from .cloudflare_github_identity_http import _random_urlsafe, _github_identity_owner
 from .cloudflare_ledger_auth import ledger_principal, workspace_payload
 from .cloudflare_plan_limits import PlanLimitError
-from .cloudflare_principal import PrincipalAuthError, _cookie_sessions, _header
+from .cloudflare_principal import PrincipalAuthError, _bearer, _cookie_sessions, _header
 from .cloudflare_state_records import record_name
 
 ROLES = {"admin", "editor", "viewer"}
@@ -55,15 +56,21 @@ def _selected(headers, workspace_id=None):
     return result
 
 
-async def _auth(binding, headers, now, workspace_id=None):
+def _key_request(headers):
+    return _bearer(headers).startswith("pwk_") or bool(_header(headers, "X-Pullwise-Api-Key"))
+
+
+async def _auth(binding, headers, now, workspace_id=None, *, scope="members:read"):
     proof = {}
-    user, _, auth, validate = await ledger_principal(binding=binding,
-        headers=_selected(headers, workspace_id), scope="profile:read", now=now, proof=proof)
+    user, restrictions, auth, validate = await ledger_principal(binding=binding,
+        headers=_selected(headers, workspace_id), scope=scope, now=now, proof=proof)
+    if scope in {"members:read", "members:write"} and "projectIds" in restrictions:
+        raise PrincipalAuthError(403, "TARGET_FORBIDDEN", "Member governance requires a ledger-wide key.")
     return user, proof, auth, validate
 
 
 async def _read(binding, headers, now, commands, workspace_id=None):
-    user, proof, auth, validate = await _auth(binding, headers, now, workspace_id)
+    user, proof, auth, validate = await _auth(binding, headers, now, workspace_id, scope="profile:read")
     results = await binding.batch([*auth, *commands])
     validate([part.results for part in results[:len(auth)]])
     _cookie_only(headers, proof)
@@ -174,13 +181,16 @@ def _expected(headers, row):
 async def _list(binding, headers, now):
     # Selectors do not change the identity whose accessible workspaces are listed.
     user, proof, auth, validate = await _auth(binding, headers, now)
+    if _key_request(headers):
+        result = await binding.batch(auth)
+        validate([part.results for part in result])
+        return 200, {"items": [user["_workspace"]]}
     result = await binding.batch([*auth, binding.prepare("""SELECT
         m.workspace_id,m.role,m.revision,a.payload AS snapshot
         FROM workspace_members m JOIN app_state a ON a.name='record:users:'||m.workspace_id
         WHERE m.user_id=?
         AND m.removed_at IS NULL ORDER BY m.workspace_id LIMIT 100""").bind(user["id"])])
     validate([part.results for part in result[:len(auth)]])
-    _cookie_only(headers, proof)
     rows = [result[-1].results]
     if len(rows[0]) > MAX_MEMBERS:
         return _error(503, "WORKSPACE_LIMIT")
@@ -194,7 +204,8 @@ async def _list(binding, headers, now):
 
 
 async def _members(binding, headers, body, now, workspace_id, user_id, method):
-    user, proof, auth, validate = await _auth(binding, headers, now, workspace_id)
+    user, proof, auth, validate = await _auth(binding, headers, now, workspace_id,
+        scope="members:read" if method == "GET" else "members:write")
     sql = """SELECT m.*,a.payload AS snapshot FROM workspace_members m
         JOIN app_state a ON a.name='record:users:'||m.user_id
         WHERE m.workspace_id=? AND m.removed_at IS NULL"""
@@ -204,7 +215,6 @@ async def _members(binding, headers, body, now, workspace_id, user_id, method):
         values.append(user_id)
     parts = await binding.batch([*auth, binding.prepare(sql).bind(*values)])
     validate([part.results for part in parts[:len(auth)]])
-    _cookie_only(headers, proof)
     rows = parts[-1].results
     if method == "GET" and not user_id:
         if len(rows) > MAX_MEMBERS:
@@ -243,13 +253,13 @@ async def _members(binding, headers, body, now, workspace_id, user_id, method):
 
 
 async def _invites(binding, gateway, headers, body, now, workspace_id, invite_id, method):
-    user, proof, auth, validate = await _auth(binding, headers, now, workspace_id)
+    user, proof, auth, validate = await _auth(binding, headers, now, workspace_id,
+        scope="members:read" if method == "GET" else "members:write")
     commands = [binding.prepare("SELECT * FROM workspace_invites WHERE workspace_id=?"
         + (" AND id=?" if invite_id else " AND status='pending' AND expires_at>=? ORDER BY created_at,id LIMIT 101"))
         .bind(workspace_id, invite_id if invite_id else now)]
     parts = await binding.batch([*auth, *commands])
     validate([part.results for part in parts[:len(auth)]])
-    _cookie_only(headers, proof)
     _manage(user)
     rows = parts[-1].results
     _, timestamp, write_guard = _helpers()
@@ -332,7 +342,7 @@ async def _accept(binding, headers, body, now, method):
         return _error(410, "INVITATION_EXPIRED")
     workspace_id, inviter_id = invite["workspace_id"], invite["created_by_user_id"]
     # Ignore the applicant's current ledger selector, preserving actual identity.
-    current_actor, proof, auth, validate = await _auth(binding, _selected(headers), now)
+    current_actor, proof, auth, validate = await _auth(binding, _selected(headers), now, scope="profile:read")
     found = await binding.batch([*auth, binding.prepare(
         "SELECT payload AS snapshot FROM app_state WHERE name=?").bind(record_name("users", workspace_id)),
         binding.prepare("SELECT role,revision,removed_at FROM workspace_members WHERE workspace_id=? AND user_id=?")
@@ -423,10 +433,13 @@ async def _request_inbox(binding, headers, now, workspace_id=None, invite_id=Non
     elif workspace_id:
         sql += " AND i.workspace_id=?"
         values.append(workspace_id)
+    elif _key_request(headers):
+        # A key cannot enumerate requests issued by its actor in other ledgers.
+        sql += " AND i.workspace_id=?"
+        values.append(user["_workspace"]["id"])
     sql += " ORDER BY r.created_at,r.id LIMIT 101"
     parts = await binding.batch([*auth, *commands, binding.prepare(sql).bind(*values)])
     validate([part.results for part in parts[:len(auth)]])
-    _cookie_only(headers, proof)
     if workspace_id:
         _manage(user)
     if workspace_id and invite_id:
@@ -457,14 +470,13 @@ async def _request_inbox(binding, headers, now, workspace_id=None, invite_id=Non
 async def _review(binding, headers, body, now, workspace_id, invite_id, request_id, action):
     if body is not None and (not isinstance(body, dict) or body):
         return _error(422, "INVALID_INPUT")
-    user, proof, auth, validate = await _auth(binding, headers, now, workspace_id)
+    user, proof, auth, validate = await _auth(binding, headers, now, workspace_id, scope="members:write")
     found = await binding.batch([*auth, binding.prepare("SELECT * FROM workspace_invites WHERE id=? AND workspace_id=?")
         .bind(invite_id, workspace_id),
         binding.prepare("""SELECT r.*,a.payload AS applicant_snapshot FROM workspace_join_requests r
             JOIN app_state a ON a.name='record:users:'||r.applicant_user_id
             WHERE r.id=? AND r.invite_id=? AND r.workspace_id=?""").bind(request_id, invite_id, workspace_id)])
     validate([part.results for part in found[:len(auth)]])
-    _cookie_only(headers, proof)
     _manage(user)
     invites, requests = (part.results for part in found[len(auth):])
     if len(invites) != 1 or len(requests) != 1:
@@ -504,7 +516,7 @@ async def _review(binding, headers, body, now, workspace_id, invite_id, request_
         if invite["revision"] == MAX_REVISION:
             return _error(409, "REVISION_EXHAUSTED")
         # Revalidate reviewer plus applicant membership/capacities in one read.
-        current, current_proof, auth, validate = await _auth(binding, headers, now, workspace_id)
+        current, current_proof, auth, validate = await _auth(binding, headers, now, workspace_id, scope="members:write")
         resources = await binding.batch([*auth,
             binding.prepare("SELECT * FROM workspace_members WHERE workspace_id=? AND user_id=?")
                 .bind(workspace_id, applicant["id"]),

@@ -13,12 +13,12 @@ from .cloudflare_state_records import record_name
 
 
 READ_SCOPES = frozenset({"profile:read", "projects:read", "categories:read",
-                         "expenses:read", "reports:read"})
+                         "expenses:read", "reports:read", "members:read"})
 ROLE_SCOPES = {
     "viewer": READ_SCOPES,
     "editor": READ_SCOPES | {"expenses:write", "suggestions:use"},
-    "admin": READ_SCOPES | {"expenses:write", "suggestions:use", "projects:write", "categories:write"},
-    "owner": READ_SCOPES | {"expenses:write", "suggestions:use", "projects:write", "categories:write"},
+    "admin": READ_SCOPES | {"expenses:write", "suggestions:use", "projects:write", "categories:write", "members:write"},
+    "owner": READ_SCOPES | {"expenses:write", "suggestions:use", "projects:write", "categories:write", "members:write"},
 }
 
 
@@ -65,6 +65,8 @@ async def ledger_principal(*, binding: Any, headers: Mapping[str, object],
             raise PrincipalAuthError(403, "INSUFFICIENT_SCOPE", "Invalid key restriction") from None
         if restrictions != raw_restrictions:
             raise PrincipalAuthError(403, "INSUFFICIENT_SCOPE", "Invalid key restriction")
+        if scope.startswith("members:") and "projectIds" in restrictions:
+            raise PrincipalAuthError(403, "TARGET_FORBIDDEN", "Member scopes require ledger-wide access.")
         if target_kind is not None and not target_allowed(restrictions, target_kind, project_id):
             raise PrincipalAuthError(403, "TARGET_FORBIDDEN", "Target is outside API key restriction")
     else:

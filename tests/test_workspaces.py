@@ -116,6 +116,27 @@ def count(app, table):
         return db.execute("SELECT COUNT(*) FROM " + table).fetchone()[0]
 
 
+def member_key(app, *, actor=1, scopes=None, workspace=OWNER, restrictions=None):
+    actor_id = f"usr_github_{actor}"
+    limits = {"shared": False}
+    if workspace is not None:
+        revision = 1
+        if workspace != actor_id:
+            with app[0].connect() as db:
+                revision = db.execute("SELECT revision FROM workspace_members WHERE workspace_id=? AND user_id=?",
+                                      (workspace, actor_id)).fetchone()[0]
+        limits.update(workspaceId=workspace, workspaceMemberRevision=revision)
+    limits.update(restrictions or {})
+    key_id = "member_key_" + str(count(app, "api_keys"))
+    token = "pwk_synthetic_" + key_id
+    with app[0]._immediate() as db:
+        db.execute("INSERT INTO api_keys VALUES(?,?,?,?,?,?,?,?,?,?,?)", (key_id, actor_id, "Synthetic members",
+            token[:16], hashlib.sha256(token.encode()).hexdigest(),
+            json.dumps(scopes or ["members:read", "members:write"]), None,
+            json.dumps(limits), NOW, None, None))
+    return {"Cookie": "", "Authorization": "Bearer " + token}
+
+
 def test_workspace_list_ignores_selector_and_exposes_only_joined_ledgers(app):
     status, page = app[3]("GET", "/api/v1/workspaces", actor=4,
                          headers={"X-Pullwise-Workspace": "usr_github_6"})
@@ -489,14 +510,14 @@ def test_invitation_creation_does_not_depend_on_github_provider(app):
     assert count(app, "workspace_events") == count(app, "workspace_invites") == 1
 
 
-def test_api_keys_and_bearer_sessions_cannot_govern(app):
+def test_member_scopes_are_required_for_api_key_governance(app):
     token = "pwk_synthetic_workspace_governance"
     with app[0]._immediate() as db:
         db.execute("INSERT INTO api_keys VALUES(?,?,?,?,?,?,?,?,?,?,?)", ("key1", OWNER, "Synthetic",
             token[:16], hashlib.sha256(token.encode()).hexdigest(), '["profile:read"]', None,
             '{"shared":false}', NOW, None, None))
     assert app[3]("GET", "/api/v1/workspaces", headers={"Cookie": "", "Authorization": "Bearer " + token})[0] == 403
-    assert app[3]("GET", path("members"), headers={"Cookie": "", "Authorization": "Bearer session-1"})[0] == 403
+    assert app[3]("GET", path("members"), headers={"Cookie": "", "Authorization": "Bearer session-1"})[0] == 200
 
 
 def test_member_mutation_race_rolls_back_audit_and_usage(app):
@@ -822,13 +843,13 @@ def test_application_cap_is_lifetime_per_link_and_denies_before_write(app):
     assert count(app, "workspace_events") == 1 and count(app, "workspace_join_requests") == 100
 
 
-def test_application_and_review_cannot_use_api_keys_or_bearer_sessions(app):
+def test_application_requires_cookie_identity_while_review_accepts_authenticated_session(app):
     issued = invite(app)
     assert apply_to_invitation(app, issued, headers={"Cookie": "", "Authorization": "Bearer session-5"})[0] == 403
     application = apply_to_invitation(app, issued)[1]["request"]
-    assert review(app, issued, application, headers={"Cookie": "", "Authorization": "Bearer session-1"})[0] == 403
-    assert app[3]("GET", "/api/v1/workspace-invitation-requests", headers={"Cookie": "", "Authorization": "Bearer session-1"})[0] == 403
-    assert count(app, "workspace_members") == 3
+    assert app[3]("GET", "/api/v1/workspace-invitation-requests", headers={"Cookie": "", "Authorization": "Bearer session-1"})[0] == 200
+    assert review(app, issued, application, headers={"Cookie": "", "Authorization": "Bearer session-1"})[0] == 200
+    assert count(app, "workspace_members") == 4
 
 
 def test_workspace_join_requests_are_scoped_separately_from_global_inbox_cap(app):
@@ -847,3 +868,154 @@ def test_workspace_join_requests_are_scoped_separately_from_global_inbox_cap(app
     assert app[3]("GET", f"/api/v1/workspaces/{OWNER}/join-requests", actor=1)[1]["items"] == []
     assert app[3]("GET", f"/api/v1/workspaces/{OWNER}/join-requests", actor=4)[0] == 403
     assert count(app, "workspace_events") == 4
+
+
+def test_member_key_reads_and_writes_require_only_their_explicit_scope(app):
+    reader = member_key(app, scopes=["members:read"])
+    writer = member_key(app, scopes=["members:write"])
+    assert app[3]("GET", "/api/v1/workspaces", headers=reader)[1]["items"][0]["id"] == OWNER
+    assert app[3]("GET", path("members"), headers=reader)[0] == 200
+    assert app[3]("GET", path(), headers=reader)[0] == 200
+    assert app[3]("GET", path("members"), headers=writer) == (403, {"error": {"code": "INSUFFICIENT_SCOPE"}})
+    assert app[3]("PATCH", path("members", "usr_github_3"), {"role": "viewer"},
+        headers={**reader, "If-Match": '"1"'}) == (403, {"error": {"code": "INSUFFICIENT_SCOPE"}})
+    status, changed = app[3]("PATCH", path("members", "usr_github_3"), {"role": "viewer"},
+                            headers={**writer, "If-Match": '"1"'})
+    assert status == 200 and changed["role"] == "viewer" and changed["revision"] == 2
+    assert app[3]("DELETE", path("members", "usr_github_3"),
+                  headers={**writer, "If-Match": '"2"'}) == (204, None)
+
+
+@pytest.mark.parametrize("project_ids", [[], ["prj_one"]])
+@pytest.mark.parametrize("method,endpoint,body", [
+    ("GET", "/api/v1/workspaces", None),
+    ("GET", "/api/v1/workspace-invitation-requests", None),
+    ("GET", path("members"), None),
+    ("GET", path(), None),
+    ("POST", path(), {"role": "viewer"}),
+])
+def test_target_restricted_keys_cannot_govern_even_with_member_scopes(app, project_ids, method, endpoint, body):
+    key = member_key(app, restrictions={"projectIds": project_ids})
+    assert app[3](method, endpoint, body, headers=key) == (403, {"error": {"code": "TARGET_FORBIDDEN"}})
+    assert count(app, "workspace_events") == count(app, "workspace_invites") == 0
+
+
+def test_member_key_workspace_list_is_bound_and_does_not_enumerate_issuer_ledgers(app):
+    key = member_key(app, actor=2)
+    status, listed = app[3]("GET", "/api/v1/workspaces", headers={**key, "X-Pullwise-Workspace": "usr_github_6"})
+    assert status == 200 and [(item["id"], item["role"]) for item in listed["items"]] == [(OWNER, "admin")]
+    status, listed = app[3]("GET", "/api/v1/workspaces", actor=2)
+    assert status == 200 and {item["id"] for item in listed["items"]} == {OWNER, "usr_github_2"}
+    assert app[3]("GET", "/api/v1/workspaces/usr_github_2/members", headers=key) == (
+        403, {"error": {"code": "WORKSPACE_FORBIDDEN"}})
+
+
+def test_member_key_global_inbox_is_bound_and_reviews_keep_original_inviter(app):
+    shared_key = member_key(app, actor=2)
+    personal_key = member_key(app, actor=2, workspace=None)
+    owner_key = member_key(app)
+    status, shared = app[3]("POST", path(), {"role": "viewer"}, headers=shared_key)
+    assert status == 201 and shared["createdByUserId"] == "usr_github_2"
+    status, personal = app[3]("POST", "/api/v1/workspaces/usr_github_2/invites", {"role": "viewer"}, headers=personal_key)
+    assert status == 201
+    shared_request = apply_to_invitation(app, shared)[1]["request"]
+    personal_request = apply_to_invitation(app, personal)[1]["request"]
+    status, inbox = app[3]("GET", "/api/v1/workspace-invitation-requests", headers=shared_key)
+    assert status == 200 and [(item["workspaceId"], item["id"]) for item in inbox["items"]] == [(OWNER, shared_request["id"])]
+    status, inbox = app[3]("GET", "/api/v1/workspace-invitation-requests", headers=personal_key)
+    assert status == 200 and [(item["workspaceId"], item["id"]) for item in inbox["items"]] == [("usr_github_2", personal_request["id"])]
+    reader = member_key(app, actor=2, scopes=["members:read"])
+    assert app[3]("GET", f"/api/v1/workspaces/{OWNER}/join-requests", headers=reader)[1]["items"][0]["id"] == shared_request["id"]
+    assert app[3]("GET", path(identifier=shared["id"]) + "/requests", headers=reader)[1]["items"][0]["id"] == shared_request["id"]
+    assert app[3]("GET", "/api/v1/workspaces/usr_github_2/join-requests", headers=reader) == (
+        403, {"error": {"code": "WORKSPACE_FORBIDDEN"}})
+    assert app[3]("GET", "/api/v1/workspace-invitation-requests", headers=owner_key)[1]["items"] == []
+    assert review(app, shared, shared_request, headers=owner_key) == (
+        403, {"error": {"code": "INVITATION_REVIEW_FORBIDDEN"}})
+    assert review(app, shared, shared_request, headers=shared_key)[0] == 200
+    assert app[3]("GET", path("members"), actor=5)[0] == 200
+    assert app[3]("GET", "/api/v1/workspace-invitation-requests", headers=shared_key)[1]["items"] == []
+
+
+def test_member_keys_preserve_role_boundaries_and_never_change_owner(app):
+    viewer = member_key(app, actor=4)
+    admin = member_key(app, actor=2)
+    owner = member_key(app)
+    assert app[3]("GET", path("members"), headers=viewer)[0] == 200
+    assert app[3]("GET", path(), headers=viewer) == (403, {"error": {"code": "ROLE_FORBIDDEN"}})
+    assert app[3]("POST", path(), {"role": "editor"}, headers=viewer) == (
+        403, {"error": {"code": "ROLE_FORBIDDEN"}})
+    assert app[3]("POST", path(), {"role": "admin"}, headers=admin) == (
+        403, {"error": {"code": "ROLE_FORBIDDEN"}})
+    assert app[3]("PATCH", path("members", "usr_github_3"), {"role": "admin"},
+        headers={**admin, "If-Match": '"1"'}) == (403, {"error": {"code": "ROLE_FORBIDDEN"}})
+    assert app[3]("DELETE", path("members", OWNER), headers={**owner, "If-Match": '"1"'}) == (
+        403, {"error": {"code": "OWNER_IMMUTABLE"}})
+
+
+def test_member_key_can_reject_requests_and_revoke_invitation_with_cas(app):
+    key = member_key(app)
+    status, issued = app[3]("POST", path(), {"role": "viewer"}, headers=key)
+    assert status == 201
+    request = apply_to_invitation(app, issued)[1]["request"]
+    assert review(app, issued, request, action="reject", headers=key)[1]["request"]["status"] == "rejected"
+    assert review(app, issued, request, action="reject", headers=key)[0] == 412
+    assert app[3]("DELETE", path(identifier=issued["id"]), headers=key)[0] == 428
+    assert app[3]("DELETE", path(identifier=issued["id"]), headers={**key, "If-Match": '"1"'}) == (204, None)
+    assert count(app, "workspace_members") == 3 and count(app, "workspace_events") == 4
+
+
+@pytest.mark.parametrize("method", ["preview", "accept"])
+def test_invitation_applicant_identity_stays_cookie_only_for_member_keys(app, method):
+    issued = invite(app)
+    key = member_key(app, actor=5, workspace=None, scopes=["profile:read", "members:read", "members:write"])
+    assert apply_to_invitation(app, issued, method=method, headers=key) == (
+        403, {"error": {"code": "COOKIE_SESSION_REQUIRED"}})
+    assert count(app, "workspace_join_requests") == 0
+
+
+def test_member_key_is_invalidated_by_issuer_membership_revision(app):
+    key = member_key(app, actor=2)
+    assert app[3]("PATCH", path("members", "usr_github_2"), {"role": "editor"},
+        headers={"If-Match": '"1"'})[0] == 200
+    assert app[3]("GET", path("members"), headers=key) == (
+        403, {"error": {"code": "WORKSPACE_MEMBERSHIP_CHANGED"}})
+    assert app[3]("PATCH", path("members", "usr_github_2"), {"role": "admin"},
+        headers={"If-Match": '"2"'})[0] == 200
+    assert app[3]("GET", path("members"), headers=key)[0] == 403
+
+
+@pytest.mark.parametrize("change", ["revoke", "scope", "restriction", "membership"])
+def test_member_key_write_races_rollback_mutation_audit_and_usage(app, change):
+    key = member_key(app, actor=2)
+    def invalidate(db):
+        if change == "revoke":
+            db.execute("UPDATE api_keys SET revoked_at=?", (NOW,))
+        elif change == "scope":
+            db.execute("UPDATE api_keys SET scopes='[\"members:read\"]'")
+        elif change == "restriction":
+            db.execute("UPDATE api_keys SET restrictions='{}'")
+        else:
+            db.execute("UPDATE workspace_members SET revision=2 WHERE user_id='usr_github_2'")
+    app[1].race = (lambda statements: any("INSERT INTO d1_command_guard" in item.sql for item in statements), invalidate)
+    assert app[3]("PATCH", path("members", "usr_github_3"), {"role": "viewer"},
+        headers={**key, "If-Match": '"1"'}, plan=True) == (
+        503, {"error": {"code": "WORKSPACE_WRITE_UNAVAILABLE"}})
+    with app[0].connect() as db:
+        assert tuple(db.execute("SELECT role,revision FROM workspace_members WHERE user_id='usr_github_3'").fetchone()) == ("editor", 1)
+    assert count(app, "workspace_events") == count(app, "ledger_plan_usage") == count(app, "d1_command_guard") == 0
+
+
+def test_member_key_approval_revocation_race_rolls_back_all_decision_effects(app):
+    key = member_key(app, actor=2)
+    status, issued = app[3]("POST", path(), {"role": "viewer"}, headers=key)
+    assert status == 201
+    request = apply_to_invitation(app, issued)[1]["request"]
+    app[1].race = (lambda statements: any("INSERT INTO d1_command_guard" in item.sql for item in statements),
+                   lambda db: db.execute("UPDATE api_keys SET revoked_at=?", (NOW,)))
+    assert review(app, issued, request, headers=key, plan=True)[0] == 503
+    with app[0].connect() as db:
+        assert db.execute("SELECT status FROM workspace_invites").fetchone()[0] == "pending"
+        assert tuple(db.execute("SELECT status,revision FROM workspace_join_requests").fetchone()) == ("pending", 1)
+    assert count(app, "workspace_members") == 3 and count(app, "workspace_events") == 2
+    assert count(app, "ledger_plan_usage") == count(app, "d1_command_guard") == 0

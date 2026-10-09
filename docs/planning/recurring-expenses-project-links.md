@@ -49,14 +49,23 @@ runtime acceptance.
 
 ## Management and execution
 
-`/api/v1/expense-recurring-rules` and `/{id}` provide cookie-session-only
-management. GET requires expense-read; creation/edit/pause/resume/cancel require
-expense-write. POST uses the existing namespaced idempotency-key convention;
+`/api/v1/expense-recurring-rules` and `/{id}` provide the same management
+resources to browser sessions and Bearer API keys. GET requires `expenses:read`;
+creation/edit/pause/resume/cancel require `expenses:write`, the issuer's current
+workspace role and the permitted project/shared target. POST uses the existing namespaced idempotency-key convention;
 PATCH and DELETE require If-Match. A rule's target is immutable. Editing or
 resuming validates the current actor and renews the background grant, without
 changing its original creation-idempotency identity or generated history.
 Cancellation preserves the rule and permanent occurrence facts. Stopping
 remains possible when the commercial write allowance is exhausted.
+
+A key-created or key-resumed rule stores only the original credential hash in
+internal template metadata. The public rule DTO contains no token or key hash.
+Every generation checks that key's current scopes, revocation, expiry, workspace
+binding, membership revision and target permissions, with those facts fenced in
+the same generated-expense transaction. A full edit or explicit resume adopts
+the current actor and credential; a browser session can renew the rule without
+retaining an old key grant. Pausing does not silently replace the saved grant.
 
 A start date in the past allows bounded catch-up. More than 12 due periods
 blocks for explicit review; resume starts at the next future matching date and

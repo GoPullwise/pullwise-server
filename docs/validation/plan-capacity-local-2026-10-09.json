@@ -1,0 +1,115 @@
+{
+  "date": "2026-10-09",
+  "scope": "Local synthetic quota and capacity evidence; no remote D1 access or deployment",
+  "defaults": {
+    "free": {"projects": 3, "expenseRecords": 100},
+    "pro": {"projects": 20, "expenseRecords": 20000},
+    "max": {"projects": 100, "expenseRecords": 100000}
+  },
+  "operatorCapacityOverrideMaximum": 1000000,
+  "capacitySemantics": {
+    "ownerScoped": true,
+    "includesArchivedAndRemovedProjects": true,
+    "includesSoftDeletedAndSharedExpenses": true,
+    "readsNeverInitializeUsage": true,
+    "aboveLimitHistoryIsRetained": true,
+    "lowerLimitsBlockNewCapacityButPreserveExistingEdits": true,
+    "getRoutes": ["/billing", "/billing/plan", "/api/v1/me"],
+    "getProjection": "ledgerUsage: workspaceId, projects/expenseRecords {used, limit, remaining}; remaining is max(0, limit-used)",
+    "getScope": "Billing uses personal owner; /api/v1/me uses selected workspace owner",
+    "getAuthorization": "Capacity is read in the same credential/owner/membership snapshot batch. Public pricing and revoked authentication do not disclose personal usage.",
+    "getCounterSource": "Exact ledger_plan_usage row; before its first mutation initialization, owner-indexed stored-row COUNT fallback with no GET writes"
+  },
+  "storageProbe": {
+    "method": "100 ordinary Shared pool creates per case, 200 total, current migrations, real handle_ledger_request and PlanLimitedD1, explicit category, Pro policy, disabled Jev. Compare SQLite dbstat allocated pages and payload for expense tables and all their indexes before and after. Close all connections.",
+    "pageBytes": 4096,
+    "cases": [
+      {
+        "noteUtf8Bytes": 0,
+        "purposeUtf8Bytes": 7,
+        "creates": 100,
+        "allocatedBytesPerCreate": {
+          "expense": 614.4,
+          "immutableAudit": 901.12,
+          "creationReplay": 696.32,
+          "persistentTotal": 2211.84,
+          "rolling24HourActivity": 778.24,
+          "includingCurrentActivity": 2990.08
+        },
+        "payloadBytesPerCreateIncludingActivity": 2488.92
+      },
+      {
+        "noteUtf8Bytes": 1024,
+        "purposeUtf8Bytes": 7,
+        "creates": 100,
+        "allocatedBytesPerCreate": {
+          "expense": 1802.24,
+          "immutableAudit": 2252.8,
+          "creationReplay": 2048,
+          "persistentTotal": 6103.04,
+          "rolling24HourActivity": 2293.76,
+          "includingCurrentActivity": 8396.8
+        },
+        "payloadBytesPerCreateIncludingActivity": 6579.92
+      }
+    ],
+    "usageCounter": "One row per owner was already initialized by category creation; 100 creates grew its payload by 2 bytes and added no pages.",
+    "modelFallback": "Disabled paid-plan Jev assistance fallback remains in durable audit/replay DTO and is included in these measurements.",
+    "persistentAllocatedBytesAtFinalCapacity": {
+      "free100": {"noNote": 221184, "oneKiBNote": 610304},
+      "pro20000": {"noNote": 44236800, "oneKiBNote": 122060800},
+      "max100000": {"noNote": 221184000, "oneKiBNote": 610304000}
+    },
+    "limits": [
+      "SQLite page estimates from simple synthetic creates are not actual Cloudflare storage invoices or production-size benchmarks.",
+      "Exclude subsequent edit/delete immutable audits, recurring rules/occurrences, account baseline, DO journal, Cloudflare infrastructure overhead, backups and WAL.",
+      "Activity is retired after 24 hours; its measured peak must not be multiplied by all permanent historical records.",
+      "Actual field lengths, UUID insertion fragmentation and 4096-byte page quantization change results.",
+      "Probe used existing Pro write allowances; the provisional Max capacity at sampling does not affect the 100-row storage cases. Final default Max is 100000."
+    ]
+  },
+  "ordinaryCreateSql": {
+    "businessMutationStatements": 9,
+    "rowsWrittenReservationIncludingIndexes": 23,
+    "breakdown": {
+      "threeCredentialCategoryTargetGuardInserts": 3,
+      "usageUpsert": 3,
+      "expense": 5,
+      "immutableAudit": 3,
+      "creationReplay": 2,
+      "activity": 4,
+      "guardCleanup": 3
+    },
+    "maximumAdditionalExpiredActivityRetirement": {"rows": 16, "rowsWrittenReservation": 64},
+    "withMaximumRetirementRowsWrittenReservation": 87,
+    "providerCallsObserved": 0,
+    "nativeActualBilledRowsMeasured": false
+  },
+  "readAmplification": {
+    "source": "ProductMeteredD1.batch calls refresh after each successful write; _refresh_records performs all-product-table COUNT and global app_state kind counts.",
+    "refreshReservation": "3 * (sum(all product table rows) + 4 * app_state rows + 128)",
+    "firstFillExpenseOnlyLogicalCountTraversal": {
+      "pro20000": 200010000,
+      "max100000": 5000050000
+    },
+    "caveat": "Immutable audit and replay tables grow alongside expenses. Other owners' data also participates. These traversal estimates and reservation upper bounds are not native D1 rows_read measurements. Capacity storage cost alone does not establish request cost or latency."
+  },
+  "runtimeBounds": {
+    "httpJsonIngressBytes": 8192,
+    "nativeD1DispatchTimeoutSeconds": 10,
+    "requestTimeoutSeconds": 30,
+    "nativeWorkerCpuMeasured": false,
+    "timeoutIsCpuBudget": false,
+    "localPythonWallTimeIsWorkerCpuEvidence": false
+  },
+  "validation": {
+    "focusedTests": {
+      "python": "3.10.12",
+      "command": "python -m pytest tests/test_ledger_plan_limits.py tests/test_ledger_capacity_usage.py tests/test_cloudflare_billing_read.py tests/test_creem_catalog_projection.py tests/test_jev_plan_entitlements.py -q",
+      "passed": 73
+    },
+    "maxBoundaryMethod": "Synthetic committed quota counters at projects=99 and records=99999; real guarded PlanLimitedD1 mutations accept the final slot, reject above-limit creation before native dispatch, and retain records and existing edits after downgrade.",
+    "nativeLargeCapacityBenchmark": false,
+    "schemaMigrationNeeded": false
+  }
+}

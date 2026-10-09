@@ -3,7 +3,7 @@ import unittest
 from pullwise_server.api_key_dto_rules import (
     DEFAULT_SCOPES, requested_api_key_scopes, parse_api_key_restrictions,
 )
-from pullwise_server.cloudflare_ledger_auth import target_allowed
+from pullwise_server.cloudflare_ledger_auth import ROLE_SCOPES, target_allowed
 
 
 class LedgerApiKeyRulesTests(unittest.TestCase):
@@ -22,6 +22,15 @@ class LedgerApiKeyRulesTests(unittest.TestCase):
         self.assertFalse(target_allowed(restricted, "shared", None))
         self.assertTrue(target_allowed({"projectIds": [], "shared": True}, "shared", None))
         self.assertFalse(target_allowed({"projectIds": [], "shared": True}, "project", "prj_a"))
+
+    def test_explicit_member_scopes_intersect_ledger_roles(self):
+        scopes, error = requested_api_key_scopes(["members:read", "members:write"], provided=True)
+        self.assertIsNone(error)
+        self.assertEqual(scopes, ["members:read", "members:write"])
+        self.assertNotIn("members:read", DEFAULT_SCOPES)
+        for role in ROLE_SCOPES:
+            self.assertIn("members:read", ROLE_SCOPES[role])
+            self.assertEqual("members:write" in ROLE_SCOPES[role], role in {"owner", "admin"})
 
     def test_restriction_shape_fails_closed(self):
         for value in ({"repositoryIds": ["old"]}, {"projectIds": ["prj_a"], "shared": "yes"},
