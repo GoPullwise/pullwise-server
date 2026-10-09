@@ -4,6 +4,13 @@ Updated 2026-10-09. Companion: [Web acceptance](../../../pullwise-web/docs/valid
 
 ## Preview operator Max trial (2026-10-09)
 
+Published source `1302fb8` to preview and applied one exact real-account Max
+trial through the requested Shanghai month end. The temporary config was removed
+and persisted authority, expiry, audit, Jev flags and healthy journal were read
+back. Original payment facts and production D1 pause were preserved. Remote
+interval observed 293 reads / 19 writes (including other preview traffic); no
+model or payment was called. See `preview-plan-grant-release-2026-10-09.json`.
+
 Preview administrators can issue a bounded complimentary Max grant through the
 existing singleton coordinator or its trusted configuration binding. Exact user
 ID, GitHub login and email must match. One atomic account/audit/authority batch

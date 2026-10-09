@@ -1,0 +1,41 @@
+{
+  "date": "2026-10-09",
+  "passed": true,
+  "sourceCommit": "1302fb8",
+  "scope": "Preview-only operator Max trial; existing immutable account matched by ID/login/email",
+  "targetMatched": true,
+  "plan": "max",
+  "expiresAt": 1793462400,
+  "expiryAsiaShanghai": "2026-11-01T00:00:00+08:00",
+  "auditRecorded": true,
+  "paymentFactsUnchanged": true,
+  "temporaryConfigurationRemoved": true,
+  "jevEnabled": true,
+  "modelCalls": 0,
+  "realPayments": 0,
+  "productionD1Paused": true,
+  "previewVersionBeforeGrant": "aa941dd1-b2e8-4232-96c3-03fe951c4ce3",
+  "previewVersionAfterConfigurationRemoval": "d7b1657e-8add-4223-9d77-b5d4f4e15b12",
+  "journalHealthy": true,
+  "schemaVersion": 9,
+  "stateStorageVersion": 1,
+  "observedIntervalDeltas": {
+    "rowsRead": 293,
+    "rowsWritten": 19
+  },
+  "intervalIncludesOtherPreviewTraffic": true,
+  "nativeAcceptance": {
+    "requests": 7,
+    "sameSingleton": true,
+    "businessHashesPreserved": true,
+    "readOnlyReplay": true,
+    "expiryDowngradesWithoutDeletion": true,
+    "attemptMetadata": "Miniflare omitted total_attempts; full reservations retained"
+  },
+  "tests": {
+    "fullSuitePassed": 1602,
+    "subtestsPassed": 56,
+    "finalTargetedPassed": 61
+  },
+  "retention": "User-entered projects/expenses/categories/notes/recurring rules survive expiry and downgrade. Generated recent activity retains its existing rolling 24-hour window."
+}
