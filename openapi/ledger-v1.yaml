@@ -1320,7 +1320,7 @@ components:
         enabled: {type: boolean, description: Persisted preference; true for a legacy account without preference fields. Free retains this value while effective availability stays false}
         revision: {type: integer, minimum: 1, maximum: 9007199254740991, description: Independent preference CAS revision}
         eligible: {type: boolean, description: The actual signed-in account currently has Pro or Max}
-        available: {type: boolean, description: Current paid entitlement, persisted preference and runtime activation gates all passed}
+        available: {type: boolean, description: "Current paid entitlement, persisted preference and runtime activation gates all passed"}
         monthlyBudgetUsd: {type: string, pattern: '^[0-9]+(\.[0-9]{1,6})?$'}
     Entitlements:
       type: object
@@ -1341,7 +1341,7 @@ components:
           properties:
             eligible: {type: boolean, description: Current ledger owner's Pro or Max entitlement; actor's personal plan does not grant eligibility}
             enabled: {type: boolean, description: Private account entitlements include the ledger owner's persisted model preference; malformed state fails closed. Public plan templates have no user preference}
-            available: {type: boolean, description: Eligibility, current activation gates and the ledger owner's preference all passed for private entitlements}
+            available: {type: boolean, description: "Eligibility, current activation gates and the ledger owner's preference all passed for private entitlements"}
             monthlyBudgetUsd: {type: string, pattern: '^[0-9]+(\.[0-9]{1,6})?$'}
             period: {type: string, enum: [utc-calendar-month]}
             rollover: {type: boolean, const: false}

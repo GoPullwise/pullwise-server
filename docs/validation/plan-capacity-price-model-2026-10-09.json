@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-09",
+  "purpose": "Explain the Pro 20000 and Max 100000 expense capacity recommendation using measured local storage and current published infrastructure prices.",
+  "sources": {
+    "storageEvidence": "plan-capacity-local-2026-10-09.json",
+    "d1Pricing": "https://developers.cloudflare.com/d1/platform/pricing/",
+    "durableObjectPricing": "https://developers.cloudflare.com/durable-objects/platform/pricing/",
+    "workersPricing": "https://developers.cloudflare.com/workers/platform/pricing/"
+  },
+  "publishedPaidD1PricesUsd": {
+    "includedStorageGbPerAccount": 5,
+    "storageGbMonthAboveIncluded": 0.75,
+    "includedRowsReadMonthly": 25000000000,
+    "rowsReadPerMillionAboveIncluded": 0.001,
+    "includedRowsWrittenMonthly": 50000000,
+    "rowsWrittenPerMillionAboveIncluded": 1
+  },
+  "storageScenario": {
+    "gbDivisor": 1000000000,
+    "includes": "Expense row, initial immutable audit and creation replay with their indexes; measured zero-note and one-KiB-note cases.",
+    "pro20000": {
+      "persistentBytesRange": [44236800, 122060800],
+      "marginalD1StorageUsdPerMonthAboveIncludedRange": [0.0331776, 0.0915456]
+    },
+    "max100000": {
+      "persistentBytesRange": [221184000, 610304000],
+      "marginalD1StorageUsdPerMonthAboveIncludedRange": [0.165888, 0.457728]
+    },
+    "excluded": "Later edit/delete audit growth, recurring rules/occurrences, account baseline, rolling activity, DO journal, infrastructure, backups and WAL. These are scenarios rather than invoice predictions."
+  },
+  "costDecision": {
+    "proDaily10EntriesYears": 5.47945205479452,
+    "maxDaily10EntriesYears": 27.3972602739726,
+    "maxCapacityMultipleOfPro": 5,
+    "basis": "Storage alone is inexpensive for the measured simple records, but current product-wide cardinality refresh after each write introduces reads over growing expense, audit and replay tables across owners. Keep distinct long-term allowances and headroom instead of asserting unlimited capacity or a per-user monthly cost guarantee.",
+    "expenseOnlyFirstFillTraversal": {"pro": 200010000, "max": 5000050000},
+    "traversalIsMeasuredBilledRead": false,
+    "existingMonthlyWriteAllowancesUnchanged": {"free": 1000, "pro": 10000, "max": 10000},
+    "modelAllowanceUnchangedUsd": {"free": "0.00", "pro": "3.00", "max": "5.00"},
+    "sharedAccountIncludedQuotas": true,
+    "remainingCostUnknowns": "Actual production SQL read/write and Worker CPU distributions, edit frequency, content sizes, retention/fragmentation, total tenant count, model calls and DO journal growth."
+  }
+}

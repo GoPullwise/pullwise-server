@@ -1,5 +1,40 @@
 # Current local acceptance
 
+## REST browser/key parity and plan capacity (2026-10-09)
+
+Cookie Web clients and external Bearer keys share the ledger REST implementation
+for project/shared expenses, recurring rules, project settings/removal and member
+governance. Member scopes remain explicit and incompatible with project allowlists;
+applicant identity uses its own account session. Recurring occurrences atomically
+recheck the original key, current member, target, category and owner allowance.
+Revocation, expiry or changed membership blocks further occurrences. Activity's
+scope guard uses at most eleven fixed JSON paths, with a real metering regression
+that prevents user-record array bounds from inflating the read reservation.
+
+Default project/expense capacities are Free **3/100**, Pro **20/20,000**, Max
+**100/100,000**. Authenticated Billing reads report personal capacity; `/api/v1/me`
+reports selected-ledger capacity. Public catalog requests never disclose usage.
+Reads do not initialize counters; retained history still consumes capacity.
+[Local capacity evidence](plan-capacity-local-2026-10-09.json) and the
+[price model](plan-capacity-price-model-2026-10-09.json) explain storage and the
+remaining product-wide COUNT/read-growth costs without claiming a production bill.
+
+The merged code preserves main's personal Jev preferences. The complete Python
+3.10.12 run passes **2,022 tests** with one newly merged OpenAPI formatting failure;
+after quoting its descriptions, all **five contract checks pass**. A further
+**96 contract/Jev integration checks pass**. S01, shell syntax, source mirrors and
+preview dry-run packaging pass. OpenAPI describes **42 paths / 57 operations**,
+including account bootstrap, key lifecycle, Billing and cookie-only Jev settings.
+
+[Native local evidence](rest-parity-native-local-2026-10-09.json) records the
+pre-Jev-merge canonical Worker, Native D1 and original singleton SQLite journal.
+Its complete fixed 48-request journey passes, including actual recurring generation
+and key/member revocation blocking. It measures 2,813 rows read / 599 written;
+all local attempts total 81 HTTP requests, 85,310 reserved reads / 2,076 reserved
+writes, with complete accounting. No remote D1, provider delivery, journal reset
+or unknown-outcome retry was performed. The final merged Jev changes have separate
+unit/integration evidence; local native evidence is not authenticated remote usage.
+
 ## English-only verification emails (2026-10-09)
 
 After the member-role refresh preview release, the shared verification template
