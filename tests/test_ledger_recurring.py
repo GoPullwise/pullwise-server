@@ -500,3 +500,91 @@ def test_archiving_preserves_exact_rule_replay_and_visibility(app):
     assert app.call("POST", body=draft(project=True)) == (201, original)
     assert app.call("GET", original["id"]) == (200, original)
     assert app.call("GET")[1]["items"] == [original]
+
+
+def _shanghai_instant(value):
+    return int(datetime.fromisoformat(value + "+08:00").timestamp())
+
+
+@pytest.mark.parametrize("project", [False, True])
+def test_monthly_start_boundary_is_saved_without_changing_the_selected_day(app, project):
+    body = draft(project=project, schedule={"frequency": "monthly", "day": 9,
+        "timezone": "Asia/Shanghai", "startOn": "2026-10-01"})
+    status, original = app.call("POST", body=body)
+    assert status == 201 and original["nextOccurrenceOn"] == "2026-10-09"
+    edited = {**body, "schedule": {**body["schedule"], "startOn": "2026-10-10"}}
+    before = app.rows("expense_recurring_rules")
+    # Constructing a form draft sends no write. The saved row and list remain
+    # the original plan until an explicit versioned PATCH succeeds.
+    assert app.call("GET", original["id"]) == (200, original)
+    assert app.call("GET", params={"target": "project" if project else "shared"})[1]["items"] == [original]
+    assert app.rows("expense_recurring_rules") == before
+    status, saved = app.call("PATCH", original["id"], edited, revision=original["revision"])
+    assert status == 200 and saved["revision"] == 2
+    assert saved["schedule"]["startOn"] == "2026-10-10" and saved["schedule"]["day"] == 9
+    # October 9 is before the new boundary; the next selected monthly day is
+    # November 9, rather than interpreting startOn as a new monthly anchor.
+    assert saved["nextOccurrenceOn"] == "2026-11-09"
+    assert saved["nextRunAt"] == _shanghai_instant("2026-11-09T00:00:00")
+    assert app.call("GET", original["id"]) == (200, saved)
+    assert app.call("GET", params={"target": "project" if project else "shared"})[1]["items"] == [saved]
+    stored = app.rows("expense_recurring_rules")[0]
+    assert json.loads(stored["schedule_json"]) == saved["schedule"]
+    assert stored["next_occurrence_on"] == "2026-11-09" and stored["next_period_key"] == "M2026-11"
+    assert app.rows("expenses") == app.rows("expense_events") == app.rows("expense_recurring_occurrences") == []
+
+
+@pytest.mark.parametrize("project", [False, True])
+@pytest.mark.parametrize("edit_date,candidate", [
+    ("2026-10-09", "2026-10-10"),
+    ("2026-10-10", "2026-11-10"),
+])
+def test_monthly_day_edit_keeps_recorded_october_period_and_applies_in_november(app, project, edit_date, candidate):
+    body = draft(project=project, schedule={"frequency": "monthly", "day": 9,
+        "timezone": "Asia/Shanghai", "startOn": "2026-10-01"})
+    status, original = app.call("POST", body=body)
+    assert status == 201
+    # Keep only this synthetic local Owner cookie valid through the explicitly
+    # bounded edit/read journey. The scheduled grant does not rely on a cookie.
+    with app.store._immediate() as db:
+        session = {"userId": "owner", "expiresAt": _shanghai_instant("2026-11-10T01:00:00")}
+        db.execute("UPDATE app_state SET payload=? WHERE name=?", (
+            encode_record("sessions", "owner", session), record_name("sessions", "owner")))
+    october = _shanghai_instant("2026-10-09T00:00:00")
+    assert app.tick(now=october) == {"scanned": 1, "created": 1, "blocked": 0, "replayed": 0}
+    recorded = {table: app.rows(table) for table in ("expenses", "expense_events", "expense_recurring_occurrences")}
+    assert recorded["expenses"][0]["occurred_on"] == "2026-10-09"
+    assert recorded["expense_recurring_occurrences"][0]["period_key"] == "M2026-10"
+    edit_now = _shanghai_instant(edit_date + "T00:05:00")
+    current = app.call("GET", original["id"], now=edit_now)[1]
+    edited = {**body, "schedule": {**body["schedule"], "day": 10, "startOn": "2026-10-10"}}
+    status, saved = app.call("PATCH", original["id"], edited, revision=current["revision"], now=edit_now)
+    assert status == 200 and saved["schedule"]["day"] == 10
+    assert saved["schedule"]["startOn"] == "2026-10-10"
+    assert saved["nextOccurrenceOn"] == candidate
+    assert saved["nextRunAt"] == _shanghai_instant(candidate + "T00:00:00")
+    assert app.call("GET", original["id"], now=edit_now) == (200, saved)
+    assert app.call("GET", params={"target": "project" if project else "shared"}, now=edit_now)[1]["items"] == [saved]
+    assert json.loads(app.rows("expense_recurring_rules")[0]["schedule_json"]) == saved["schedule"]
+    assert {table: app.rows(table) for table in recorded} == recorded
+    usage_after_save = app.rows("ledger_plan_usage")
+    # On local October 9, tomorrow is a valid candidate date. Its monthly
+    # identity is already recorded: the runner advances the pointer without
+    # publishing another expense/audit/occurrence or charging a business write.
+    tick_now = _shanghai_instant("2026-10-10T00:06:00")
+    result = app.tick(now=tick_now)
+    assert result == {"scanned": int(edit_date == "2026-10-09"), "created": 0,
+        "blocked": 0, "replayed": int(edit_date == "2026-10-09")}
+    assert {table: app.rows(table) for table in recorded} == recorded
+    assert app.rows("ledger_plan_usage") == usage_after_save
+    next_rule = app.call("GET", original["id"], now=tick_now)[1]
+    assert next_rule["nextOccurrenceOn"] == "2026-11-10"
+    stored = app.rows("expense_recurring_rules")[0]
+    assert stored["next_occurrence_on"] == "2026-11-10" and stored["next_period_key"] == "M2026-11"
+    # The next calendar month creates exactly one new record on the edited day;
+    # the old October expense and its durable financial audit stay unchanged.
+    assert app.tick(now=_shanghai_instant("2026-11-10T00:00:00"))["created"] == 1
+    assert [row["occurred_on"] for row in app.rows("expenses")] == ["2026-10-09", "2026-11-10"]
+    assert [row["period_key"] for row in app.rows("expense_recurring_occurrences")] == ["M2026-10", "M2026-11"]
+    for table in recorded:
+        assert app.rows(table)[0] == recorded[table][0]
