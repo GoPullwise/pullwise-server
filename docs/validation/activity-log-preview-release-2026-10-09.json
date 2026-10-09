@@ -1,0 +1,320 @@
+{
+  "kind": "activity-log-preview-release",
+  "date": "2026-10-09",
+  "completedAt": "2026-10-09T05:34:16.347498+00:00",
+  "passed": true,
+  "scope": "Preview publication, native local acceptance and finite static readback. No remote authenticated workflow acceptance is claimed.",
+  "features": {
+    "projectTabs": [
+      "Expenses",
+      "Reports",
+      "Project settings",
+      "Operation log"
+    ],
+    "sharedTabs": [
+      "Expenses",
+      "Reports",
+      "Operation log"
+    ],
+    "actorTimeRecordAndBeforeAfter": true,
+    "serverRollingWindowHours": 24,
+    "localTimeZoneDisplay": true,
+    "historicalBackfill": false,
+    "projectionStartsWithRelease": true,
+    "manualReloadAndBoundedPagination": true,
+    "polling": false,
+    "standaloneTopbarLedgerLabelRemoved": true,
+    "accessibleNativeSelectorPreserved": true
+  },
+  "server": {
+    "worker": "pullwise-server-preview",
+    "origin": "https://preview-api.pull-wise.com",
+    "codeSourceCommit": "7d5422221e838a92ea13aa6b6510524de6417228",
+    "publicationSourceCommit": "7d5422221e838a92ea13aa6b6510524de6417228",
+    "beforeDeployment": {
+      "id": "12118229-3993-4e26-9d5a-37378073ef0f",
+      "createdAt": "2026-10-09T04:33:43.625095Z",
+      "versions": [
+        {
+          "version_id": "ef365f6d-3e71-464e-973b-b8d477fb86c8",
+          "percentage": 100
+        }
+      ]
+    },
+    "deployment": {
+      "id": "d90fdf12-bcd8-4ade-a6d3-d963cbb45cb4",
+      "createdAt": "2026-10-09T05:28:39.852541Z",
+      "versions": [
+        {
+          "version_id": "b931d45f-507a-4ca5-8f81-e0b1ed366f47",
+          "percentage": 100
+        }
+      ]
+    },
+    "packageEvidence": {
+      "passed": true,
+      "canonicalModuleCount": 53,
+      "entrySha256": "857e4f3c08815eb85d16a9213a4ea81d5bca7d014b730b83f41c0e0e6ec175ae",
+      "sdkVendored": true,
+      "tzdataVendored": true,
+      "pinsUnchanged": true
+    },
+    "schemaFingerprint": "3bc9f5e11f8883b22a791180204ef55ba9f6990cb03ea59d6cf315d266c70ad2",
+    "allExistingBindingsPreserved": true,
+    "onlyAddedBinding": "PULLWISE_PREVIEW_SCHEMA_V9_UPGRADE_ENABLED=1",
+    "secretNamesPreserved": [
+      "PULLWISE_CREEM_API_KEY",
+      "PULLWISE_CREEM_WEBHOOK_SECRET",
+      "PULLWISE_EMAIL_CODE_SECRET",
+      "PULLWISE_GITHUB_CLIENT_SECRET",
+      "PULLWISE_GITHUB_TOKEN_KEY",
+      "TYPESAFE_API_KEY"
+    ],
+    "databaseId": "e9dc3b89-f81f-4fce-87ef-d8797d879fb4",
+    "coordinatorNamespaceId": "0e0ce4946c5e4d5f81c606273ba94b5d",
+    "coordinatorIdentity": "pullwise-s17-s18-2026-09-28",
+    "scheduledCron": "0 * * * *",
+    "addedCron": false,
+    "forcedRemoteTicks": 0
+  },
+  "web": {
+    "worker": "pullwise-web-preview",
+    "origin": "https://preview.pull-wise.com",
+    "codeSourceCommit": "718242732d1f5b29262386a0996420eb17f5e9ea",
+    "publicationSourceCommit": "1358af2d8eb6fceeef9c6f32785e36d6bedf63e3",
+    "preservedConcurrentMemberPanelCommit": "b37f9af5bdbd3226e8b0faa5e449d07489325e03",
+    "beforeDeployment": {
+      "id": "273b70f4-3c47-443a-b90b-9b56b6c8e003",
+      "createdAt": "2026-10-09T05:03:09.989027Z",
+      "versions": [
+        {
+          "version_id": "c9f34829-4912-4fd8-9abd-545fcd123a25",
+          "percentage": 100
+        }
+      ]
+    },
+    "deployment": {
+      "id": "e95de44b-4fa5-4be7-9010-3781b1918d21",
+      "createdAt": "2026-10-09T05:33:39.19333Z",
+      "versions": [
+        {
+          "version_id": "59787df2-05d3-48e1-b2c2-750d13de1755",
+          "percentage": 100
+        }
+      ]
+    },
+    "frozenBuildEnvironment": {
+      "VITE_APP_URL": "https://preview.pull-wise.com",
+      "VITE_API_BASE_URL": "/api",
+      "VITE_GITHUB_APP_SLUG": "gopullwise-preview"
+    },
+    "frozenHomepageSha256": "c7f4f5cf60c867ab4ac054162dfd1cafd14557284eb4c6974f5655d299dbae72",
+    "frozenReadbackAssets": [
+      "index-DG1_LAAx.js",
+      "ledger-DV-OZzdj.js",
+      "index-ChhzqjXD.css"
+    ],
+    "bindingsPreserved": true,
+    "serverService": "pullwise-server-preview",
+    "rebuiltDuringDeployment": false
+  },
+  "localAcceptance": {
+    "serverFullSuitePassed": 1569,
+    "webFullSuiteFiles": 47,
+    "webFullSuitePassed": 867,
+    "serverStaticContractsMirrorAndPackagePassed": true,
+    "webLintBuildAndOfflineWorkerPassed": true,
+    "schemaEvidence": "activity-schema-native-local-2026-10-09.json",
+    "schemaLocalCalls": 5,
+    "schemaMigrationAccounting": {
+      "rowsRead": 453,
+      "rowsWritten": 5
+    },
+    "all21ExistingTableHashesPreserved": true,
+    "nativeWorkflowEvidence": "activity-log-native-runtime-local-2026-10-09.json",
+    "nativeLocalCalls": 55,
+    "nativeWorkflowAccounting": {
+      "rowsRead": 2442,
+      "rowsWritten": 627
+    },
+    "separateReadOnlyIntegrityRowsRead": 1763,
+    "browserEvidence": "activity-log-local-2026-10-09.json",
+    "browserWorkflowStates": 18,
+    "browserWorkflowSyntheticApiCalls": 88,
+    "persistentLayoutStates": 250,
+    "persistentSyntheticGetCalls": 215,
+    "browserEnginesRun": [
+      "Chromium"
+    ],
+    "rootReviewedAllSevenOriginalScreenshots": true,
+    "physicalDeviceAcceptance": false
+  },
+  "remotePublicationVerification": {
+    "finiteApplicationHttpCap": 7,
+    "applicationHttpRequests": 7,
+    "budgetBeforeGet": 1,
+    "healthGet": 1,
+    "budgetAfterGet": 1,
+    "staticGets": 4,
+    "healthStatus": 200,
+    "healthBody": {
+      "ok": true,
+      "service": "pullwise-server",
+      "database": {
+        "type": "d1",
+        "configured": true
+      }
+    },
+    "budgetBefore": {
+      "productOperationMode": true,
+      "limits": {
+        "rowsRead": null,
+        "rowsWritten": null
+      },
+      "historicalCeilings": {
+        "rowsRead": 100000,
+        "rowsWritten": 1000
+      },
+      "reserved": {
+        "rowsRead": 232966,
+        "rowsWritten": 4425
+      },
+      "observed": {
+        "rowsRead": 77440,
+        "rowsWritten": 2197
+      },
+      "schemaReady": true,
+      "schemaVersion": 8,
+      "stateStorageVersion": 1,
+      "stopped": null
+    },
+    "budgetAfter": {
+      "productOperationMode": true,
+      "limits": {
+        "rowsRead": null,
+        "rowsWritten": null
+      },
+      "historicalCeilings": {
+        "rowsRead": 100000,
+        "rowsWritten": 1000
+      },
+      "reserved": {
+        "rowsRead": 281128,
+        "rowsWritten": 4713
+      },
+      "observed": {
+        "rowsRead": 82679,
+        "rowsWritten": 2316
+      },
+      "schemaReady": true,
+      "schemaVersion": 9,
+      "stateStorageVersion": 1,
+      "stopped": null
+    },
+    "intervalCounterDeltas": {
+      "reserved": {
+        "rowsRead": 48162,
+        "rowsWritten": 288
+      },
+      "observed": {
+        "rowsRead": 5239,
+        "rowsWritten": 119
+      }
+    },
+    "deltaScope": "Whole before/after interval; concurrent product and scheduled traffic may contribute. These are not isolated remote migration costs.",
+    "journalCountersReset": false,
+    "unknownOutcomesRetried": false,
+    "staticReadback": {
+      "kind": "preview-static-publication-readback",
+      "startedAt": "2026-10-09T05:33:59.223518+00:00",
+      "scope": "Unauthenticated static HTTP readback only; no JavaScript, browser OAuth, business API or D1 acceptance",
+      "origin": "https://preview.pull-wise.com",
+      "requestLimit": 4,
+      "requestCount": 4,
+      "cookies": false,
+      "redirects": false,
+      "retries": false,
+      "inheritedProxy": true,
+      "frozenHomepageSha256": "c7f4f5cf60c867ab4ac054162dfd1cafd14557284eb4c6974f5655d299dbae72",
+      "requests": [
+        {
+          "url": "https://preview.pull-wise.com/",
+          "method": "GET",
+          "attempts": 1,
+          "passed": true,
+          "status": 200,
+          "sameUrl": true,
+          "contentType": "text/html",
+          "bytes": 4839,
+          "sha256": "37fd0382a62546ecde908b397a81aa4bd17dfbb11c15e62f26dcce430cd37a8e",
+          "xRobotsTag": "noindex, nofollow",
+          "noindex": true,
+          "referencesFrozenAssets": true
+        },
+        {
+          "url": "https://preview.pull-wise.com/assets/index-DG1_LAAx.js",
+          "method": "GET",
+          "attempts": 1,
+          "passed": true,
+          "status": 200,
+          "sameUrl": true,
+          "contentType": "text/javascript",
+          "bytes": 44970,
+          "sha256": "6fd60b94676d712b43a9aeb28db4d4580fe92fd04b1e0f89d8664a065bcc7b76",
+          "expectedBytes": 44970,
+          "expectedSha256": "6fd60b94676d712b43a9aeb28db4d4580fe92fd04b1e0f89d8664a065bcc7b76",
+          "matchesFrozenBytes": true
+        },
+        {
+          "url": "https://preview.pull-wise.com/assets/ledger-DV-OZzdj.js",
+          "method": "GET",
+          "attempts": 1,
+          "passed": true,
+          "status": 200,
+          "sameUrl": true,
+          "contentType": "text/javascript",
+          "bytes": 91139,
+          "sha256": "3ca617f40d004e22a6bc124f2bdf389e8b8d34b83562ac1a9c8f1b3fd81dcf31",
+          "expectedBytes": 91139,
+          "expectedSha256": "3ca617f40d004e22a6bc124f2bdf389e8b8d34b83562ac1a9c8f1b3fd81dcf31",
+          "matchesFrozenBytes": true
+        },
+        {
+          "url": "https://preview.pull-wise.com/assets/index-ChhzqjXD.css",
+          "method": "GET",
+          "attempts": 1,
+          "passed": true,
+          "status": 200,
+          "sameUrl": true,
+          "contentType": "text/css",
+          "bytes": 82847,
+          "sha256": "2c8cf90ef4c80bcfdda2662acb47118be0ad846d7cf06ad3ed5e54f2526e3f05",
+          "expectedBytes": 82847,
+          "expectedSha256": "2c8cf90ef4c80bcfdda2662acb47118be0ad846d7cf06ad3ed5e54f2526e3f05",
+          "matchesFrozenBytes": true
+        }
+      ],
+      "completedAt": "2026-10-09T05:34:00.380154+00:00",
+      "passed": true
+    },
+    "managementReadback": "Separate read-only settings, deployment, secret-name and schedule API calls; no D1 query.",
+    "clientRetries": 0,
+    "cookies": false,
+    "redirectsFollowed": false,
+    "remoteBrowserJavaScript": false,
+    "remoteAuthenticatedBusinessRequests": 0,
+    "remoteSyntheticAccounts": 0,
+    "realProviderRequests": 0,
+    "realPayments": 0
+  },
+  "production": {
+    "worker": "pullwise-server-production",
+    "manualDeploy": false,
+    "mainBuildsMayPublishGuardedCode": true,
+    "D1AccessEnabledReadback": "0",
+    "schedules": [],
+    "activitySchemaUpgradeFlagAbsent": true,
+    "remoteProductionApplicationRequests": 0
+  },
+  "receiptOnlyFollowupNeedsRedeployment": false
+}

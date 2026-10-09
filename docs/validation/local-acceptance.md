@@ -41,6 +41,13 @@ bounded publication checks separately from real-account acceptance. The new
 projection begins with this release; historical audit facts are not backfilled.
 Production D1 remains paused and publication is preview only.
 
+Preview version `b931d45f-507a-4ca5-8f81-e0b1ed366f47` is published. The single
+health GET returns 200; readback confirms schema9/storage1, no stop, the original
+database/coordinator and cumulative accounting. Existing bindings, secret names
+and the hourly schedule are preserved. Production management readback retains
+D1 access `0` and no schedules. The release receipt records seven finite HTTP
+publication checks; interval counters include any concurrent product traffic.
+
 ## Invitation links and inviter approval (2026-10-09)
 
 The Members flow creates an invitation link without a GitHub username. A real
