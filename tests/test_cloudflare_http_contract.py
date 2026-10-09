@@ -82,6 +82,8 @@ def test_candidate_worker_has_read_only_health_and_authenticated_repository_list
 
 def test_health_rejects_incomplete_d1_auth_schema(tmp_path):
     fixture, _, _ = seed(tmp_path / "domain.db")
+    with fixture.store._immediate() as db:
+        db.execute("DROP TABLE api_keys")
     binding = D1ShapedSQLite(fixture.store)
     status, payload = _get_health(binding)
     assert status == 503 and payload["ok"] is False

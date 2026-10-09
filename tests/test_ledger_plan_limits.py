@@ -33,10 +33,6 @@ def test_defaults_override_and_max_only_jev():
 def setup(tmp_path):
     fixture, _, frozen = seed(tmp_path / "plans.db")
     seed_auth(fixture)
-    with fixture.store._immediate() as db:
-        migrations = Path(__file__).resolve().parents[1] / "cloudflare/server/migrations"
-        for name in ("0004_ledger_plan_usage.sql", "0009_activity_log.sql"):
-            db.executescript((migrations / name).read_text())
     return fixture, frozen
 
 
@@ -108,9 +104,6 @@ def test_concurrent_creations_cannot_overfill_project_slots(setup):
 
 def test_jev_is_max_only_and_failed_transaction_does_not_spend(setup):
     fixture, frozen = setup
-    with fixture.store._immediate() as db:
-        db.executescript((Path(__file__).resolve().parents[1] /
-                          "cloudflare/server/migrations/0003_ledger_suggestions.sql").read_text())
     limited = PlanLimitedD1(D1ShapedSQLite(fixture.store), policy=default_policy(), now=fixture.now)
     with pytest.raises(PlanLimitError, match="MAX_REQUIRED"):
         write(limited, frozen, fixture, 1, kind="jev")
@@ -121,8 +114,6 @@ def test_jev_is_max_only_and_failed_transaction_does_not_spend(setup):
 def test_monthly_jev_reservation_is_no_rollover_and_survives_failure(setup):
     fixture, _ = setup
     with fixture.store._immediate() as db:
-        db.executescript((Path(__file__).resolve().parents[1] /
-                          "cloudflare/server/migrations/0003_ledger_suggestions.sql").read_text())
         user = json.loads(db.execute("SELECT payload FROM app_state WHERE name=?",
                                     (record_name("users", "owner"),)).fetchone()[0])
         user["billing"] = {"plan": "max", "status": "active"}
@@ -272,8 +263,6 @@ def test_initial_capacity_check_includes_legacy_archived_projects(setup):
 def test_internal_jev_reservation_survives_lowered_business_write_caps(setup):
     fixture, _ = setup
     with fixture.store._immediate() as db:
-        db.executescript((Path(__file__).resolve().parents[1] /
-                          "cloudflare/server/migrations/0003_ledger_suggestions.sql").read_text())
         user = json.loads(db.execute("SELECT payload FROM app_state WHERE name=?",
                                     (record_name("users", "owner"),)).fetchone()[0])
         user["billing"] = {"plan": "max", "status": "active"}

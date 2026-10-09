@@ -119,6 +119,24 @@ def test_point_mutations_include_indexes_and_guard_cleanup():
         sql_write_bound("INSERT OR REPLACE INTO expenses(id) VALUES(?)")
 
 
+def test_project_tombstone_and_maximum_scalar_repository_unlinks_are_bounded():
+    from pullwise_server.cloudflare_preview_budget import sql_write_bound
+    project = "UPDATE ledger_projects SET deleted_at=?,status='archived',revision=revision+1," \
+        "github_repo_id=NULL,github_full_name=NULL,github_organization_id=NULL,updated_at=? " \
+        "WHERE id=? AND owner_id=? AND revision=? AND deleted_at IS NULL"
+    repository = "DELETE FROM ledger_project_repositories WHERE project_id=? AND github_repo_id=? AND owner_id=?"
+    assert sql_write_bound(project) == 9
+    assert sql_write_bound(repository) == 3
+    assert sql_write_bound(project) + 30 * sql_write_bound(repository) == 99
+    # Tombstoning is a single project write; unbounded child rewrites cannot
+    # silently enter the preview product envelope.
+    for sql in ("DELETE FROM ledger_project_repositories WHERE project_id=?",
+                "UPDATE expenses SET deleted_at=? WHERE project_id=?",
+                "UPDATE expense_recurring_rules SET status='canceled' WHERE project_id=?"):
+        with pytest.raises(ValueError, match="unique key"):
+            sql_write_bound(sql)
+
+
 def test_every_current_literal_update_has_a_unique_key_fence():
     import ast
     from pathlib import Path

@@ -20,10 +20,7 @@ from pullwise_server.cloudflare_state_records import encode_record, record_name
 def workspace_db(tmp_path):
     fixture, _, _ = seed(tmp_path / "workspace.sqlite")
     seed_auth(fixture)
-    migrations = Path(__file__).resolve().parents[1] / "cloudflare/server/migrations"
     with fixture.store.connect() as db:
-        for name in ("0003_ledger_suggestions.sql", "0004_ledger_plan_usage.sql", "0005_workspaces_repositories.sql", "0009_activity_log.sql"):
-            db.executescript((migrations / name).read_text())
         sessions = {"session-local": {"userId": "owner", "expiresAt": fixture.now + 3600}}
         for index, role in enumerate(("admin", "editor", "viewer"), 1):
             user = {"id": role, "name": role, "githubId": str(index), "createdAt": fixture.now}

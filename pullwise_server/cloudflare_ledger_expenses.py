@@ -34,6 +34,27 @@ EXPONENTS.update({code: 3 for code in "BHD IQD JOD KWD LYD OMR TND".split()})
 EXPONENTS.update({"CLF": 4, "UYW": 4})
 MAX_MINOR = 9007199254740991
 
+# The stored creation DTO can reference a different target than an expense
+# moved later. Check its original target before returning an idempotent replay;
+# a removed project must never be exposed through that immutable response.
+_REPLAY_PROJECTION = """*, CASE WHEN (
+    json_extract(response_json,'$.target.kind')='shared' OR
+    (json_extract(response_json,'$.target.kind')='project' AND EXISTS(
+        SELECT 1 FROM ledger_projects AS visible_project
+        WHERE visible_project.owner_id=expense_create_idempotency.owner_id
+            AND visible_project.id=json_extract(response_json,'$.target.projectId')
+            AND visible_project.deleted_at IS NULL)))
+    AND EXISTS(SELECT 1 FROM expenses AS replayed_expense
+        WHERE replayed_expense.owner_id=expense_create_idempotency.owner_id
+            AND replayed_expense.id=expense_create_idempotency.expense_id
+            AND (replayed_expense.target_kind='shared' OR
+                (replayed_expense.target_kind='project' AND EXISTS(
+                    SELECT 1 FROM ledger_projects AS current_project
+                    WHERE current_project.owner_id=replayed_expense.owner_id
+                        AND current_project.id=replayed_expense.project_id
+                        AND current_project.deleted_at IS NULL))))
+    THEN 1 ELSE 0 END AS target_visible"""
+
 
 def _amount(value, currency):
     if (not isinstance(value, str) or not re.fullmatch(r"(0|[1-9][0-9]*)(\.[0-9]+)?", value)
@@ -140,7 +161,7 @@ async def _valid_target(binding, user, restrictions, data, gateway, writing, evi
         return _error(403, "TARGET_FORBIDDEN")
     if kind == "project":
         row = await binding.prepare("""SELECT status FROM ledger_projects
-            WHERE owner_id=? AND id=?""").bind(user["id"], project_id).first()
+            WHERE owner_id=? AND id=? AND deleted_at IS NULL""").bind(user["id"], project_id).first()
         if row is None:
             return _error(404, "NOT_FOUND")
         if writing:
@@ -157,12 +178,13 @@ def _target_guard(binding, owner_id, evidence):
     if evidence["githubRepoId"] is None:
         return binding.prepare("""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN
             EXISTS(SELECT 1 FROM ledger_projects WHERE owner_id=? AND id=? AND revision=?
-                AND status='active' AND github_repo_id IS NULL)
+                AND status='active' AND deleted_at IS NULL AND github_repo_id IS NULL)
             AND NOT EXISTS(SELECT 1 FROM ledger_project_repositories WHERE owner_id=? AND project_id=?)
             THEN 1 ELSE 0 END)""").bind(owner_id, evidence["projectId"], evidence["revision"],
                                           owner_id, evidence["projectId"])
     return binding.prepare("""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN
-        EXISTS(SELECT 1 FROM ledger_projects WHERE owner_id=? AND id=? AND revision=? AND status='active')
+        EXISTS(SELECT 1 FROM ledger_projects WHERE owner_id=? AND id=? AND revision=?
+            AND status='active' AND deleted_at IS NULL)
         AND EXISTS(SELECT 1 FROM ledger_project_repositories WHERE owner_id=? AND project_id=? AND github_repo_id=?)
         THEN 1 ELSE 0 END)""").bind(owner_id, evidence["projectId"], evidence["revision"],
                                      owner_id, evidence["projectId"], evidence["githubRepoId"])
@@ -198,9 +220,11 @@ async def handle_expense_request(*, binding: Any, gateway: Any, method: str, pat
 
 
 async def _read(binding, headers, params, item_id, now):
+    from .cloudflare_ledger_reports import VISIBLE_EXPENSE_TARGET_SQL
     if item_id:
         user, restrictions, _, rows = await _snapshot(binding, headers, now, "expenses:read",
-            lambda owner: [binding.prepare("SELECT * FROM expenses WHERE id=? AND owner_id=? AND deleted_at IS NULL").bind(item_id, owner)])
+            lambda owner: [binding.prepare("SELECT * FROM expenses WHERE id=? AND owner_id=? "
+                "AND deleted_at IS NULL " + VISIBLE_EXPENSE_TARGET_SQL).bind(item_id, owner)])
         if not rows[0]:
             return _error(404, "NOT_FOUND")
         row = rows[0][0]
@@ -231,6 +255,7 @@ async def _read(binding, headers, params, item_id, now):
 
 
 async def _write(binding, gateway, method, item_id, headers, data, now, suggestion_gateway=None):
+    from .cloudflare_ledger_reports import VISIBLE_EXPENSE_TARGET_SQL
     key = _header(headers, "Idempotency-Key") if method == "POST" else ""
     if method == "POST" and (not 1 <= len(key) <= 128 or any(ord(c) < 33 for c in key)):
         return _error(422, "INVALID_INPUT")
@@ -240,8 +265,11 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
     if method != "POST" and expected < 0:
         return _error(422, "INVALID_INPUT")
     user, restrictions, proof, rows = await _snapshot(binding, headers, now, "expenses:write",
-        lambda owner, actor: [binding.prepare("SELECT * FROM expenses WHERE id=? AND owner_id=?").bind(item_id or "", owner),
-            binding.prepare("SELECT * FROM expense_create_idempotency WHERE owner_id=? AND idempotency_key=?").bind(owner, _creation_key(owner, actor, key)) if key else binding.prepare("SELECT * FROM expense_create_idempotency WHERE 0")], actor_queries=True)
+        lambda owner, actor: [binding.prepare("SELECT * FROM expenses WHERE id=? AND owner_id=? "
+                + VISIBLE_EXPENSE_TARGET_SQL).bind(item_id or "", owner),
+            binding.prepare("SELECT " + _REPLAY_PROJECTION + " FROM expense_create_idempotency "
+                "WHERE owner_id=? AND idempotency_key=?").bind(owner, _creation_key(owner, actor, key))
+                if key else binding.prepare("SELECT * FROM expense_create_idempotency WHERE 0")], actor_queries=True)
     if key:
         key = _creation_key(user["id"], user["_actor"]["id"], key)
     current = rows[0][0] if rows[0] else None
@@ -263,7 +291,11 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
             return _error(403, "TARGET_FORBIDDEN")
         if rows[1]:
             saved = rows[1][0]
-            return (201, json.loads(saved["response_json"])) if saved["request_sha256"] == digest else _error(409, "IDEMPOTENCY_CONFLICT")
+            if saved["request_sha256"] != digest:
+                return _error(409, "IDEMPOTENCY_CONFLICT")
+            if not saved["target_visible"]:
+                return _error(404, "NOT_FOUND")
+            return 201, json.loads(saved["response_json"])
     assistance = None
     target_evidence = {}
     if method == "POST" or method == "PATCH":
@@ -310,7 +342,7 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
               THEN 1 ELSE 0 END)""").bind(user["id"], data["category_id"]),
             (_target_guard(binding, user["id"], target_evidence) if data["target_kind"] == "project" else binding.prepare("""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN
               ?='shared' OR EXISTS(SELECT 1 FROM ledger_projects WHERE owner_id=? AND id=?
-                AND status='active') THEN 1 ELSE 0 END)""").bind(
+                AND status='active' AND deleted_at IS NULL) THEN 1 ELSE 0 END)""").bind(
                 data["target_kind"], user["id"], data["project_id"])),
             binding.prepare("""INSERT INTO expenses(id,owner_id,target_kind,project_id,category_id,
               occurred_on,amount_minor,currency,purpose,note,quantity_decimal,unit,revision,
@@ -332,11 +364,13 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
         except Exception:
             try:
                 _, replay_restrictions, _, replay_rows = await _snapshot(binding, headers, now, "expenses:write",
-                    lambda owner: [binding.prepare("""SELECT request_sha256,response_json
-                        FROM expense_create_idempotency WHERE owner_id=? AND idempotency_key=?""").bind(owner, key)])
+                    lambda owner: [binding.prepare("SELECT " + _REPLAY_PROJECTION +
+                        " FROM expense_create_idempotency WHERE owner_id=? AND idempotency_key=?").bind(owner, key)])
                 if not target_allowed(replay_restrictions, data["target_kind"], data["project_id"]):
                     return _error(403, "TARGET_FORBIDDEN")
                 if replay_rows[0] and replay_rows[0][0]["request_sha256"] == digest:
+                    if not replay_rows[0][0]["target_visible"]:
+                        return _error(404, "NOT_FOUND")
                     return 201, json.loads(replay_rows[0][0]["response_json"])
             except PrincipalAuthError as exc:
                 return _error(exc.status, exc.code)
@@ -350,14 +384,14 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
             after["assistance"] = assistance
         sql = """UPDATE expenses SET target_kind=?,project_id=?,category_id=?,occurred_on=?,
           amount_minor=?,currency=?,purpose=?,note=?,quantity_decimal=?,unit=?,revision=revision+1,
-          updated_at=? WHERE id=? AND owner_id=? AND revision=? AND deleted_at IS NULL"""
+          updated_at=? WHERE id=? AND owner_id=? AND revision=? AND deleted_at IS NULL """ + VISIBLE_EXPENSE_TARGET_SQL
         values = [data[name] for name in ("target_kind", "project_id", "category_id", "occurred_on",
             "amount_minor", "currency", "purpose", "note", "quantity_decimal", "unit")]
         values += [stamp, item_id, user["id"], expected]
     else:
         after = None
         sql = """UPDATE expenses SET deleted_at=?,updated_at=?,revision=revision+1
-            WHERE id=? AND owner_id=? AND revision=? AND deleted_at IS NULL"""
+            WHERE id=? AND owner_id=? AND revision=? AND deleted_at IS NULL """ + VISIBLE_EXPENSE_TARGET_SQL
         values = [stamp, stamp, item_id, user["id"], expected]
     action = "move" if after is not None and before["target"] != after["target"] else (
         "update" if method == "PATCH" else "delete")

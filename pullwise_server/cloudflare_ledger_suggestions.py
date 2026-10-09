@@ -75,6 +75,7 @@ def suggestion_questions(categories):
 
 async def handle_suggestion_request(*, binding, method, headers, body, now, gateway,
                                     scope="suggestions:use", exclude_expense_id=None):
+    from .cloudflare_ledger_reports import VISIBLE_EXPENSE_TARGET_SQL
     if method != "POST":
         return _error(405, "METHOD_NOT_ALLOWED")
     draft = _draft(body)
@@ -96,7 +97,7 @@ async def handle_suggestion_request(*, binding, method, headers, body, now, gate
             binding.prepare("""SELECT id,purpose FROM expenses WHERE owner_id=? AND deleted_at IS NULL
             AND target_kind=? AND (project_id=? OR (project_id IS NULL AND ? IS NULL))
             AND occurred_on BETWEEN ? AND ? AND amount_minor=? AND currency=? AND id!=?
-            ORDER BY occurred_on DESC,id DESC LIMIT 30""").bind(
+            """ + VISIBLE_EXPENSE_TARGET_SQL + " ORDER BY occurred_on DESC,id DESC LIMIT 30").bind(
                 user["id"], target_kind, project_id, project_id, start, end, minor, currency,
                 exclude_expense_id or "")]
         daily = []
@@ -108,7 +109,7 @@ async def handle_suggestion_request(*, binding, method, headers, body, now, gate
                 WHERE owner_id=? AND day=?""").bind(user["id"], day))
         if project_id:
             commands.append(binding.prepare("""SELECT id FROM ledger_projects
-                WHERE owner_id=? AND id=?""").bind(user["id"], project_id))
+                WHERE owner_id=? AND id=? AND deleted_at IS NULL""").bind(user["id"], project_id))
         rows = await binding.batch([*auth, *commands])
         validate([part.results for part in rows[:len(auth)]])
         categories, recent = rows[len(auth)].results, rows[len(auth) + 1].results
@@ -132,6 +133,7 @@ async def handle_suggestion_request(*, binding, method, headers, body, now, gate
         return 200, {"status": "unavailable", "reason": "invalid_context", "suggestions": {}}
     try:
         attempt = await binding.batch([_write_guard(binding, proof, user["id"], now),
+            *_project_visibility_guards(binding, user["id"], project_id),
             binding.prepare("""INSERT INTO expense_suggestion_budget(owner_id,day,attempts)
                 VALUES(?,?,1) ON CONFLICT(owner_id,day) DO UPDATE SET attempts=attempts+1
                 WHERE attempts<? RETURNING attempts""").bind(user["id"], day, limit),
@@ -172,6 +174,7 @@ async def handle_suggestion_request(*, binding, method, headers, body, now, gate
     event_id = "sg_" + uuid.uuid4().hex
     try:
         await binding.batch([_write_guard(binding, proof, user["id"], now),
+            *_project_visibility_guards(binding, user["id"], project_id),
             binding.prepare("""INSERT INTO expense_suggestion_events(id,owner_id,created_at,
         question_version,draft_target_kind,draft_project_id,model_version,outcome,category_id,target_kind,
         category_probabilities_json,target_probabilities_json)
@@ -214,12 +217,13 @@ async def handle_suggestion_decision(*, binding, method, path, headers, body, no
             scope="suggestions:use", now=now, target_kind=target_kind, project_id=project_id,
             proof=proof)
         checks = [binding.prepare("""SELECT id FROM expense_suggestion_events WHERE id=?
-            AND owner_id=? AND outcome IN ('available','uncertain') AND decided_at IS NULL""").bind(
+            AND owner_id=? AND outcome IN ('available','uncertain') AND decided_at IS NULL
+            """ + _VISIBLE_SUGGESTION_DRAFT_SQL).bind(
                 suggestion_id, user["id"]),
             binding.prepare("""SELECT id FROM expense_categories WHERE id=? AND owner_id=?
                 AND archived_at IS NULL""").bind(body["categoryId"], user["id"])]
         if project_id:
-            checks.append(binding.prepare("SELECT id FROM ledger_projects WHERE id=? AND owner_id=?").bind(
+            checks.append(binding.prepare("SELECT id FROM ledger_projects WHERE id=? AND owner_id=? AND deleted_at IS NULL").bind(
                 project_id, user["id"]))
         parts = await binding.batch([*auth, *checks])
         validate([part.results for part in parts[:len(auth)]])
@@ -235,12 +239,14 @@ async def handle_suggestion_decision(*, binding, method, path, headers, body, no
     stamp = datetime.fromtimestamp(now, timezone.utc).isoformat().replace("+00:00", "Z")
     try:
         parts = await binding.batch([_write_guard(binding, proof, user["id"], now),
+            *_project_visibility_guards(binding, user["id"], project_id),
             binding.prepare("""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN EXISTS(
                 SELECT 1 FROM expense_categories WHERE owner_id=? AND id=? AND archived_at IS NULL)
                 THEN 1 ELSE 0 END)""").bind(user["id"], body["categoryId"]),
             binding.prepare("""UPDATE expense_suggestion_events
                 SET accepted_category_id=?,accepted_target_kind=?,project_id=?,decided_at=?
-                WHERE id=? AND owner_id=? AND decided_at IS NULL RETURNING id""").bind(
+                WHERE id=? AND owner_id=? AND decided_at IS NULL """ +
+                    _VISIBLE_SUGGESTION_DRAFT_SQL + " RETURNING id").bind(
                     body["categoryId"], target_kind, project_id, stamp, suggestion_id, user["id"]),
             binding.prepare("DELETE FROM d1_command_guard")])
     except Exception:
@@ -248,3 +254,20 @@ async def handle_suggestion_decision(*, binding, method, path, headers, body, no
     if not parts[-2].results:
         return _error(409, "DECISION_CONFLICT")
     return 204, None
+
+
+_VISIBLE_SUGGESTION_DRAFT_SQL = """AND (draft_target_kind='shared' OR
+    (draft_target_kind='project' AND EXISTS(SELECT 1 FROM ledger_projects AS visible_project
+        WHERE visible_project.owner_id=expense_suggestion_events.owner_id
+            AND visible_project.id=expense_suggestion_events.draft_project_id
+            AND visible_project.deleted_at IS NULL)))"""
+
+
+def _project_visibility_guards(binding, owner_id, project_id):
+    # The target may be removed during inference or between the read and write
+    # batches. Never spend another attempt or publish a removed-project result.
+    if project_id is None:
+        return []
+    return [binding.prepare("""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN
+        EXISTS(SELECT 1 FROM ledger_projects WHERE owner_id=? AND id=? AND deleted_at IS NULL)
+        THEN 1 ELSE 0 END)""").bind(owner_id, project_id)]

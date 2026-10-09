@@ -14,6 +14,14 @@ EXPORT_HEADER = ("id", "target", "projectId", "occurredOn", "amountMinor", "curr
                  "categoryId", "purpose", "note", "quantity", "unit")
 EXPORT_PAGE_SIZE = 250
 
+# Archived projects retain ordinary financial history. Removed projects retain
+# their records only in the background and must not contribute to any public
+# detail, report or CSV page, including requests without an explicit project.
+VISIBLE_EXPENSE_TARGET_SQL = """AND (expenses.target_kind='shared' OR
+    (expenses.target_kind='project' AND EXISTS(SELECT 1 FROM ledger_projects AS visible_project
+        WHERE visible_project.owner_id=expenses.owner_id AND visible_project.id=expenses.project_id
+            AND visible_project.deleted_at IS NULL)))"""
+
 
 class CsvExport:
     """A page-at-a-time CSV body. The Worker turns chunks into a ReadableStream."""
@@ -62,7 +70,7 @@ def expense_filter(params: Mapping[str, object], *, paged: bool = False):
             raise ValueError("date")
     if start and end and start >= end:
         raise ValueError("range")
-    clauses, values = [], []
+    clauses, values = [VISIBLE_EXPENSE_TARGET_SQL], []
     if target != "all":
         clauses.append("AND target_kind=?")
         values.append(target)

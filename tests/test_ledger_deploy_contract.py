@@ -25,6 +25,28 @@ BASH = shutil.which("bash") or "bash"
 
 
 class LedgerDeployContractTests(unittest.TestCase):
+    def test_removal_upgrade_flag_requires_the_existing_enabled_preview(self):
+        spec = importlib.util.spec_from_file_location("removal_checker", ROOT / "scripts/check-ledger-s01.py")
+        checker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checker)
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            (folder / "src").mkdir()
+            (folder / "src/entry.py").touch()
+            for environment, enabled, access, accepted in (
+                    ("preview", "1", "1", True), ("preview", "invalid", "1", False),
+                    ("preview", "1", "0", False), ("production", "1", "0", False)):
+                config = json.loads((ROOT / f"cloudflare/server/wrangler.{environment}.jsonc").read_text())
+                config["vars"]["PULLWISE_PREVIEW_SCHEMA_V10_UPGRADE_ENABLED"] = enabled
+                config["vars"]["PULLWISE_D1_ACCESS_ENABLED"] = access
+                (folder / f"wrangler.{environment}.jsonc").write_text(json.dumps(config))
+                with self.subTest(environment=environment, enabled=enabled, access=access), patch.object(checker, "SERVER", folder):
+                    if accepted:
+                        checker.validate_config(environment, allow_placeholders=False)
+                    else:
+                        with self.assertRaises(ValueError):
+                            checker.validate_config(environment, allow_placeholders=False)
+
     def test_active_preview_retains_budget_and_database_isolation(self):
         spec = importlib.util.spec_from_file_location("preview_checker", ROOT / "scripts/check-ledger-s01.py")
         checker = importlib.util.module_from_spec(spec)

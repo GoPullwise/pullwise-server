@@ -8,6 +8,7 @@ from pathlib import Path
 from pullwise_server.cloudflare_ledger_api import handle_ledger_request
 from pullwise_server.cloudflare_ledger_suggestions import _draft
 from pullwise_server.cloudflare_state_records import encode_record, record_name
+from pullwise_server.cloudflare_preview_schema import UPGRADE_V6_SQL, UPGRADE_V7_SQL, UPGRADE_V8_SQL, UPGRADE_V9_SQL, UPGRADE_V10_SQL
 from test_cloudflare_github_identity_http import D1ShapedSQLite, GitHubStub, login, seed
 from state_record_fixtures import normalize_legacy_state
 
@@ -32,6 +33,12 @@ class LedgerSuggestionTests(unittest.TestCase):
             db.execute("""CREATE TABLE api_keys(id TEXT PRIMARY KEY,user_id TEXT,name TEXT,
                 key_prefix TEXT,key_hash TEXT UNIQUE,scopes TEXT,expires_at INTEGER,
                 restrictions TEXT,created_at INTEGER,last_used_at INTEGER,revoked_at INTEGER)""")
+            db.executescript((Path(__file__).resolve().parents[1] /
+                "cloudflare/server/migrations/0005_workspaces_repositories.sql").read_text())
+            db.commit()
+            db.execute("BEGIN")
+            for sql in (*UPGRADE_V6_SQL, *UPGRADE_V7_SQL, *UPGRADE_V8_SQL, *UPGRADE_V9_SQL, *UPGRADE_V10_SQL):
+                db.execute(sql)
             normalize_legacy_state(db, now=self.now)
         self.binding = D1ShapedSQLite(self.store)
         _, _, headers = login(self.binding, GitHubStub(), self.now)

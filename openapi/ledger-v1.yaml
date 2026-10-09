@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Pullwise Project Expense Ledger API
-  version: 0.7.0
+  version: 0.8.0
   description: |
     Current ledger contract for Pullwise, the project expense tracker for
     developers and teams at pull-wise.com. Users and authorized API clients
@@ -27,6 +27,13 @@ info:
     depends on the ledger owner's Max plan, current activation and usage budget;
     an explicit category permits manual entry when assistance is unavailable.
     Project development and product links are optional absolute HTTP(S) URLs.
+    Only the selected ledger Owner using a current cookie session may remove a
+    project. Removal is a soft tombstone, distinct from reversible archiving:
+    the project and its expenses disappear from resource reads, reports and
+    exports, and its recurring plans cannot generate further expenses. Stored
+    financial records, audit history and commercial capacity accounting remain
+    intact. Repository associations are released atomically; removed projects
+    cannot be restored through PATCH. API keys cannot remove projects.
     Recurring expense rules require a cookie session and explicit expense-write
     authority; API keys cannot create persistent background authority. Each
     generated occurrence uses the current ledger owner's plan and the rule
@@ -416,6 +423,22 @@ paths:
         '200': {description: Updated project, content: {application/json: {schema: {$ref: '#/components/schemas/Project'}}}}
         '404': {$ref: '#/components/responses/NotFound'}
         '412': {$ref: '#/components/responses/PreconditionFailed'}
+    delete:
+      operationId: removeLedgerProject
+      x-pullwise-scope: projects:write
+      security: [{cookieSession: []}]
+      description: Current cookie-session Owner of the selected ledger only; Admin, Editor, Viewer and every API key are rejected. Requires a trusted app Origin and the current If-Match revision. Atomically tombstones the project, releases at most 30 repository associations and records the actual actor. Retains all financial, recurring and audit rows without a bulk cascade. The removed project's expenses and recurring rules become inaccessible, leave list/report/export results and cannot generate new expenses. Shared-pool expenses are unchanged. Capacity totals are not reclaimed. Repeating removal of the same authorized tombstone is read-only; PATCH cannot resurrect it.
+      parameters: [{$ref: '#/components/parameters/IfMatch'}, {$ref: '#/components/parameters/WorkspaceHeader'}, {$ref: '#/components/parameters/AuthOrigin'}]
+      responses:
+        '204': {description: Project removed or already removed within the same authorized ledger}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Revision or repository-binding limit reached}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '422': {$ref: '#/components/responses/InvalidInput'}
+        '428': {description: If-Match is required}
+        '429': {$ref: '#/components/responses/RateLimited'}
   /api/v1/categories:
     get:
       parameters: [{$ref: '#/components/parameters/WorkspaceHeader'}]

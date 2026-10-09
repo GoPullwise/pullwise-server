@@ -123,7 +123,7 @@ def runtime(monkeypatch):
     sql = LocalSql(connection)
     journal = BudgetJournal(sql, preview_product=True, product_operations=True)
     state = journal.snapshot()
-    state.update(schema_ready=True, schema_version=9)
+    state.update(schema_ready=True, schema_version=10)
     journal._save(state)
     events, meters = [], []
     native = object()
@@ -169,7 +169,7 @@ def runtime(monkeypatch):
         connection.close()
 
 
-@pytest.mark.parametrize("schema_version", [9])
+@pytest.mark.parametrize("schema_version", [10])
 def test_rpc_runs_bounded_due_work_under_commercial_and_global_meters(runtime, schema_version):
     state = runtime.journal.snapshot()
     state["schema_version"] = schema_version
@@ -182,7 +182,7 @@ def test_rpc_runs_bounded_due_work_under_commercial_and_global_meters(runtime, s
     assert runtime.coordinator._waiting == 0
 
 
-@pytest.mark.parametrize("ready,version", [(False, 9), (True, 7), (True, 8), (True, 6), (True, 5), (True, 10), (True, None)])
+@pytest.mark.parametrize("ready,version", [(False, 10), (True, 7), (True, 8), (True, 6), (True, 5), (True, 9), (True, 11), (True, None)])
 def test_rpc_requires_known_recurring_schema_without_auto_initializing_or_upgrading(runtime, ready, version):
     state = runtime.journal.snapshot()
     state.update(schema_ready=ready, schema_version=version)

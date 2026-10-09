@@ -11,7 +11,7 @@ from typing import Any, Mapping
 
 from .cloudflare_ledger_auth import ledger_principal, target_allowed
 from .cloudflare_github_gateway import GitHubFailure
-from .cloudflare_principal import PrincipalAuthError, _header
+from .cloudflare_principal import PrincipalAuthError, _cookie_sessions, _header
 from .ledger_money_totals import AGGREGATE_SQL, aggregate_minor, public_minor
 from .json_input import validate_json_unicode
 from .cloudflare_state_records import record_name
@@ -245,8 +245,6 @@ async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path
         return _error(404, "NOT_FOUND")
     if method not in {"GET", "POST", "PATCH", "DELETE"}:
         return _error(405, "METHOD_NOT_ALLOWED")
-    if kind == "projects" and method == "DELETE":
-        return _error(405, "METHOD_NOT_ALLOWED")
     if method in {"POST", "PATCH", "DELETE"} and (
             (method == "POST" and item_id) or (method in {"PATCH", "DELETE"} and not item_id)):
         return _error(404, "NOT_FOUND")
@@ -262,6 +260,8 @@ async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path
 
 
 async def _projects(binding, gateway, method, item_id, headers, params, body, now, scope):
+    if method == "DELETE":
+        return await _remove_project(binding, item_id, headers, now, scope)
     selected = None
     if method in {"POST", "PATCH"}:
         try:
@@ -276,7 +276,7 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
         if item_id:
             user, _, auth, validate = await ledger_principal(binding=binding, headers=headers,
                 scope=scope, now=now, target_kind="project", project_id=item_id)
-            commands = [binding.prepare("SELECT * FROM ledger_projects WHERE owner_id=? AND id=?").bind(user["id"], item_id),
+            commands = [binding.prepare("SELECT * FROM ledger_projects WHERE owner_id=? AND id=? AND deleted_at IS NULL").bind(user["id"], item_id),
                 binding.prepare(f"""SELECT currency,{AGGREGATE_SQL} FROM expenses
                     WHERE owner_id=? AND project_id=? AND deleted_at IS NULL GROUP BY currency""").bind(user["id"], item_id),
                 binding.prepare("""SELECT * FROM ledger_project_repositories
@@ -310,11 +310,12 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
             " AND id IN (" + ",".join("?" for _ in project_ids) + ")" if project_ids else " AND 0")
         date_where = (" AND occurred_on>=?" if start else "") + (" AND occurred_on<?" if end else "")
         date_values = ([start] if start else []) + ([end] if end else [])
-        commands = [binding.prepare("SELECT * FROM ledger_projects WHERE owner_id=? AND id>?" +
+        from .cloudflare_ledger_reports import VISIBLE_EXPENSE_TARGET_SQL
+        commands = [binding.prepare("SELECT * FROM ledger_projects WHERE owner_id=? AND deleted_at IS NULL AND id>?" +
             visible + " ORDER BY id LIMIT ?").bind(user["id"], cursor,
                 *(project_ids or []), limit + 1),
             binding.prepare(f"""SELECT project_id,currency,{AGGREGATE_SQL} FROM expenses
-            WHERE owner_id=? AND deleted_at IS NULL""" + date_where +
+            WHERE owner_id=? AND deleted_at IS NULL """ + VISIBLE_EXPENSE_TARGET_SQL + date_where +
                 " GROUP BY project_id,currency").bind(user["id"], *date_values),
             binding.prepare("""SELECT * FROM ledger_project_repositories
                 WHERE owner_id=? AND project_id>?""" + visible.replace("id IN", "project_id IN") +
@@ -337,7 +338,7 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
             by_binding.get(row["id"], []), organizations) for row in page],
                      "nextCursor": page[-1]["id"] if len(projects) > limit else None}
     user, restrictions, proof, rows = await _authorized(binding, headers, scope, now,
-        [binding.prepare("SELECT * FROM ledger_projects WHERE id=?").bind(item_id or ""),
+        [binding.prepare("SELECT * FROM ledger_projects WHERE id=? AND deleted_at IS NULL").bind(item_id or ""),
          binding.prepare("""SELECT * FROM ledger_project_repositories
              WHERE project_id=? ORDER BY github_repo_id LIMIT 30""").bind(item_id or "")],
         "project" if item_id else None, item_id)
@@ -430,7 +431,7 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
         binding.prepare("""UPDATE ledger_projects SET name=?,github_organization_id=?,
             github_repo_id=?,github_full_name=?,description=?,development_url=?,product_url=?,
             status=?,revision=revision+1,
-            updated_at=? WHERE id=? AND owner_id=? AND revision=?""").bind(
+            updated_at=? WHERE id=? AND owner_id=? AND revision=? AND deleted_at IS NULL""").bind(
             body.get("name", existing["name"]), organization_id, repo_id, full_name,
             body.get("description", existing["description"]),
             body.get("developmentUrl", existing.get("development_url")),
@@ -463,6 +464,64 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
     repos, state, organizations = ({}, "not_linked", []) if standalone_project(
         updated, bindings) else await _project_repos(user, gateway)
     return 200, _project(updated, repos, result[-1].results, state, bindings, organizations)
+
+
+async def _remove_project(binding, item_id, headers, now, scope):
+    """Owner-cookie-only tombstone and bounded unlink, never financial cascade."""
+    user, _, proof, rows = await _authorized(binding, headers, scope, now,
+        [binding.prepare("SELECT * FROM ledger_projects WHERE id=?").bind(item_id),
+         binding.prepare("SELECT * FROM ledger_project_repositories WHERE project_id=? ORDER BY github_repo_id LIMIT 31").bind(item_id)],
+        "project", item_id)
+    # The effective user is the selected ledger Owner even for members. Check
+    # the actual actor and selected role, and require the used session cookie.
+    if (proof.get("key") is not None or proof.get("workspace_role") != "owner"
+            or proof.get("actor_user_id") != user["id"]
+            or proof.get("workspace_id") != user["id"]
+            or _header(headers, "Authorization") or _header(headers, "X-Pullwise-Api-Key")
+            or proof.get("session_id") not in _cookie_sessions(headers)):
+        return _error(403, "PROJECT_OWNER_SESSION_REQUIRED")
+    expected = _revision(headers)
+    if expected is None:
+        return _error(428, "PRECONDITION_REQUIRED")
+    if expected < 0:
+        return _error(422, "INVALID_INPUT")
+    # The workspace is resolved by authentication, never by a caller-owned ID.
+    existing = rows[0][0] if rows[0] and rows[0][0]["owner_id"] == user["id"] else None
+    if existing is None:
+        return _error(404, "NOT_FOUND")
+    if existing["deleted_at"] is not None:
+        return 204, None
+    if expected != existing["revision"]:
+        return _error(412, "PRECONDITION_FAILED")
+    if expected >= MAX_REVISION:
+        return _error(409, "REVISION_LIMIT")
+    bindings = [row for row in rows[1] if row["owner_id"] == user["id"]]
+    if len(bindings) > MAX_REPOSITORIES:
+        return _error(409, "PROJECT_BINDINGS_INVALID")
+    stamp = _timestamp(now)
+    from .cloudflare_ledger_activity import activity_commands, project_snapshot
+    activity = await activity_commands(binding, user, "project", item_id, "delete",
+        project_snapshot(existing, bindings), None, now, proof=proof)
+    commands = [_write_guard(binding, proof, user["id"], now),
+        binding.prepare("""UPDATE ledger_projects SET deleted_at=?,status='archived',
+            github_repo_id=NULL,github_full_name=NULL,github_organization_id=NULL,
+            revision=revision+1,updated_at=? WHERE id=? AND owner_id=? AND revision=?
+            AND deleted_at IS NULL""").bind(stamp, stamp, item_id, user["id"], expected),
+        binding.prepare("INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN changes()=1 THEN 1 ELSE 0 END)")]
+    commands.extend(binding.prepare("""DELETE FROM ledger_project_repositories
+        WHERE project_id=? AND github_repo_id=? AND owner_id=?""").bind(
+            item_id, row["github_repo_id"], user["id"]) for row in bindings)
+    commands.extend([binding.prepare("""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN
+        NOT EXISTS(SELECT 1 FROM ledger_project_repositories WHERE owner_id=? AND project_id=?)
+        THEN 1 ELSE 0 END)""").bind(user["id"], item_id),
+        *activity, binding.prepare("DELETE FROM d1_command_guard")])
+    try:
+        await binding.batch(commands)
+    except PlanLimitError as error:
+        return error.response()
+    except Exception:
+        return _error(412, "PRECONDITION_FAILED")
+    return 204, None
 
 
 async def _repository_conflict(binding, owner_id, selected, project_id):
