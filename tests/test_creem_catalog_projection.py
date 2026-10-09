@@ -26,9 +26,10 @@ def test_verified_catalog_binds_configured_ids_intervals_and_product_capacity():
     import json
     projected = catalog_payload([{"payload_json": json.dumps(result), "expires_at": 100, "source_revision": 1}], 10)
     assert [plan["entitlements"]["limits"]["projects"] for plan in projected["plans"]] == [3, 100, 100]
-    assert projected["plans"][2]["entitlements"]["jev"] == {
-        "eligible": True, "available": False, "monthlyBudgetUsd": "5.00",
-        "period": "utc-calendar-month", "rollover": False}
+    for index, budget in ((1, "3.00"), (2, "5.00")):
+        assert projected["plans"][index]["entitlements"]["jev"] == {
+            "eligible": True, "available": False, "monthlyBudgetUsd": budget,
+            "period": "utc-calendar-month", "rollover": False}
     assert all("expense" in plan["description"] for plan in result["plans"])
 
 

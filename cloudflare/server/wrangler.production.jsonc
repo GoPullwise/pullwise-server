@@ -19,6 +19,7 @@
     "PULLWISE_CREEM_PRODUCT_IDS_JSON": "{\"pro\":{\"month\":\"prod_1ZPmBQisU24W9nbchSbY4e\",\"year\":\"prod_6dKBnQA9RMlBbYvzOyXFUp\"},\"max\":{\"month\":\"prod_4r5baIPikLWUU5ACOWwr1m\",\"year\":\"prod_7AwPI8NNipx2UFEJqEOvkd\"}}",
     "PULLWISE_ALLOWED_ORIGINS": "https://pull-wise.com",
     "PULLWISE_COOKIE_SAME_SITE": "None",
+    "PULLWISE_PLAN_LIMITS_JSON": "{\"free\":{\"projects\":3,\"records\":500,\"writesPerMinute\":10,\"writesPerMonth\":1000,\"jevMonthlyBudgetUsd\":\"0.00\"},\"pro\":{\"projects\":100,\"records\":20000,\"writesPerMinute\":60,\"writesPerMonth\":10000,\"jevMonthlyBudgetUsd\":\"3.00\"},\"max\":{\"projects\":100,\"records\":20000,\"writesPerMinute\":60,\"writesPerMonth\":10000,\"jevMonthlyBudgetUsd\":\"5.00\"}}",
     "PULLWISE_JEV_SUGGESTIONS_ENABLED": "0",
     "PULLWISE_JEV_SUGGESTIONS_EVALUATED": "0"
   },

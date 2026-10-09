@@ -7,7 +7,12 @@
   "workers_dev": false,
   "preview_urls": false,
   "routes": [],
-  "vars": {"PULLWISE_D1_ACCESS_ENABLED": "1", "PULLWISE_MODE": "local", "PULLWISE_EMAIL_AUTH_ENABLED": "0"},
+  "vars": {
+    "PULLWISE_D1_ACCESS_ENABLED": "1",
+    "PULLWISE_MODE": "local",
+    "PULLWISE_EMAIL_AUTH_ENABLED": "0",
+    "PULLWISE_PLAN_LIMITS_JSON": "{\"free\":{\"projects\":3,\"records\":500,\"writesPerMinute\":10,\"writesPerMonth\":1000,\"jevMonthlyBudgetUsd\":\"0.00\"},\"pro\":{\"projects\":100,\"records\":20000,\"writesPerMinute\":60,\"writesPerMonth\":10000,\"jevMonthlyBudgetUsd\":\"3.00\"},\"max\":{\"projects\":100,\"records\":20000,\"writesPerMinute\":60,\"writesPerMonth\":10000,\"jevMonthlyBudgetUsd\":\"5.00\"}}"
+  },
   "d1_databases": [
     {
       "binding": "DB",

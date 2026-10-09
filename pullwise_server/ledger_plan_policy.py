@@ -4,14 +4,14 @@ import copy
 import json
 from decimal import Decimal, InvalidOperation
 
-from .account_cycle_rules import effective_user_plan
+from .account_cycle_rules import PAID_PLAN_IDS, effective_user_plan
 
 
 _DEFAULT = {
     "free": {"projects": 3, "records": 500, "writesPerMinute": 10,
              "writesPerMonth": 1000, "jevMonthlyBudgetUsd": "0.00"},
     "pro": {"projects": 100, "records": 20000, "writesPerMinute": 60,
-            "writesPerMonth": 10000, "jevMonthlyBudgetUsd": "0.00"},
+            "writesPerMonth": 10000, "jevMonthlyBudgetUsd": "3.00"},
     "max": {"projects": 100, "records": 20000, "writesPerMinute": 60,
             "writesPerMonth": 10000, "jevMonthlyBudgetUsd": "5.00"},
 }
@@ -60,8 +60,8 @@ def parse_policy(raw=None):
             if type(values[key]) is not int or not 1 <= values[key] <= 1000000:
                 raise ValueError("allowance must be a positive bounded integer")
         budget = usd_micros(values["jevMonthlyBudgetUsd"])
-        if plan != "max" and budget:
-            raise ValueError("Jev is Max-only")
+        if plan not in PAID_PLAN_IDS and budget:
+            raise ValueError("Jev requires a paid plan")
     if policy["pro"]["records"] != policy["max"]["records"]:
         raise ValueError("Pro and Max record allowances must match")
     return policy
@@ -77,6 +77,6 @@ def plan_entitlements(plan, *, policy=None, jev_available=False):
     return {"plan": plan, "limits": {"projects": values["projects"],
         "expenseRecords": values["records"], "writesPerMinute": values["writesPerMinute"],
         "writesPerMonth": values["writesPerMonth"]},
-        "jev": {"eligible": plan == "max", "available": plan == "max" and jev_available,
+        "jev": {"eligible": plan in PAID_PLAN_IDS, "available": plan in PAID_PLAN_IDS and jev_available,
                 "monthlyBudgetUsd": values["jevMonthlyBudgetUsd"],
                 "period": "utc-calendar-month", "rollover": False}}

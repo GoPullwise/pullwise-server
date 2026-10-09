@@ -24,7 +24,7 @@ info:
     organization association. Connecting repositories is optional and continues
     to require the current actor's GitHub authorization. The shared expense pool
     is shared across projects in a ledger, never publicly accessible. AI assistance
-    depends on the ledger owner's Max plan, current activation and usage budget;
+    depends on the ledger owner's Pro or Max plan, current activation and usage budget;
     an explicit category permits manual entry when assistance is unavailable.
     Project development and product links are optional absolute HTTP(S) URLs.
     Only the selected ledger Owner using a current cookie session may remove a
@@ -519,7 +519,7 @@ paths:
       operationId: createExpense
       x-pullwise-scope: expenses:write
       description: |
-        When the ledger owner's Max plan, activation gates and usage budget allow
+        When the ledger owner's Pro or Max plan, activation gates and usage budget allow
         it, this ordinary write attempts Jev assistance for Cookie sessions and
         expenses:write API keys alike. categoryId may be omitted on create:
         a confident existing ledger category is then selected. Explicit
@@ -556,7 +556,18 @@ paths:
     patch:
       operationId: updateExpense
       x-pullwise-scope: expenses:write
-      description: Moving an expense checks write authority on both old and new targets. Advisory assistance is attempted when the ledger owner's Max plan, activation gates and usage budget allow it; categoryId remains required and existing values are never changed by inference.
+      description: |
+        Requires the current If-Match revision before inference. Moving an
+        expense checks write authority on both old and new targets. When the
+        ledger owner's Pro or Max plan, activation gates and usage budget allow it,
+        categoryId may be omitted to select a confident existing active category.
+        The selected category must remain active at the atomic update, including
+        when inference chooses the previous category. Explicit categories,
+        targets, money and dates are preserved; explicitly retaining the previous
+        archived category is permitted. Unavailable or uncertain automatic
+        classification returns 422 CATEGORY_REQUIRED without updating the expense.
+        Assistance uses the same daily and monthly budget as expense creation;
+        advisory target suggestions never move the expense.
       parameters: [{$ref: '#/components/parameters/IfMatch'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ExpensePatchInput'}}}}
       responses:
@@ -721,11 +732,11 @@ paths:
       parameters: [{$ref: '#/components/parameters/WorkspaceHeader'}]
       operationId: suggestExpense
       x-pullwise-scope: suggestions:use
-      description: Advanced draft advice only; ordinary expense writes already attempt eligible Max assistance without this endpoint or its scope. Never writes an expense. Disabled unless evaluated and enabled. Shares the ledger owner's limit of 20 attempts per UTC day and monthly Jev reservation with automatic assistance.
+      description: Advanced draft advice only; ordinary expense writes already attempt eligible Pro or Max assistance without this endpoint or its scope. Never writes an expense. Disabled unless evaluated and enabled. Requires the ledger owner's current paid plan, irrespective of the actor's personal plan. Shares the ledger owner's limit of 20 attempts per UTC day and monthly Jev reservation with automatic assistance; defaults are USD 3 for Pro and USD 5 for Max per UTC calendar month, without rollover.
       requestBody: {required: true, content: {application/json: {schema: {type: object, required: [purpose, target], properties: {purpose: {type: string, maxLength: 500}, note: {type: string, maxLength: 4000}, occurredOn: {type: string, format: date}, amount: {type: string, description: Decimal amount in selected currency}, currency: {type: string, pattern: "^[A-Z]{3}$"}, target: {$ref: '#/components/schemas/Target'}}}}}}
       responses:
         '200': {description: Status, optional suggestionId, candidates and probabilities; never an expense write, content: {application/json: {schema: {type: object, properties: {status: {type: string, enum: [available, uncertain, unavailable]}, suggestionId: {type: string}, questionVersion: {type: string}, modelVersion: {type: [string, 'null']}, suggestions: {type: object, properties: {categoryId: {type: string}, targetKind: {type: string}, duplicateExpenseId: {type: string}}}, probabilities: {type: object}}}}}}
-        '403': {$ref: '#/components/responses/Forbidden'}
+        '403': {description: JEV_PLAN_REQUIRED when the ledger owner has no current Pro or Max plan, or current scope/target authority is forbidden}
         '429': {description: Ledger owner rate or daily/monthly suggestion budget exhausted}
   /api/v1/expense-suggestions/{id}/decision:
     post:
@@ -774,7 +785,7 @@ components:
     NotFound: {description: Resource absent or outside the authorized ledger}
     Conflict: {description: Idempotency conflict or a quota window changed; reload before retrying}
     PreconditionFailed: {description: Revision does not match If-Match}
-    InvalidInput: {description: Invalid or missing field. CATEGORY_REQUIRED on create may include top-level assistance when eligible Max inference is unavailable or cannot confidently select an existing category. No expense is saved in that case.}
+    InvalidInput: {description: Invalid or missing field. CATEGORY_REQUIRED on create or edit may include top-level assistance when eligible Pro or Max inference is unavailable or cannot confidently select an existing active category. No expense is created or updated in that case.}
     RateLimited: {description: Runtime request rate or ledger owner write allowance exhausted. Jev budget exhaustion falls back to manual completion for ordinary expense writes and does not block a write with an explicit category.}
   schemas:
     AccountSession:
@@ -918,7 +929,7 @@ components:
           type: object
           required: [eligible, available, monthlyBudgetUsd, period, rollover]
           properties:
-            eligible: {type: boolean, description: Max-only entitlement}
+            eligible: {type: boolean, description: Current ledger owner's Pro or Max entitlement; actor's personal plan does not grant eligibility}
             available: {type: boolean, description: Eligibility and current activation gates both passed}
             monthlyBudgetUsd: {type: string, pattern: '^[0-9]+(\.[0-9]{1,6})?$'}
             period: {type: string, enum: [utc-calendar-month]}
@@ -1092,7 +1103,7 @@ components:
         occurredOn: {type: string, format: date}
         amount: {type: string, pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$', description: Currency exponent and safe integer bound enforced by server}
         currency: {type: string, pattern: '^[A-Z]{3}$'}
-        categoryId: {type: [string, 'null'], description: Required for Free/Pro. Omit on Max create to select a confident existing category automatically; unavailable or uncertain inference returns CATEGORY_REQUIRED. An explicit nonempty value is always preserved.}
+        categoryId: {type: [string, 'null'], description: Required for a Free ledger. Omit on create or edit when the ledger owner's Pro or Max plan and assistance gates permit automatic classification; a confident existing active category is selected. Unavailable or uncertain inference returns CATEGORY_REQUIRED. An explicit nonempty value is preserved, including the previous archived category on edit.}
         purpose: {type: string, minLength: 1, maxLength: 500}
         note: {type: [string, 'null'], maxLength: 4000}
         quantity: {type: [string, 'null'], pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$'}
@@ -1167,7 +1178,6 @@ components:
     ExpensePatchInput:
       allOf:
         - {$ref: '#/components/schemas/ExpenseInput'}
-        - {type: object, required: [categoryId], properties: {categoryId: {type: string, minLength: 1}}}
     ExpenseAssistance:
       type: object
       required: [status, suggestions, categorySource]
@@ -1181,9 +1191,9 @@ components:
         suggestions:
           type: object
           properties:
-            categoryId: {type: string, description: Confident existing category; only assigned on create when caller omits categoryId}
+            categoryId: {type: string, description: Confident existing active category; assigned on create or edit when caller omits categoryId}
             targetKind: {type: string, enum: [project, shared], description: Advice only; never moves an expense}
-            duplicateExpenseId: {type: string, description: Matching active expense on the same authorized target, currency and amount within seven days; advisory only}
+            duplicateExpenseId: {type: string, description: Matching active expense on the same authorized target, currency and amount within seven days, excluding the expense being edited; advisory only}
         probabilities: {type: object}
     Expense:
       allOf:

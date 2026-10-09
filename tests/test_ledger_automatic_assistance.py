@@ -72,7 +72,13 @@ class Provider:
             "usage": {"input_tokens": 100, "output_tokens": 5}}).encode()
 
 
-def test_max_create_automatically_classifies_and_replay_spends_nothing(ledger):
+@pytest.mark.parametrize("plan", ["pro", "max"])
+def test_paid_create_automatically_classifies_and_replay_spends_nothing(ledger, plan):
+    with ledger.store.connect() as db:
+        name = record_name("users", "usr_github_77")
+        user = json.loads(db.execute("SELECT payload FROM app_state WHERE name=?", (name,)).fetchone()[0])
+        user["billing"]["plan"] = plan
+        db.execute("UPDATE app_state SET payload=? WHERE name=?", (encode_record("users", user["id"], user), name))
     chosen = category(ledger)
     provider = Provider()
     status, saved = call(ledger, expense(), provider)
@@ -104,14 +110,13 @@ def test_expense_write_key_gets_assistance_without_separate_model_scope(ledger):
         assert db.execute("SELECT actor_kind FROM expense_events").fetchone()[0] == "api_key"
 
 
-@pytest.mark.parametrize("plan", ["free", "pro"])
-def test_unpaid_tiers_never_call_model_and_require_category(ledger, plan):
+def test_free_tier_never_calls_model_and_requires_category(ledger):
     chosen = category(ledger)
     with ledger.store.connect() as db:
         owner_id = "usr_github_77"
         name = record_name("users", owner_id)
         user = json.loads(db.execute("SELECT payload FROM app_state WHERE name=?", (name,)).fetchone()[0])
-        user["billing"]["plan"] = plan
+        user["billing"]["plan"] = "free"
         db.execute("UPDATE app_state SET payload=? WHERE name=?",
                    (encode_record("users", owner_id, user), name))
     provider = Provider()
@@ -208,12 +213,14 @@ def test_invalid_access_never_calls_provider(ledger):
     assert provider.calls == []
 
 
-def test_expired_max_has_no_automatic_model_access(ledger):
+@pytest.mark.parametrize("plan", ["pro", "max"])
+def test_expired_paid_plan_has_no_automatic_model_access(ledger, plan):
     chosen = category(ledger)
     with ledger.store.connect() as db:
         owner_id = "usr_github_77"
         name = record_name("users", owner_id)
         user = json.loads(db.execute("SELECT payload FROM app_state WHERE name=?", (name,)).fetchone()[0])
+        user["billing"]["plan"] = plan
         user["billing"]["currentPeriodEnd"] = ledger.now - 1
         db.execute("UPDATE app_state SET payload=? WHERE name=?",
                    (encode_record("users", owner_id, user), name))

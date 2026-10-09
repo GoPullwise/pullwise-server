@@ -15,7 +15,7 @@ from .cloudflare_ledger_api import (
 )
 from .cloudflare_ledger_auth import ledger_principal, target_allowed
 from .cloudflare_principal import PrincipalAuthError, _header
-from .account_cycle_rules import effective_user_plan
+from .account_cycle_rules import PAID_PLAN_IDS, effective_user_plan
 
 # ISO 4217 active alphabetic units; exponents are fixed here so Worker runtime
 # does not depend on the host locale or a floating point conversion library.
@@ -209,7 +209,7 @@ async def handle_expense_request(*, binding: Any, gateway: Any, method: str, pat
             return await _read(binding, headers, params, item_id, now)
         if method in {"POST", "PATCH"}:
             try:
-                data = _input(body, allow_missing_category=method == "POST")
+                data = _input(body, allow_missing_category=True)
             except ValueError:
                 return _error(422, "INVALID_INPUT")
         else:
@@ -297,6 +297,7 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
                 return _error(404, "NOT_FOUND")
             return 201, json.loads(saved["response_json"])
     assistance = None
+    automatic_requested = data is not None and data["category_id"] is None
     target_evidence = {}
     if method == "POST" or method == "PATCH":
         new_target = method == "POST" or (current is not None and (
@@ -311,7 +312,7 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
                     user["id"], data["category_id"], 1 if unchanged_category else 0).first()
             if category is None:
                 return _error(422, "INVALID_CATEGORY")
-        if effective_user_plan(user, timestamp=now) == "max":
+        if effective_user_plan(user, timestamp=now) in PAID_PLAN_IDS:
             assistance = await _automatic_assistance(binding, headers, data, now, suggestion_gateway, item_id)
             if not data["category_id"]:
                 data = {**data, "category_id": assistance["suggestions"].get("categoryId")}
@@ -398,7 +399,7 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
     activity = await activity_commands(binding, user, "expense", item_id, action, before,
         after, now, proof=proof, operation_id=event_id)
     commands = [_write_guard(binding, proof, user["id"], now)]
-    if method == "PATCH" and data["category_id"] != current["category_id"]:
+    if method == "PATCH" and (automatic_requested or data["category_id"] != current["category_id"]):
         commands.append(binding.prepare("""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN
             EXISTS(SELECT 1 FROM expense_categories WHERE owner_id=? AND id=? AND archived_at IS NULL)
             THEN 1 ELSE 0 END)""").bind(user["id"], data["category_id"]))

@@ -1,32 +1,39 @@
 import asyncio
 import json
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 
 from ledger_d1_fixture import D1ShapedSQLite, seed, seed_auth
-from pullwise_server.ledger_plan_policy import default_policy, parse_policy, entitlements
+from pullwise_server.ledger_plan_policy import default_policy, parse_policy, entitlements, JEV_RESERVATION_MICROUSD
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1, PlanLimitError
 from pullwise_server.cloudflare_state_records import record_name
 
 
-def test_defaults_override_and_max_only_jev():
+def test_defaults_override_and_paid_plan_jev():
     policy = default_policy()
     assert [policy[p]["projects"] for p in ("free", "pro", "max")] == [3, 100, 100]
     assert policy["pro"]["records"] == policy["max"]["records"] == 20_000
     assert policy["free"]["records"] == 500
-    assert policy["max"]["jevMonthlyBudgetUsd"] == "5.00"
+    assert [policy[p]["jevMonthlyBudgetUsd"] for p in ("free", "pro", "max")] == ["0.00", "3.00", "5.00"]
     changed = parse_policy(json.dumps({"free": {"projects": 4}}))
     assert changed["free"]["projects"] == 4 and default_policy()["free"]["projects"] == 3
-    for raw in ({"free": {"jevMonthlyBudgetUsd": "1.00"}}, {"pro": {"jevMonthlyBudgetUsd": "1"}},
+    for raw in ({"free": {"jevMonthlyBudgetUsd": "1.00"}},
                 {"max": {"records": True}}, {"max": {"recrods": 10}}):
         with pytest.raises(ValueError):
             parse_policy(json.dumps(raw))
     with pytest.raises(ValueError):
         parse_policy(json.dumps({"pro": {"records": 30000}}))
-    expired = {"billing": {"plan": "max", "status": "active", "currentPeriodEnd": 9}}
-    assert entitlements(expired, now=10, policy=policy)["plan"] == "free"
+    for plan in ("pro", "max"):
+        changed = parse_policy(json.dumps({plan: {"jevMonthlyBudgetUsd": "100.00"}}))
+        assert changed[plan]["jevMonthlyBudgetUsd"] == "100.00"
+        for value in ("-1", "NaN", "Infinity", "100.000001", "0.0000001", 3):
+            with pytest.raises(ValueError):
+                parse_policy(json.dumps({plan: {"jevMonthlyBudgetUsd": value}}))
+        expired = {"billing": {"plan": plan, "status": "active", "currentPeriodEnd": 9}}
+        assert entitlements(expired, now=10, policy=policy)["plan"] == "free"
 
 
 @pytest.fixture
@@ -34,6 +41,17 @@ def setup(tmp_path):
     fixture, _, frozen = seed(tmp_path / "plans.db")
     seed_auth(fixture)
     return fixture, frozen
+
+
+def account_plan(fixture, plan, **billing):
+    with fixture.store._immediate() as db:
+        user = json.loads(db.execute("SELECT payload FROM app_state WHERE name=?",
+                                    (record_name("users", "owner"),)).fetchone()[0])
+        user["billing"] = {"plan": plan, "status": "active", **billing}
+        frozen = json.dumps(user, separators=(",", ":"))
+        db.execute("UPDATE app_state SET payload=? WHERE name=?",
+                   (frozen, record_name("users", "owner")))
+    return frozen
 
 
 def write(binding, frozen, fixture, number, *, kind="project", now=None):
@@ -102,26 +120,87 @@ def test_concurrent_creations_cannot_overfill_project_slots(setup):
         assert sorted(pool.map(attempt, [1, 2])) == [False, True]
 
 
-def test_jev_is_max_only_and_failed_transaction_does_not_spend(setup):
-    fixture, frozen = setup
-    limited = PlanLimitedD1(D1ShapedSQLite(fixture.store), policy=default_policy(), now=fixture.now)
-    with pytest.raises(PlanLimitError, match="MAX_REQUIRED"):
+def test_free_jev_is_rejected_even_with_a_positive_unparsed_budget(setup):
+    fixture, _ = setup
+    frozen = account_plan(fixture, "free")
+    policy = default_policy()
+    policy["free"]["jevMonthlyBudgetUsd"] = "5.00"
+    raw = D1ShapedSQLite(fixture.store)
+    limited = PlanLimitedD1(raw, policy=policy, now=fixture.now)
+    with pytest.raises(PlanLimitError, match="JEV_PLAN_REQUIRED"):
         write(limited, frozen, fixture, 1, kind="jev")
+    assert raw.batch_count == 0
     with fixture.store.connect() as db:
         assert db.execute("SELECT COUNT(*) FROM expense_suggestion_budget").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM ledger_plan_usage").fetchone()[0] == 0
 
 
-def test_monthly_jev_reservation_is_no_rollover_and_survives_failure(setup):
+@pytest.mark.parametrize("plan,cap", [("pro", 3_000_000), ("max", 5_000_000)])
+def test_paid_jev_exact_monthly_boundary_preserves_business_usage_and_denies_before_dispatch(setup, plan, cap):
     fixture, _ = setup
+    frozen = account_plan(fixture, plan)
+    raw = D1ShapedSQLite(fixture.store)
+    limited = PlanLimitedD1(raw, policy=default_policy(), now=fixture.now)
+    write(limited, frozen, fixture, 1)
+    write(limited, frozen, fixture, 1, kind="jev")
     with fixture.store._immediate() as db:
-        user = json.loads(db.execute("SELECT payload FROM app_state WHERE name=?",
-                                    (record_name("users", "owner"),)).fetchone()[0])
-        user["billing"] = {"plan": "max", "status": "active"}
-        frozen = json.dumps(user, separators=(",", ":"))
-        db.execute("UPDATE app_state SET payload=? WHERE name=?",
-                   (frozen, record_name("users", "owner")))
+        db.execute("UPDATE ledger_plan_usage SET jev_reserved_microusd=?",
+                   (cap - JEV_RESERVATION_MICROUSD,))
+    write(limited, frozen, fixture, 2, kind="jev")
+    batches = raw.batch_count
+    with pytest.raises(PlanLimitError, match="JEV_BUDGET_LIMIT"):
+        write(limited, frozen, fixture, 3, kind="jev")
+    assert raw.batch_count == batches
+    with fixture.store.connect() as db:
+        assert tuple(db.execute("SELECT projects,records,writes,minute_writes,jev_reserved_microusd,jev_cap FROM ledger_plan_usage").fetchone()) == (1, 0, 1, 1, cap, cap)
+        assert db.execute("SELECT COUNT(*) FROM expense_suggestion_budget").fetchone()[0] == 2
+        assert db.execute("SELECT COUNT(*) FROM d1_command_guard").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("plan", ["pro", "max"])
+def test_concurrent_paid_jev_attempts_cannot_overfill_budget(setup, plan):
+    fixture, _ = setup
+    frozen = account_plan(fixture, plan)
     policy = default_policy()
-    policy["max"]["jevMonthlyBudgetUsd"] = "0.002753"
+    policy[plan]["jevMonthlyBudgetUsd"] = "0.002753"
+    def attempt(number):
+        try:
+            write(PlanLimitedD1(D1ShapedSQLite(fixture.store), policy=policy, now=fixture.now),
+                  frozen, fixture, number, kind="jev")
+            return True
+        except PlanLimitError as error:
+            assert error.code == "JEV_BUDGET_LIMIT"
+            return False
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert sorted(pool.map(attempt, [1, 2])) == [False, True]
+    with fixture.store.connect() as db:
+        assert tuple(db.execute("SELECT writes,jev_reserved_microusd FROM ledger_plan_usage").fetchone()) == (0, JEV_RESERVATION_MICROUSD)
+        assert db.execute("SELECT COUNT(*) FROM expense_suggestion_budget").fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("plan", ["pro", "max"])
+@pytest.mark.parametrize("invalid", ["expired", "future", "canceled", "pending"])
+def test_unearned_or_expired_paid_plan_does_not_reserve_jev(setup, plan, invalid):
+    fixture, _ = setup
+    billing = ({"currentPeriodEnd": fixture.now} if invalid == "expired" else
+               {"currentPeriodStart": fixture.now + 1} if invalid == "future" else
+               {"status": "canceled"} if invalid == "canceled" else
+               {"pendingChange": {"plan": plan}})
+    frozen = account_plan(fixture, "free" if invalid == "pending" else plan, **billing)
+    raw = D1ShapedSQLite(fixture.store)
+    with pytest.raises(PlanLimitError, match="JEV_PLAN_REQUIRED"):
+        write(PlanLimitedD1(raw, now=fixture.now), frozen, fixture, 1, kind="jev")
+    assert raw.batch_count == 0
+    with fixture.store.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM ledger_plan_usage").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("plan", ["pro", "max"])
+def test_monthly_jev_reservation_is_no_rollover_and_survives_failure(setup, plan):
+    fixture, _ = setup
+    frozen = account_plan(fixture, plan)
+    policy = default_policy()
+    policy[plan]["jevMonthlyBudgetUsd"] = "0.002753"
     limited = PlanLimitedD1(D1ShapedSQLite(fixture.store), policy=policy, now=fixture.now)
     write(limited, frozen, fixture, 1, kind="jev")
     with pytest.raises(PlanLimitError, match="JEV_BUDGET_LIMIT"):
@@ -133,6 +212,51 @@ def test_monthly_jev_reservation_is_no_rollover_and_survives_failure(setup):
     with fixture.store.connect() as db:
         row = db.execute("SELECT month,jev_reserved_microusd FROM ledger_plan_usage").fetchone()
         assert tuple(row) == ("2027-02", 2753)  # Not unused old budget + new budget.
+
+
+def test_paid_downgrade_retains_spend_and_manual_writes_until_next_month(setup):
+    fixture, _ = setup
+    frozen = account_plan(fixture, "max")
+    raw = D1ShapedSQLite(fixture.store)
+    limited = PlanLimitedD1(raw, now=fixture.now)
+    write(limited, frozen, fixture, 1, kind="jev")
+    with fixture.store._immediate() as db:
+        db.execute("UPDATE ledger_plan_usage SET jev_reserved_microusd=4000000")
+    frozen = account_plan(fixture, "pro")
+    batches = raw.batch_count
+    with pytest.raises(PlanLimitError, match="JEV_BUDGET_LIMIT"):
+        write(limited, frozen, fixture, 2, kind="jev")
+    assert raw.batch_count == batches
+    write(limited, frozen, fixture, 1)
+    with fixture.store.connect() as db:
+        assert tuple(db.execute("SELECT writes,jev_reserved_microusd,jev_cap FROM ledger_plan_usage").fetchone()) == (1, 4_000_000, 3_000_000)
+    # Returning to Max does not refund the spend or create a fresh quota window.
+    frozen = account_plan(fixture, "max")
+    write(limited, frozen, fixture, 2, kind="jev")
+    with fixture.store.connect() as db:
+        assert db.execute("SELECT jev_reserved_microusd FROM ledger_plan_usage").fetchone()[0] == 4_000_000 + JEV_RESERVATION_MICROUSD
+
+
+@pytest.mark.parametrize("plan", ["pro", "max"])
+def test_failed_business_batch_does_not_refund_an_admitted_jev_attempt(setup, plan):
+    fixture, _ = setup
+    frozen = account_plan(fixture, plan)
+    limited = PlanLimitedD1(D1ShapedSQLite(fixture.store), now=fixture.now)
+    write(limited, frozen, fixture, 1, kind="jev")
+    fence = limited.prepare("""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN
+        EXISTS(SELECT 1 FROM app_state u WHERE u.name=? AND u.payload=?)
+        THEN 1 ELSE 0 END)""").bind(record_name("users", "owner"), frozen)
+    mutation = limited.prepare("""INSERT INTO ledger_projects(id,owner_id,github_repo_id,
+        github_full_name,created_at,updated_at) VALUES('failed','owner',99,'o/failed','local','local')""")
+    with pytest.raises(sqlite3.IntegrityError):
+        asyncio.run(limited.batch([fence, mutation,
+            limited.prepare("INSERT INTO d1_command_guard(ok) VALUES(0)"),
+            limited.prepare("DELETE FROM d1_command_guard")]))
+    with fixture.store.connect() as db:
+        assert tuple(db.execute("SELECT projects,records,writes,jev_reserved_microusd FROM ledger_plan_usage").fetchone()) == (0, 0, 0, JEV_RESERVATION_MICROUSD)
+        assert db.execute("SELECT COUNT(*) FROM expense_suggestion_budget").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM ledger_projects").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM d1_command_guard").fetchone()[0] == 0
 
 
 def test_deleted_records_count_and_failed_audit_rolls_back_quota(setup):

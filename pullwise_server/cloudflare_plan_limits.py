@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from .account_cycle_rules import effective_user_plan
+from .account_cycle_rules import PAID_PLAN_IDS, effective_user_plan
 from .ledger_plan_policy import default_policy, usd_micros, JEV_RESERVATION_MICROUSD
 from .cloudflare_state_records import record_name
 
@@ -28,7 +28,7 @@ _ERRORS = {"plan_project_limit": (403, "PROJECT_LIMIT"),
            "plan_record_limit": (403, "RECORD_LIMIT"),
            "plan_write_rate": (429, "WRITE_RATE_LIMIT"),
            "plan_monthly_write_limit": (429, "MONTHLY_WRITE_LIMIT"),
-           "plan_max_required": (403, "MAX_REQUIRED"),
+           "plan_max_required": (403, "JEV_PLAN_REQUIRED"),
            "plan_jev_budget_limit": (429, "JEV_BUDGET_LIMIT")}
 _MUTATION = re.compile(r"^\s*(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM)\s+"
     r"(ledger_projects|expense_categories|expenses|api_keys|expense_suggestion_budget|expense_suggestion_events|ledger_plan_usage|workspace_members|workspace_invites|workspace_events|workspace_join_requests|ledger_project_repositories|expense_recurring_rules|expense_recurring_occurrences|ledger_activity_events)\b", re.I)
@@ -144,8 +144,8 @@ class PlanLimitedD1:
         jev_delta = JEV_RESERVATION_MICROUSD if any(table == "expense_suggestion_budget" for _, table in mutations) else 0
         write_delta = int(any(table not in {"expense_suggestion_budget", "expense_suggestion_events"}
                               for _, table in mutations))
-        if jev_delta and plan != "max":
-            raise PlanLimitError(403, "MAX_REQUIRED")
+        if jev_delta and plan not in PAID_PLAN_IDS:
+            raise PlanLimitError(403, "JEV_PLAN_REQUIRED")
         period = datetime.fromtimestamp(self.now, timezone.utc).strftime("%Y-%m")
         minute = self.now // 60
         usage = await self.binding.prepare("""SELECT projects,records,month,writes,minute,
