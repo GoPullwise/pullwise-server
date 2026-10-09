@@ -85,14 +85,30 @@ def path(kind="invites", identifier=None):
 
 
 def invite(app, role="viewer", actor=1, plan=False):
-    status, payload = app[3]("POST", path(), {"githubLogin": "recipient", "role": role}, actor=actor, plan=plan)
+    status, payload = app[3]("POST", path(), {"role": role}, actor=actor, plan=plan)
     assert status == 201, payload
     return payload
 
 
-def accept(app, issued, actor=5, method="accept", **kwargs):
+def apply_to_invitation(app, issued, actor=5, method="accept", **kwargs):
     return app[3]("POST", "/api/v1/workspace-invitations/" + method,
                   {"token": issued["token"]}, actor=actor, **kwargs)
+
+
+def review(app, issued, request, action="approve", actor=None, **kwargs):
+    actor = actor or int(issued["createdByUserId"].rsplit("_", 1)[1])
+    headers = {"If-Match": '"' + str(request["revision"]) + '"'}
+    headers.update(kwargs.pop("headers", {}))
+    return app[3]("POST", path(identifier=issued["id"]) + "/requests/" + request["id"] + "/" + action,
+                  {}, actor=actor, headers=headers, **kwargs)
+
+
+def accept(app, issued, actor=5, method="accept", **kwargs):
+    """Complete the new two-party workflow for existing membership scenarios."""
+    status, payload = apply_to_invitation(app, issued, actor=actor, method=method, **kwargs)
+    if method == "preview" or status not in {200, 202}:
+        return status, payload
+    return review(app, issued, payload["request"], **kwargs)
 
 
 def count(app, table):
@@ -155,7 +171,7 @@ def test_large_retained_owner_record_keeps_invitation_fences_and_payer(app):
     status, recovered = accept(app, issued, method="preview", plan=True)
     assert status == 200 and recovered["workspace"]["role"] == "viewer"
     with app[0].connect() as db:
-        assert [tuple(row) for row in db.execute("SELECT owner_id,writes FROM ledger_plan_usage")] == [(OWNER, 2)]
+        assert [tuple(row) for row in db.execute("SELECT owner_id,writes FROM ledger_plan_usage")] == [(OWNER, 3)]
         assert db.execute("SELECT payload FROM app_state WHERE name=?", (record_name("users", OWNER),)).fetchone()[0] == encoded
 
 
@@ -209,7 +225,7 @@ def test_selector_conflict_and_unjoined_workspace_fail_closed(app):
     assert app[3]("GET", path("members"), actor=6)[0] == 404
 
 
-def test_invitation_hash_only_single_use_recipient_preview_no_writes(app):
+def test_invitation_hash_only_single_use_link_preview_no_writes(app):
     issued = invite(app)
     with app[0].connect() as db:
         saved = dict(db.execute("SELECT * FROM workspace_invites").fetchone())
@@ -218,7 +234,7 @@ def test_invitation_hash_only_single_use_recipient_preview_no_writes(app):
     assert issued["token"] not in json.dumps(saved) + audit
     status, listed = app[3]("GET", path())
     assert status == 200 and "token" not in json.dumps(listed)
-    assert accept(app, issued, actor=6, method="preview")[0] == 403
+    assert accept(app, issued, actor=6, method="preview")[0] == 200
     before = count(app, "workspace_events")
     status, preview = accept(app, issued, method="preview")
     assert status == 200 and preview["workspace"]["id"] == OWNER
@@ -226,13 +242,13 @@ def test_invitation_hash_only_single_use_recipient_preview_no_writes(app):
     status, accepted = accept(app, issued)
     assert status == 200 and accepted["workspace"]["role"] == "viewer"
     assert accept(app, issued)[0] == 410
-    assert count(app, "workspace_events") == 2
-    assert len(app[2].calls) == 2  # only the issuance lookup
+    assert count(app, "workspace_events") == 3
+    assert app[2].calls == []  # no recipient/provider lookup
 
 
 def test_invitation_acceptance_ignores_current_personal_workspace_selector(app):
     issued = invite(app)
-    assert accept(app, issued, headers={"X-Pullwise-Workspace": "usr_github_5"})[0] == 200
+    assert apply_to_invitation(app, issued, headers={"X-Pullwise-Workspace": "usr_github_5"})[0] == 202
 
 
 def test_accepted_invitation_preview_recovers_current_membership_without_writing(app):
@@ -250,7 +266,7 @@ def test_accepted_invitation_preview_recovers_current_membership_without_writing
     assert recovered["workspace"]["role"] == "editor" and recovered["workspace"]["revision"] == 2
     assert count(app, "workspace_events") == before
     assert accept(app, issued) == (410, {"error": {"code": "INVITATION_ACCEPTED"}})
-    assert accept(app, issued, actor=6, method="preview")[0] == 403
+    assert accept(app, issued, actor=6, method="preview")[0] == 410
 
 
 def test_accepted_invitation_preview_cannot_restore_removed_membership(app):
@@ -278,7 +294,7 @@ def test_revoked_invitation_is_distinct_from_expiry_and_recipient_bound(app):
     issued = invite(app)
     assert app[3]("DELETE", path(identifier=issued["id"]), headers={"If-Match": '"1"'})[0] == 204
     assert accept(app, issued, method="preview") == (410, {"error": {"code": "INVITATION_REVOKED"}})
-    assert accept(app, issued, actor=6, method="preview")[0] == 403
+    assert accept(app, issued, actor=6, method="preview")[0] == 410
 
 
 def test_acceptance_charges_ledger_owner_not_recipient(app):
@@ -287,15 +303,11 @@ def test_acceptance_charges_ledger_owner_not_recipient(app):
     assert status == 200
     with app[0].connect() as db:
         usage = [dict(row) for row in db.execute("SELECT owner_id,writes FROM ledger_plan_usage")]
-    assert usage == [{"owner_id": OWNER, "writes": 2}]
+    assert usage == [{"owner_id": OWNER, "writes": 3}]
 
 
 def test_removed_member_rejoins_with_new_revision(app):
     assert app[3]("DELETE", path("members", "usr_github_3"), headers={"If-Match": '"1"'})[0] == 204
-    # Resolve to the already registered, previously removed GitHub identity.
-    async def lookup(url, *, token):
-        return {"id": 3, "login": "user3", "type": "User"}
-    app[2]._json = lookup
     issued = invite(app, role="editor")
     status, response = accept(app, issued, actor=3)
     assert status == 200 and response["workspace"]["revision"] == 3
@@ -322,9 +334,6 @@ def test_admin_invitation_does_not_revive_after_demotion_and_repromotion(app):
 def test_admin_invitation_does_not_revive_after_removal_and_rejoin(app):
     issued = invite(app, actor=2)
     assert app[3]("DELETE", path("members", "usr_github_2"), headers={"If-Match": '"1"'})[0] == 204
-    async def lookup(url, *, token):
-        return {"id": 2, "login": "user2", "type": "User"}
-    app[2]._json = lookup
     rejoin = invite(app, role="admin")
     status, joined = accept(app, rejoin, actor=2)
     assert status == 200 and joined["workspace"]["revision"] == 3
@@ -333,7 +342,7 @@ def test_admin_invitation_does_not_revive_after_removal_and_rejoin(app):
 
 
 def test_admin_cannot_issue_or_revoke_admin_invitation(app):
-    assert app[3]("POST", path(), {"githubLogin": "recipient", "role": "admin"}, actor=2)[0] == 403
+    assert app[3]("POST", path(), {"role": "admin"}, actor=2)[0] == 403
     assert app[2].calls == []
     issued = invite(app, role="admin")
     assert app[3]("DELETE", path(identifier=issued["id"]), actor=2,
@@ -342,9 +351,9 @@ def test_admin_cannot_issue_or_revoke_admin_invitation(app):
     assert accept(app, issued)[0] == 410
 
 
-def test_pending_duplicates_and_expired_tokens_are_rejected(app):
+def test_unassigned_links_are_independent_and_expired_tokens_are_rejected(app):
     issued = invite(app)
-    assert app[3]("POST", path(), {"githubLogin": "recipient", "role": "editor"})[0] == 409
+    assert app[3]("POST", path(), {"role": "editor"})[0] == 201
     assert accept(app, issued, now=NOW + 86401)[0] == 401  # session also expired
     with app[0]._immediate() as db:
         db.execute("UPDATE workspace_invites SET expires_at=?", (NOW - 1,))
@@ -359,11 +368,12 @@ def test_invalid_invites_have_no_provider_or_write_effects(app, body):
     assert app[2].calls == [] and count(app, "workspace_invites") == 0
 
 
-def test_provider_failure_is_safe_and_does_not_create_invite(app):
+def test_invitation_creation_does_not_depend_on_github_provider(app):
     app[2].failure = GitHubFailure("GITHUB_UNAVAILABLE")
-    assert app[3]("POST", path(), {"githubLogin": "recipient", "role": "viewer"}) == (
-        503, {"error": {"code": "GITHUB_UNAVAILABLE"}})
-    assert count(app, "workspace_events") == count(app, "workspace_invites") == 0
+    status, issued = app[3]("POST", path(), {"role": "viewer"})
+    assert status == 201 and issued["recipient"] is None
+    assert app[2].calls == []
+    assert count(app, "workspace_events") == count(app, "workspace_invites") == 1
 
 
 def test_api_keys_and_bearer_sessions_cannot_govern(app):
@@ -418,7 +428,7 @@ def test_acceptance_member_limit_denies_before_write(app):
         db.executemany("INSERT INTO workspace_members VALUES(?,?,'viewer',1,'joined','updated',NULL,?)",
             [(OWNER, "usr_extra_" + str(number), OWNER) for number in range(96)])
     assert accept(app, issued)[0] == 403
-    assert count(app, "workspace_members") == 99 and count(app, "workspace_events") == 1
+    assert count(app, "workspace_members") == 99 and count(app, "workspace_events") == 2
 
 
 def test_governance_workflow_uses_admitted_scalar_sql_and_parameter_envelopes(app):
@@ -443,7 +453,7 @@ def test_governance_workflow_uses_admitted_scalar_sql_and_parameter_envelopes(ap
     assert app[3]("PATCH", path("members", RECIPIENT), {"role": "editor"},
                   headers={"If-Match": '"1"'})[0] == 200
     assert app[3]("DELETE", path("members", RECIPIENT), headers={"If-Match": '"2"'})[0] == 204
-    assert len(costs) >= 15 and max(costs) <= 7
+    assert len(costs) >= 20 and max(costs) <= 11
     assert count(app, "d1_command_guard") == 0
 
 
@@ -456,10 +466,7 @@ def test_emergency_revocations_work_at_exhausted_quota_but_grants_and_finance_do
         db.execute("UPDATE ledger_plan_usage SET writes=?,minute_writes=? WHERE owner_id=?",
                    (10000 if exhausted == "monthly" else 2, 60 if exhausted == "minute" else 2, OWNER))
         before = dict(db.execute("SELECT * FROM ledger_plan_usage WHERE owner_id=?", (OWNER,)).fetchone())
-    async def lookup(url, *, token):
-        return {"id": 6, "login": "user6", "type": "User"}
-    app[2]._json = lookup
-    assert app[3]("POST", path(), {"githubLogin": "user6", "role": "viewer"}, plan=True) == (
+    assert app[3]("POST", path(), {"role": "viewer"}, plan=True) == (
         429, {"error": {"code": code}})
     assert app[3]("PATCH", path("members", "usr_github_3"), {"role": "viewer"},
         headers={"If-Match": '"1"'}, plan=True) == (429, {"error": {"code": code}})
@@ -502,3 +509,228 @@ def test_migration_preserves_project_identity_history_and_backfills_only_links()
     for table in ("workspace_members", "workspace_invites", "workspace_events"):
         assert db.execute("SELECT COUNT(*) FROM " + table).fetchone()[0] == 0
     db.close()
+
+
+def test_unassigned_link_identifies_applicant_but_only_approval_grants_access(app):
+    issued = invite(app, role="editor")
+    assert issued["recipient"] is None and issued["createdByUserId"] == OWNER
+    assert issued["canReview"] is True
+    status, preview = apply_to_invitation(app, issued, method="preview")
+    assert status == 200 and preview["request"] is None
+    assert not any(preview["workspace"]["permissions"].values())
+    status, application = apply_to_invitation(app, issued)
+    assert status == 202 and application["request"]["status"] == "pending"
+    assert application["request"]["applicant"] == {
+        "userId": RECIPIENT, "name": "User 5", "githubLogin": "user5"}
+    assert app[3]("GET", path("members"), actor=5)[0] == 404
+    assert app[3]("GET", "/api/v1/expenses", actor=5, headers={"X-Pullwise-Workspace": OWNER})[0] == 404
+    assert count(app, "workspace_members") == 3
+    status, inbox = app[3]("GET", "/api/v1/workspace-invitation-requests")
+    assert status == 200 and inbox["hasMore"] is False
+    assert len(inbox["items"]) == 1 and inbox["items"][0]["applicant"]["userId"] == RECIPIENT
+    assert inbox["items"][0]["workspace"]["id"] == OWNER
+    assert issued["token"] not in json.dumps(inbox)
+    assert "githubAccessToken" not in json.dumps(inbox) and "session-" not in json.dumps(inbox)
+    status, approved = review(app, issued, application["request"])
+    assert status == 200 and approved["request"]["status"] == "approved"
+    assert approved["request"]["revision"] == 2 and approved["workspace"]["role"] == "editor"
+    assert app[3]("GET", path("members"), actor=5)[0] == 200
+    assert app[3]("GET", "/api/v1/workspace-invitation-requests")[1]["items"] == []
+    status, recovered = apply_to_invitation(app, issued, method="preview")
+    assert status == 200 and recovered["request"]["status"] == "approved"
+    assert recovered["workspace"]["permissions"]["writeExpenses"] is True
+
+
+def test_applicant_retries_and_preview_are_read_only_without_duplicate_requests(app):
+    issued = invite(app)
+    status, application = apply_to_invitation(app, issued, plan=True)
+    assert status == 202
+    with app[0].connect() as db:
+        before = list(db.iterdump())
+    for method in ("accept", "preview", "accept"):
+        status, response = apply_to_invitation(app, issued, method=method, plan=True)
+        assert status == 200 and response["request"] == application["request"]
+    with app[0].connect() as db:
+        assert list(db.iterdump()) == before
+    assert count(app, "workspace_join_requests") == 1 and count(app, "workspace_events") == 2
+
+
+def test_rejection_is_final_for_one_applicant_and_another_applicant_can_join(app):
+    issued = invite(app)
+    first = apply_to_invitation(app, issued)[1]["request"]
+    second = apply_to_invitation(app, issued, actor=6)[1]["request"]
+    status, rejected = review(app, issued, first, "reject")
+    assert status == 200 and rejected["request"]["status"] == "rejected"
+    before = count(app, "workspace_events")
+    status, retry = apply_to_invitation(app, issued)
+    assert status == 200 and retry["request"]["status"] == "rejected"
+    assert count(app, "workspace_events") == before and count(app, "workspace_join_requests") == 2
+    assert count(app, "workspace_members") == 3
+    assert review(app, issued, rejected["request"])[0] == 409
+    status, accepted = review(app, issued, second)
+    assert status == 200 and accepted["request"]["applicant"]["userId"] == "usr_github_6"
+    assert app[3]("GET", path("members"), actor=5)[0] == 404
+    assert app[3]("GET", path("members"), actor=6)[0] == 200
+
+
+def test_first_approval_consumes_link_and_hides_other_pending_requests(app):
+    issued = invite(app)
+    first = apply_to_invitation(app, issued)[1]["request"]
+    second = apply_to_invitation(app, issued, actor=6)[1]["request"]
+    assert review(app, issued, first)[0] == 200
+    before = count(app, "workspace_events")
+    assert review(app, issued, second)[0] == 410
+    assert apply_to_invitation(app, issued, actor=6, method="preview")[0] == 410
+    assert app[3]("GET", "/api/v1/workspace-invitation-requests")[1]["items"] == []
+    assert app[3]("GET", path(identifier=issued["id"]) + "/requests")[1]["items"] == []
+    assert count(app, "workspace_events") == before and count(app, "workspace_members") == 4
+
+
+@pytest.mark.parametrize("actor", [2, 3, 4, 5, 6])
+def test_only_original_inviter_can_review_not_other_admin_or_applicant(app, actor):
+    issued = invite(app)
+    application = apply_to_invitation(app, issued)[1]["request"]
+    before = count(app, "workspace_events")
+    assert review(app, issued, application, actor=actor)[0] in {403, 404}
+    assert review(app, issued, application, "reject", actor=actor)[0] in {403, 404}
+    status, inbox = app[3]("GET", "/api/v1/workspace-invitation-requests", actor=actor)
+    assert status == 200 and inbox["items"] == []
+    assert count(app, "workspace_events") == before and count(app, "workspace_members") == 3
+
+
+def test_owner_cannot_review_an_admins_invitation_on_their_behalf(app):
+    issued = invite(app, actor=2)
+    application = apply_to_invitation(app, issued)[1]["request"]
+    assert review(app, issued, application, actor=1)[0] == 403
+    assert app[3]("GET", path(identifier=issued["id"]) + "/requests", actor=1)[0] == 403
+    status, inbox = app[3]("GET", "/api/v1/workspace-invitation-requests", actor=2)
+    assert status == 200 and inbox["items"][0]["invitation"]["canReview"] is True
+    assert review(app, issued, application, actor=2)[0] == 200
+
+
+@pytest.mark.parametrize("headers,expected", [({"If-Match": ""}, 428), ({"If-Match": '"2"'}, 412),
+    ({"If-Match": "1"}, 422)])
+def test_review_requires_current_request_revision(app, headers, expected):
+    issued = invite(app)
+    application = apply_to_invitation(app, issued)[1]["request"]
+    assert review(app, issued, application, headers=headers)[0] == expected
+    assert count(app, "workspace_members") == 3 and count(app, "workspace_events") == 2
+
+
+def test_admin_request_review_loses_authority_after_demotion_and_repromotion(app):
+    issued = invite(app, actor=2)
+    application = apply_to_invitation(app, issued)[1]["request"]
+    assert app[3]("PATCH", path("members", "usr_github_2"), {"role": "editor"}, headers={"If-Match": '"1"'})[0] == 200
+    assert app[3]("PATCH", path("members", "usr_github_2"), {"role": "admin"}, headers={"If-Match": '"2"'})[0] == 200
+    assert review(app, issued, application, actor=2)[0] == 403
+    assert app[3]("GET", "/api/v1/workspace-invitation-requests", actor=2)[1]["items"] == []
+    assert count(app, "workspace_members") == 3
+
+
+@pytest.mark.parametrize("change", ["revoked", "request", "applicant", "session", "owner", "inviter"])
+def test_approval_races_rollback_membership_request_decision_audit_and_quota(app, change):
+    issued = invite(app, actor=2)
+    application = apply_to_invitation(app, issued)[1]["request"]
+    def race(db):
+        if change == "revoked":
+            db.execute("UPDATE workspace_invites SET status='revoked',revision=revision+1")
+        elif change == "request":
+            db.execute("UPDATE workspace_join_requests SET revision=revision+1")
+        elif change == "session":
+            db.execute("DELETE FROM app_state WHERE name=?", (record_name("sessions", "session-2"),))
+        elif change == "inviter":
+            db.execute("UPDATE workspace_members SET role='viewer',revision=revision+1 WHERE user_id='usr_github_2'")
+        else:
+            identifier = RECIPIENT if change == "applicant" else OWNER
+            saved = json.loads(db.execute("SELECT payload FROM app_state WHERE name=?", (record_name("users", identifier),)).fetchone()[0])
+            saved["name"] = "Changed after authorization snapshot"
+            db.execute("UPDATE app_state SET payload=? WHERE name=?", (encode_record("users", identifier, saved), record_name("users", identifier)))
+    app[1].race = (lambda statements: any("INSERT INTO d1_command_guard" in item.sql for item in statements), race)
+    assert review(app, issued, application, plan=True) == (503, {"error": {"code": "WORKSPACE_WRITE_UNAVAILABLE"}})
+    assert count(app, "workspace_members") == 3 and count(app, "workspace_events") == 2
+    assert count(app, "ledger_plan_usage") == count(app, "d1_command_guard") == 0
+    with app[0].connect() as db:
+        assert db.execute("SELECT status FROM workspace_join_requests").fetchone()[0] == "pending"
+
+
+def test_legacy_targeted_link_keeps_recipient_restriction_and_requires_approval(app):
+    issued = invite(app)
+    with app[0]._immediate() as db:
+        db.execute("UPDATE workspace_invites SET github_recipient_id=5,github_login='old-login'")
+    assert apply_to_invitation(app, issued, actor=6, method="preview")[0] == 403
+    assert apply_to_invitation(app, issued, actor=6)[0] == 403
+    status, application = apply_to_invitation(app, issued)
+    assert status == 202 and application["recipient"] == {"githubId": "5", "login": "old-login"}
+    assert count(app, "workspace_members") == 3
+    assert review(app, issued, application["request"])[0] == 200
+
+
+def test_legacy_accepted_link_recovers_without_a_join_request_or_write(app):
+    issued = invite(app)
+    with app[0]._immediate() as db:
+        db.execute("UPDATE workspace_invites SET github_recipient_id=5,github_login='old-login',status='accepted',revision=2,accepted_by_user_id=?,accepted_at='earlier'", (RECIPIENT,))
+        db.execute("INSERT INTO workspace_members VALUES(?,?,'viewer',1,'earlier','earlier',NULL,?)", (OWNER, RECIPIENT, OWNER))
+        before = list(db.iterdump())
+    status, preview = apply_to_invitation(app, issued, method="preview")
+    assert status == 200 and preview["request"] is None and preview["workspace"]["role"] == "viewer"
+    with app[0].connect() as db:
+        assert list(db.iterdump()) == before
+
+
+def test_inbox_is_bounded_read_only_and_reveals_next_requests_after_review(app):
+    first, second = invite(app), invite(app)
+    with app[0]._immediate() as db:
+        db.executemany("""INSERT INTO workspace_join_requests(id,workspace_id,invite_id,applicant_user_id,
+            created_at,updated_at) VALUES(?,?,?,?,?,?)""", [(f"wjr_{number:03}", OWNER,
+            first["id"] if number < 100 else second["id"], f"usr_request_{number}", "created", "updated")
+            for number in range(101)])
+        for number in range(101):
+            identifier = f"usr_request_{number}"
+            db.execute("INSERT INTO app_state(name,payload,updated_at) VALUES(?,?,?)", (record_name("users", identifier), encode_record("users", identifier, {"id": identifier, "name": f"Applicant {number}"}), NOW))
+        before = list(db.iterdump())
+    status, inbox = app[3]("GET", "/api/v1/workspace-invitation-requests", headers={"X-Pullwise-Workspace": "some_other_ledger"})
+    assert status == 200 and len(inbox["items"]) == 100 and inbox["hasMore"] is True
+    assert [item["id"] for item in inbox["items"]] == [f"wjr_{number:03}" for number in range(100)]
+    with app[0].connect() as db:
+        assert list(db.iterdump()) == before
+    assert review(app, first, inbox["items"][0], "reject")[0] == 200
+    status, refreshed = app[3]("GET", "/api/v1/workspace-invitation-requests")
+    assert status == 200 and refreshed["hasMore"] is False
+    assert refreshed["items"][-1]["id"] == "wjr_100"
+
+
+def test_application_cap_is_lifetime_per_link_and_denies_before_write(app):
+    issued = invite(app)
+    with app[0]._immediate() as db:
+        db.executemany("""INSERT INTO workspace_join_requests(id,workspace_id,invite_id,applicant_user_id,
+            status,created_at,updated_at,reviewed_by_user_id,reviewed_at) VALUES(?,?,?,?,'rejected','c','u',?,'r')""",
+            [(f"wjr_cap_{number}", OWNER, issued["id"], f"usr_cap_{number}", OWNER) for number in range(100)])
+    assert apply_to_invitation(app, issued) == (403, {"error": {"code": "INVITATION_REQUEST_LIMIT"}})
+    assert count(app, "workspace_events") == 1 and count(app, "workspace_join_requests") == 100
+
+
+def test_application_and_review_cannot_use_api_keys_or_bearer_sessions(app):
+    issued = invite(app)
+    assert apply_to_invitation(app, issued, headers={"Cookie": "", "Authorization": "Bearer session-5"})[0] == 403
+    application = apply_to_invitation(app, issued)[1]["request"]
+    assert review(app, issued, application, headers={"Cookie": "", "Authorization": "Bearer session-1"})[0] == 403
+    assert app[3]("GET", "/api/v1/workspace-invitation-requests", headers={"Cookie": "", "Authorization": "Bearer session-1"})[0] == 403
+    assert count(app, "workspace_members") == 3
+
+
+def test_workspace_join_requests_are_scoped_separately_from_global_inbox_cap(app):
+    status, personal = app[3]("POST", "/api/v1/workspaces/usr_github_2/invites", {"role": "viewer"}, actor=2)
+    assert status == 201
+    shared = invite(app, actor=2)
+    shared_request = apply_to_invitation(app, shared)[1]["request"]
+    personal_request = apply_to_invitation(app, personal)[1]["request"]
+    status, global_inbox = app[3]("GET", "/api/v1/workspace-invitation-requests", actor=2)
+    assert status == 200 and {item["workspaceId"] for item in global_inbox["items"]} == {OWNER, "usr_github_2"}
+    status, shared_inbox = app[3]("GET", f"/api/v1/workspaces/{OWNER}/join-requests", actor=2)
+    assert status == 200 and [item["id"] for item in shared_inbox["items"]] == [shared_request["id"]]
+    assert shared_inbox["items"][0]["invitation"]["id"] == shared["id"]
+    status, personal_inbox = app[3]("GET", "/api/v1/workspaces/usr_github_2/join-requests", actor=2)
+    assert status == 200 and [item["id"] for item in personal_inbox["items"]] == [personal_request["id"]]
+    assert app[3]("GET", f"/api/v1/workspaces/{OWNER}/join-requests", actor=1)[1]["items"] == []
+    assert app[3]("GET", f"/api/v1/workspaces/{OWNER}/join-requests", actor=4)[0] == 403
+    assert count(app, "workspace_events") == 4

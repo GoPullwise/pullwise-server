@@ -20,17 +20,23 @@
 ## 账本身份与共享范围
 
 现有账本的 `owner_id` 同时作为稳定的 workspace ID。原个人账本有一个
-隐式 Owner，不需要迁移支出归属或新增 Owner 成员行。成员接受邀请后访问
+隐式 Owner，不需要迁移支出归属或新增 Owner 成员行。成员申请获批后访问
 同一个账本；账本已有及未来的项目、分类、支出、报表和 CSV 都按角色共享。
 邀请创建和接受页面明确警告这一共享范围，不复制原账目，也不另建一份
 团队历史。成员自己的个人账本仍然独立。
 
-邀请通过 GitHub username 创建，服务端立即解析并固定接收人的稳定 numeric
-GitHub user ID。随机邀请 token 只返回一次，数据库只保存 hash；有效期为
-24 小时，只有该 GitHub 身份登录的用户可以预览和单次接受。接受前重新
-校验邀请状态、有效期、邀请者当前权限及 revision。撤销、过期、重复接受、
-接收人不符或邀请者失权均拒绝。GitHub Organization 成员资格不会自动
-授予账本角色；接受账本邀请也不授予 GitHub 仓库权限。
+邀请只选择角色，不预先指定 GitHub 用户。随机邀请 token 只返回一次，
+数据库只保存 hash；有效期为 24 小时。打开链接后先恢复登录或登录并
+回到邀请页，申请使用真实登录账号的身份。申请不会创建成员或授予账本
+权限；原邀请人在持久申请列表中看到申请人的姓名和 GitHub 账号，选择
+同意或拒绝。只有原邀请人当前权限及原始成员 revision 仍有效时才能审批。
+同意会在一个原子 batch 中创建或恢复成员并关闭链接；其他待申请者无法
+再通过这条链接加入。拒绝不关闭链接，同一账号重复申请不覆盖拒绝结果。
+同一链接最多接收 100 个不同账号的申请。通知在登录、导航、返回页面和
+手动刷新时更新，没有定时轮询。撤销、过期、旧版本或邀请者失权均拒绝
+审批。历史指定账号的邀请继续保留接收人约束，已加入的成员保持原权限。
+GitHub Organization 成员资格不会自动授予账本角色；加入账本也不授予
+GitHub 仓库权限。
 
 ## 当前角色与权限
 
@@ -112,7 +118,14 @@ Origin。入口包括 `GET /api/v1/workspaces`，
 邀请 `GET/POST /api/v1/workspaces/{workspaceId}/invites` 与
 `DELETE /api/v1/workspaces/{workspaceId}/invites/{inviteId}`，以及
 `POST /api/v1/workspace-invitations/preview` 和 `/accept`。成员及邀请
-现有记录变更要求 `If-Match`；预览和接受 body 为 `{"token":"pwi_…"}`。
+创建 body 为 `{"role":"viewer"}`。预览与申请 body 为 `{"token":"pwi_…"}`，
+首次申请返回 202 和 pending request。全局申请列表为
+`GET /api/v1/workspace-invitation-requests`，当前账本申请列表为
+`GET /api/v1/workspaces/{workspaceId}/join-requests`，均只返回当前登录人
+创建的有效邀请的待审批申请，最多 100 条并提供 `hasMore`。
+审批为 `POST /api/v1/workspaces/{workspaceId}/invites/{inviteId}/requests/{requestId}/approve`
+或 `/reject`，使用申请的 `If-Match`。成员、撤销邀请及审批的变更均要求
+当前 revision，实际权限只在审批同意后获得。
 
 新建 workspace-scoped API key 绑定 workspace ID 和当前
 `workspaceMemberRevision`。有效权限为 key scopes、当前成员角色、项目

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Pullwise Project Expense Ledger API
-  version: 0.4.0
+  version: 0.5.0
   description: |
     Current ledger contract for Pullwise, the project expense tracker for
     developers and teams at pull-wise.com. Users and authorized API clients
@@ -11,8 +11,10 @@ info:
     clients call these paths on the Server Worker. All private responses are
     Cache-Control: no-store. Money is grouped by currency without conversion.
     Each user's existing personal ledger is an immutable workspace. Explicit
-    invitations share all existing and future ledger data; they do not grant
-    GitHub organization or repository access. Select a ledger with
+    invitations share all existing and future ledger data after the original
+    inviter approves the authenticated applicant. Links do not require a named
+    recipient. Pending or rejected requests grant no ledger access. Invitations
+    do not grant GitHub organization or repository access. Select a ledger with
     X-Pullwise-Workspace, or workspaceId on CSV links. Conflicting selectors are
     rejected. API keys are permanently bound to one ledger and intersect the
     issuing member's current role; membership revision changes invalidate team
@@ -94,8 +96,8 @@ paths:
       operationId: inviteWorkspaceMember
       x-pullwise-scope: profile:read
       security: [{cookieSession: []}]
-      description: Resolve a GitHub login to its stable numeric user ID; a 24-hour token is displayed once. Financial roles do not grant GitHub access.
-      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [githubLogin, role], properties: {githubLogin: {type: string, minLength: 1, maxLength: 39}, role: {$ref: '#/components/schemas/AssignableRole'}}}}}}
+      description: Create an unassigned 24-hour invitation link with a role. The token is displayed once; the original inviter must approve an authenticated applicant before membership is granted. Financial roles do not grant GitHub access.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [role], properties: {role: {$ref: '#/components/schemas/AssignableRole'}}}}}}
       responses:
         '201': {description: Invitation metadata and one-time token, content: {application/json: {schema: {allOf: [{$ref: '#/components/schemas/WorkspaceInvitation'}, {type: object, required: [token], properties: {token: {type: string, pattern: '^pwi_[A-Za-z0-9_-]{43}$'}}}]}}}}
         '403': {$ref: '#/components/responses/Forbidden'}
@@ -116,10 +118,10 @@ paths:
       operationId: previewWorkspaceInvitation
       x-pullwise-scope: profile:read
       security: [{cookieSession: []}]
-      description: Recipient-bound read; confirmation does not join or write. Pending tokens check expiry, stable recipient ID and current inviter authority. An accepted token can recover its recipient's current active membership after a lost acceptance response, without reaccepting or restoring removed membership.
+      description: Authenticated read without a join or write. Pending tokens check expiry and current inviter authority; legacy targeted tokens also check their stable recipient ID. The response includes the current applicant request when present. Pending requests grant no ledger permissions. An accepted token can recover only its approved applicant's current active membership, without restoring removed membership.
       requestBody: {$ref: '#/components/requestBodies/InvitationToken'}
       responses:
-        '200': {description: Pending invitation for explicit confirmation or accepted invitation with the recipient's current active ledger role and revision}
+        '200': {description: Invitation and applicant request or current approved membership, content: {application/json: {schema: {$ref: '#/components/schemas/WorkspaceInvitationPreview'}}}}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '410': {description: INVITATION_EXPIRED, INVITATION_REVOKED, or INVITATION_ACCEPTED without a current active membership}
@@ -128,14 +130,79 @@ paths:
       operationId: acceptWorkspaceInvitation
       x-pullwise-scope: profile:read
       security: [{cookieSession: []}]
-      description: Atomically consume a single-use token, grant membership and publish the real actor's audit event. Removed-member generations advance; old keys do not revive.
+      description: Submit the authenticated actor's join request and notify the original inviter through their durable inbox. This does not grant membership or consume the link. Each link permits at most 100 lifetime applicants. Existing pending or rejected requests replay read-only. One approved applicant consumes the link; removed-member generations advance only upon approval and old keys do not revive.
       requestBody: {$ref: '#/components/requestBodies/InvitationToken'}
       responses:
-        '200': {description: Accepted target ledger and membership}
+        '200': {description: Existing pending or rejected applicant request without another write, content: {application/json: {schema: {$ref: '#/components/schemas/WorkspaceInvitationPreview'}}}}
+        '202': {description: Join request awaiting original inviter approval, content: {application/json: {schema: {$ref: '#/components/schemas/WorkspaceInvitationPreview'}}}}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
-        '410': {description: INVITATION_ACCEPTED, INVITATION_REVOKED, or INVITATION_EXPIRED; acceptance is never replayed as another membership write}
+        '410': {description: INVITATION_ACCEPTED, INVITATION_REVOKED, or INVITATION_EXPIRED; no request or membership write}
+  /api/v1/workspace-invitation-requests:
+    get:
+      operationId: listWorkspaceInvitationRequests
+      x-pullwise-scope: profile:read
+      security: [{cookieSession: []}]
+      description: Durable cross-ledger inbox for the current original inviter. Returns up to 100 oldest actionable pending requests plus hasMore; expiry, revocation, consumed links and lost inviter authority remove requests from the actionable inbox. Reads never mark notifications or mutate data.
+      responses:
+        '200': {description: Pending requests with applicant identity, invitation and ledger, content: {application/json: {schema: {type: object, required: [items, hasMore], properties: {items: {type: array, maxItems: 100, items: {allOf: [{$ref: '#/components/schemas/WorkspaceJoinRequest'}, {type: object, required: [invitation, workspace], properties: {invitation: {$ref: '#/components/schemas/WorkspaceInvitation'}, workspace: {$ref: '#/components/schemas/Workspace'}}}]}}, hasMore: {type: boolean}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/workspaces/{workspaceId}/join-requests:
+    parameters: [{$ref: '#/components/parameters/WorkspacePath'}]
+    get:
+      operationId: listWorkspaceJoinRequests
+      x-pullwise-scope: profile:read
+      security: [{cookieSession: []}]
+      description: Current Owner/Admin only. Durable inbox scoped to this ledger and invitations created by the current actor. Returns up to 100 oldest actionable pending requests plus hasMore.
+      responses:
+        '200': {description: Pending requests with applicant identity and ledger invitation, content: {application/json: {schema: {type: object, required: [items, hasMore], properties: {items: {type: array, maxItems: 100, items: {allOf: [{$ref: '#/components/schemas/WorkspaceJoinRequest'}, {type: object, required: [invitation, workspace], properties: {invitation: {$ref: '#/components/schemas/WorkspaceInvitation'}, workspace: {$ref: '#/components/schemas/Workspace'}}}]}}, hasMore: {type: boolean}}}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/workspaces/{workspaceId}/invites/{id}/requests:
+    parameters: [{$ref: '#/components/parameters/WorkspacePath'}, {$ref: '#/components/parameters/Id'}]
+    get:
+      operationId: listWorkspaceInvitationJoinRequests
+      x-pullwise-scope: profile:read
+      security: [{cookieSession: []}]
+      description: Current original inviter only. List up to 100 actionable pending applicants for this invitation.
+      responses:
+        '200': {description: Pending join requests, content: {application/json: {schema: {type: object, required: [items, hasMore], properties: {items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/WorkspaceJoinRequest'}}, hasMore: {type: boolean}}}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/workspaces/{workspaceId}/invites/{id}/requests/{requestId}/approve:
+    parameters: [{$ref: '#/components/parameters/WorkspacePath'}, {$ref: '#/components/parameters/Id'}, {$ref: '#/components/parameters/JoinRequestPath'}]
+    post:
+      operationId: approveWorkspaceJoinRequest
+      x-pullwise-scope: profile:read
+      security: [{cookieSession: []}]
+      parameters: [{$ref: '#/components/parameters/IfMatch'}]
+      description: Current original inviter only. Atomically approve one pending request, grant the link's role, consume the link and append the audit event. Other pending applicants become unavailable. If-Match is the request revision; stale authority, membership or invitation revisions cannot commit partial changes.
+      requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
+      responses:
+        '200': {description: Approved request and granted ledger membership, content: {application/json: {schema: {$ref: '#/components/schemas/WorkspaceJoinReview'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '410': {description: Invitation no longer actionable}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+  /api/v1/workspaces/{workspaceId}/invites/{id}/requests/{requestId}/reject:
+    parameters: [{$ref: '#/components/parameters/WorkspacePath'}, {$ref: '#/components/parameters/Id'}, {$ref: '#/components/parameters/JoinRequestPath'}]
+    post:
+      operationId: rejectWorkspaceJoinRequest
+      x-pullwise-scope: profile:read
+      security: [{cookieSession: []}]
+      parameters: [{$ref: '#/components/parameters/IfMatch'}]
+      description: Current original inviter only. Reject a pending applicant and append the audit event without granting membership or consuming the invitation. The rejected applicant cannot resubmit on the same link. If-Match is the request revision.
+      requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
+      responses:
+        '200': {description: Rejected request and ledger summary, content: {application/json: {schema: {$ref: '#/components/schemas/WorkspaceJoinReview'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '410': {description: Invitation no longer actionable}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
   /api/v1/me:
     get:
       parameters: [{$ref: '#/components/parameters/WorkspaceHeader'}]
@@ -432,6 +499,7 @@ components:
     WorkspacePath: {name: workspaceId, in: path, required: true, schema: {type: string, pattern: '^[A-Za-z0-9_-]{1,120}$'}}
     WorkspaceHeader: {name: X-Pullwise-Workspace, in: header, schema: {type: string}, description: Explicit ledger selection; never grants membership and cannot override a key binding}
     WorkspaceQuery: {name: workspaceId, in: query, schema: {type: string}, description: CSV/native-link selector; must agree with any header}
+    JoinRequestPath: {name: requestId, in: path, required: true, schema: {type: string, pattern: '^[A-Za-z0-9_-]{1,120}$'}}
     Id: {name: id, in: path, required: true, schema: {type: string, pattern: '^[A-Za-z0-9_-]{1,120}$'}}
     IfMatch: {name: If-Match, in: header, required: true, schema: {type: string, maxLength: 18, pattern: '^"[1-9][0-9]{0,15}"$'}, description: Quoted revision ETag in the exact integer range 1 through 9007199254740991}
     IdempotencyKey: {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 1, maxLength: 128}}
@@ -475,15 +543,50 @@ components:
         joinedAt: {type: [string, 'null']}
     WorkspaceInvitation:
       type: object
-      required: [id, recipient, role, status, revision, expiresAt, createdAt]
+      required: [id, recipient, createdByUserId, canReview, role, status, revision, expiresAt, createdAt]
       properties:
         id: {type: string}
-        recipient: {type: object, required: [githubId, login], properties: {githubId: {type: string}, login: {type: string}}}
+        recipient: {type: [object, 'null'], description: Null for unassigned links; preserved identity for legacy targeted links, required: [githubId, login], properties: {githubId: {type: string}, login: {type: string}}}
+        createdByUserId: {type: string}
+        canReview: {type: boolean, description: Current actor is the original inviter with current management authority}
         role: {$ref: '#/components/schemas/AssignableRole'}
         status: {type: string, enum: [pending, accepted, revoked]}
         revision: {type: integer, minimum: 1}
         expiresAt: {type: string, format: date-time}
         createdAt: {type: string, format: date-time}
+    WorkspaceJoinRequest:
+      type: object
+      required: [id, invitationId, workspaceId, applicant, status, revision, createdAt, updatedAt, reviewedAt]
+      properties:
+        id: {type: string}
+        invitationId: {type: string}
+        workspaceId: {type: string}
+        applicant:
+          type: object
+          required: [userId, name, githubLogin]
+          properties:
+            userId: {type: string, description: Authenticated Pullwise account identity}
+            name: {type: [string, 'null']}
+            githubLogin: {type: [string, 'null']}
+        status: {type: string, enum: [pending, approved, rejected]}
+        revision: {type: integer, minimum: 1, maximum: 9007199254740991}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        reviewedAt: {type: [string, 'null'], format: date-time}
+    WorkspaceInvitationPreview:
+      allOf:
+        - {$ref: '#/components/schemas/WorkspaceInvitation'}
+        - type: object
+          required: [request, workspace]
+          properties:
+            request: {anyOf: [{$ref: '#/components/schemas/WorkspaceJoinRequest'}, {type: 'null'}]}
+            workspace: {allOf: [{$ref: '#/components/schemas/Workspace'}], description: Before approval all permissions are false; only an approved applicant receives its current active role and generation}
+    WorkspaceJoinReview:
+      type: object
+      required: [request, workspace]
+      properties:
+        request: {$ref: '#/components/schemas/WorkspaceJoinRequest'}
+        workspace: {$ref: '#/components/schemas/Workspace'}
     Me:
       type: object
       required: [id, scopes, entitlements, workspace]

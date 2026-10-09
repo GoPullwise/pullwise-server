@@ -19,7 +19,7 @@ from pullwise_server.cloudflare_ledger_api import handle_ledger_request
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1, _USAGE_SQL
 from pullwise_server.cloudflare_preview_budget import ProductMeteredD1
 from pullwise_server.cloudflare_preview_schema import (
-    INDEX_COUNTS, LEGACY_SCHEMA_SQL, UPGRADE_SQL, UPGRADE_V6_SQL, UPGRADE_V7_SQL, SCHEMA_VERSION, SCHEMA_FINGERPRINT,
+    INDEX_COUNTS, LEGACY_SCHEMA_SQL, UPGRADE_SQL, UPGRADE_V6_SQL, UPGRADE_V7_SQL, UPGRADE_V8_SQL, SCHEMA_VERSION, SCHEMA_FINGERPRINT,
 )
 from pullwise_server.cloudflare_validation_budget import BudgetJournal
 from pullwise_server.ledger_plan_policy import default_policy, JEV_RESERVATION_MICROUSD
@@ -62,6 +62,9 @@ def preview():
                     database.execute(sql)
             if not database.execute("SELECT 1 FROM sqlite_schema WHERE name='expense_recurring_rules'").fetchone():
                 for sql in UPGRADE_V7_SQL:
+                    database.execute(sql)
+            if not database.execute("SELECT 1 FROM sqlite_schema WHERE name='workspace_join_requests'").fetchone():
+                for sql in UPGRADE_V8_SQL:
                     database.execute(sql)
             database.execute("""INSERT INTO expense_categories(id,owner_id,name,created_at,updated_at)
                 VALUES('cat_host','usr_github_77','Hosting','local','local')""")

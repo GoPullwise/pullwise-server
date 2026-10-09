@@ -8,7 +8,8 @@ from test_d1_validation_budget import LocalSql
 from test_preview_blank_schema_upgrade import v5, facts
 from test_preview_schema_upgrade import SQLiteD1
 from pullwise_server.cloudflare_preview_schema import (
-    SCHEMA_VERSION, SCHEMA_FINGERPRINT, SCHEMA_OBJECTS, INDEX_COUNTS,
+    V7_SCHEMA_VERSION as SCHEMA_VERSION, V7_SCHEMA_FINGERPRINT as SCHEMA_FINGERPRINT,
+    V7_SCHEMA_OBJECTS as SCHEMA_OBJECTS, V7_INDEX_COUNTS as INDEX_COUNTS,
     V6_INDEX_COUNTS, UPGRADE_V7_SQL,
 )
 from pullwise_server.cloudflare_preview_budget import (

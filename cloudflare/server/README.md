@@ -17,11 +17,20 @@ preview schema upgrade are recorded in
 Migrations apply in order: `0001_ledger.sql`, `0002_identity_billing_keys.sql`,
 `0003_ledger_suggestions.sql`, `0004_ledger_plan_usage.sql`,
 `0005_workspaces_repositories.sql`, `0006_blank_projects.sql`,
-`0007_recurring_expenses_project_links.sql`.
-Production remains unmigrated and paused. The current canonical v7
-schema has 20 tables and 40 SQLite indexes. Coordinated initialization and
+`0007_recurring_expenses_project_links.sql`,
+`0008_workspace_join_approval.sql`.
+Production remains unmigrated and paused. The current canonical v8
+schema has 21 tables and 46 SQLite indexes. Coordinated initialization and
 upgrade verify the full schema; health retains its 18-table compatibility probe.
 The deploy script never applies remote migrations.
+
+0008 makes new invite links independent of a GitHub recipient and adds durable
+join requests. Applying never grants ledger access; only the original inviter
+can approve or reject with current authority and request revision. One approval
+atomically creates membership and consumes the link. Legacy invitations and
+existing permissions are preserved. The 17-statement preview upgrade uses the
+same database, coordinator and cumulative journal. See the
+[upgrade review](../../docs/validation/invite-approval-schema-upgrade.md).
 
 0007 adds optional development/product URLs and recurring rule/occurrence
 records, and permits the `schedule` audit actor. Its preview-only one-shot v6-to-v7

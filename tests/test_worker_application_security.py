@@ -217,3 +217,28 @@ def test_workspace_cookie_operations_require_trusted_origin_before_body_or_datab
     response = asyncio.run(app.fetch(request(path, headers={"cookie": "pw_session=synthetic", "origin": "https://hostile.test"})))
     assert response.status == 403 and response.payload["error"]["code"] == "UNTRUSTED_ORIGIN"
     assert calls == []
+
+
+@pytest.mark.parametrize("path,method", [
+    ("/api/v1/workspace-invitation-requests", "GET"),
+    ("/api/v1/workspaces/owner/invites/link/requests", "GET"),
+    ("/api/v1/workspaces/owner/join-requests", "GET"),
+    ("/api/v1/workspaces/owner/invites/link/requests/request/approve", "POST"),
+    ("/api/v1/workspaces/owner/invites/link/requests/request/reject", "POST"),
+])
+def test_inviter_inbox_and_approval_routes_reach_the_ledger_handler(path, method):
+    app, calls = application()
+    response = asyncio.run(app.fetch(request(path, method=method,
+        headers={"cookie": "pw_session=synthetic", "origin": "https://app.example.test"})))
+    assert response.status == 204 and calls == ["ledger"]
+    assert response.headers["Cache-Control"] == "no-store"
+
+
+@pytest.mark.parametrize("decision", ["approve", "reject"])
+def test_invitation_reviews_reject_untrusted_cookie_origin_before_database(decision):
+    app, calls = application()
+    response = asyncio.run(app.fetch(request(
+        "/api/v1/workspaces/owner/invites/link/requests/request/" + decision,
+        headers={"cookie": "pw_session=synthetic", "origin": "https://hostile.test"})))
+    assert response.status == 403 and response.payload["error"]["code"] == "UNTRUSTED_ORIGIN"
+    assert calls == []

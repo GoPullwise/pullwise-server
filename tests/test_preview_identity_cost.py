@@ -43,9 +43,10 @@ def test_identity_trace_replays_fresh_schema_and_keeps_providers_synthetic(tmp_p
     assert {"schema", "login_authorize", "login_callback", "callback_replay",
             "session", "install_authorize", "install_callback", "repositories",
             "sign_out", "signed_out_session"} <= cases
-    assert manifest["tables"] == 20 and manifest["indexes"] == 40
+    assert manifest["tables"] == 21 and manifest["indexes"] == 46
     assert manifest["http_cases"] == 9
     assert manifest["remote_admissible"] is False
     assert manifest["final_state"] == {"users": 1, "sessions": 0, "githubStates": 0}
     assert manifest["state_storage_version"] == 1
-    assert len(trace) < 100
+    # The eighth migration adds a finite 17-statement local-only schema trace.
+    assert len(trace) < 128

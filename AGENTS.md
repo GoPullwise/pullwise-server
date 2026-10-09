@@ -1,5 +1,18 @@
 # Pullwise Server
 
+## Invitation approval (2026-10-09)
+
+New member links select a role without a GitHub recipient. Opening the hash
+link restores/login-returns the actual account, and applying records a pending
+request without ledger access. Only the original inviter with current original
+management authority approves or rejects; approval atomically grants membership
+and consumes the link. Keep legacy targeted/accepted invitations, idempotent
+applications, creator/revision/session/Origin fences, single-use approval and
+removed-member protection. Inbox reads remain cookie-only, bounded and scoped
+to the issuing actor. Migration 0008/v8 preserves the existing database,
+singleton journal, prior markers and accounting. Complete isolated native
+schema/journey acceptance before preview publication; production D1 stays paused.
+
 ## Project links and recurring expenses (2026-10-08)
 
 The latest user explicitly requests implementation of development/product links

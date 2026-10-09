@@ -31,7 +31,7 @@ _ERRORS = {"plan_project_limit": (403, "PROJECT_LIMIT"),
            "plan_max_required": (403, "MAX_REQUIRED"),
            "plan_jev_budget_limit": (429, "JEV_BUDGET_LIMIT")}
 _MUTATION = re.compile(r"^\s*(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM)\s+"
-    r"(ledger_projects|expense_categories|expenses|api_keys|expense_suggestion_budget|expense_suggestion_events|ledger_plan_usage|workspace_members|workspace_invites|workspace_events|ledger_project_repositories|expense_recurring_rules|expense_recurring_occurrences)\b", re.I)
+    r"(ledger_projects|expense_categories|expenses|api_keys|expense_suggestion_budget|expense_suggestion_events|ledger_plan_usage|workspace_members|workspace_invites|workspace_events|workspace_join_requests|ledger_project_repositories|expense_recurring_rules|expense_recurring_occurrences)\b", re.I)
 _USER_FENCE = re.compile(r"\bu\.name\s*=\s*\?\s+AND\s+u\.payload\s*=\s*\?", re.I)
 
 

@@ -21,6 +21,7 @@ from .cloudflare_preview_schema import (
     LEGACY_SCHEMA_FINGERPRINT, UPGRADE_SQL,
     V5_SCHEMA_OBJECTS, V5_SCHEMA_FINGERPRINT, V5_INDEX_COUNTS, UPGRADE_V6_SQL,
     V6_SCHEMA_OBJECTS, V6_SCHEMA_FINGERPRINT, V6_INDEX_COUNTS, UPGRADE_V7_SQL,
+    V7_SCHEMA_OBJECTS, V7_SCHEMA_FINGERPRINT, V7_INDEX_COUNTS, UPGRADE_V8_SQL,
 )
 from .cloudflare_validation_budget import (
     BudgetError, MeteredD1, OperationBound, RequestPlan, _Statement, _field,
@@ -213,6 +214,7 @@ def _count_sql(tables):
 _COUNT_SQL = _count_sql(INDEX_COUNTS)
 _V5_COUNT_SQL = _count_sql(V5_INDEX_COUNTS)
 _V6_COUNT_SQL = _count_sql(V6_INDEX_COUNTS)
+_V7_COUNT_SQL = _count_sql(V7_INDEX_COUNTS)
 _STATE_SQL = "SELECT name,payload FROM app_state LIMIT 7"
 _RECORD_COUNT_SQL = "SELECT " + ",".join(
     f"COALESCE(SUM(CASE WHEN name GLOB 'record:{kind}:*' THEN 1 ELSE 0 END),0) AS {kind}"
@@ -400,7 +402,7 @@ async def upgrade_product_schema(binding, journal, *, clock=time.time):
     """
     if (_current_schema(journal.snapshot()) or
             (journal.snapshot().get("schema_version"), journal.snapshot().get("schema_fingerprint"))
-                in {(5, V5_SCHEMA_FINGERPRINT), (6, V6_SCHEMA_FINGERPRINT)}):
+                in {(5, V5_SCHEMA_FINGERPRINT), (6, V6_SCHEMA_FINGERPRINT), (7, V7_SCHEMA_FINGERPRINT)}):
         return
     plan, upper = _upgrade_plan(journal.snapshot())
     ticket = begin_product_schema_upgrade(journal, plan, now=clock())
@@ -547,7 +549,8 @@ async def upgrade_product_schema_v6(binding, journal, *, clock=time.time):
     if state["stopped"]:
         raise BudgetError(state["stopped"])
     if (_current_schema(state) or
-            (state.get("schema_version") == 6 and state.get("schema_fingerprint") == V6_SCHEMA_FINGERPRINT)):
+            (state.get("schema_version"), state.get("schema_fingerprint"))
+                in {(6, V6_SCHEMA_FINGERPRINT), (7, V7_SCHEMA_FINGERPRINT)}):
         marker = state.get("schema_upgrade_v6")
         if marker is not None and marker.get("complete") is not True:
             raise BudgetError("SCHEMA_V6_UPGRADE_UNREVIEWED")
@@ -637,7 +640,7 @@ def _upgrade_v7_plan(state):
         OperationBound((_SCHEMA_QUERY,), 3 * 384, 0),
         OperationBound((_V6_COUNT_SQL, *state_queries, _FK_COUNT_SQL), scans, 0),
         OperationBound(UPGRADE_V7_SQL, migration_reads, migration_writes),
-        OperationBound((_SCHEMA_QUERY, _COUNT_SQL, *state_queries, _FK_COUNT_SQL),
+        OperationBound((_SCHEMA_QUERY, _V7_COUNT_SQL, *state_queries, _FK_COUNT_SQL),
                        3 * 384 + scans, 0),
     )
     plan = _SchemaUpgradePlan(operations, records_mode)
@@ -686,7 +689,8 @@ async def upgrade_product_schema_v7(binding, journal, *, clock=time.time):
     state = journal.snapshot()
     if state["stopped"]:
         raise BudgetError(state["stopped"])
-    if _current_schema(state):
+    if (_current_schema(state) or
+            (state.get("schema_version") == 7 and state.get("schema_fingerprint") == V7_SCHEMA_FINGERPRINT)):
         marker = state.get("schema_upgrade_v7")
         if marker is not None and marker.get("complete") is not True:
             raise BudgetError("SCHEMA_V7_UPGRADE_UNREVIEWED")
@@ -712,7 +716,7 @@ async def upgrade_product_schema_v7(binding, journal, *, clock=time.time):
         return results
 
     def validate(results, offset, *, old=False):
-        tables = V6_INDEX_COUNTS if old else INDEX_COUNTS
+        tables = V6_INDEX_COUNTS if old else V7_INDEX_COUNTS
         ceiling = state["product_data"]["rows"] if old else upper
         if plan.records_mode:
             data = _record_product_data(results[offset], results[offset + 1], ceiling,
@@ -733,17 +737,157 @@ async def upgrade_product_schema_v7(binding, journal, *, clock=time.time):
         validate(await execute(1), 0, old=True)
         await execute(2)
         verified = await execute(3)
-        if _schema_objects(verified[0]) != SCHEMA_OBJECTS:
+        if _schema_objects(verified[0]) != V7_SCHEMA_OBJECTS:
             journal._reject("PREVIEW_SCHEMA_MISMATCH")
         data = validate(verified, 1)
         saved = journal.check(ticket, now=clock())
         saved.update(product_data=data, schema_version=7,
-                     schema_fingerprint=SCHEMA_FINGERPRINT, product_data_verified=True)
+                     schema_fingerprint=V7_SCHEMA_FINGERPRINT, product_data_verified=True)
         saved["schema_upgrade_v7"]["complete"] = True
         journal._save(saved)
         journal.finish(ticket, now=clock())
     except BaseException:
         journal.stop("SCHEMA_V7_UPGRADE_OUTCOME_UNKNOWN")
+        raise
+
+
+_UPGRADE_V8_CASE = "product-schema-v7-to-v8"
+
+
+def _upgrade_v8_plan(state):
+    """Compile the closed invitation/request/audit extension from verified v7 counts."""
+    data = state.get("product_data")
+    rows = data.get("rows") if isinstance(data, dict) else None
+    if (not isinstance(rows, dict) or set(rows) != set(V7_INDEX_COUNTS)
+            or any(type(n) is not int or not 0 <= n <= 1_000_000 for n in rows.values())
+            or rows["d1_command_guard"] != 0
+            or not isinstance(data.get("json"), dict)
+            or type(data.get("arrays")) is not int or data["arrays"] < 0):
+        raise BudgetError("PREVIEW_DATA_BOUND")
+    records_mode = state.get("state_storage_version") == STATE_STORAGE_VERSION
+    state_queries = (_RECORD_COUNT_SQL, _STRICT_RECORD_SQL) if records_mode else (_STATE_SQL,)
+    # Read-only groups include all three possible native attempts, complete
+    # count/state/FK traversal and schema catalog reads. No data is exported.
+    scans = 3 * (16 * (sum(rows.values()) + 4 * rows["app_state"] + 128))
+    invites, events = rows["workspace_invites"], rows["workspace_events"]
+    migration_reads = (384 * len(UPGRADE_V8_SQL) + 32 * sum(rows.values())
+                       + 64 * invites + 32 * events)
+    # Preserve old/new rows, all old/new indexes, new catalog writes and the
+    # final FK guard. No existing identity, finance or recurring rows change.
+    migration_writes = (384 + invites * (2 + V7_INDEX_COUNTS["workspace_invites"]
+                                         + INDEX_COUNTS["workspace_invites"])
+                        + 2 * events * (1 + V7_INDEX_COUNTS["workspace_events"]))
+    operations = (
+        OperationBound((_SCHEMA_QUERY,), 3 * 384, 0),
+        OperationBound((_V7_COUNT_SQL, *state_queries, _FK_COUNT_SQL), scans, 0),
+        OperationBound(UPGRADE_V8_SQL, migration_reads, migration_writes),
+        OperationBound((_SCHEMA_QUERY, _COUNT_SQL, *state_queries, _FK_COUNT_SQL),
+                       3 * 384 + scans, 0),
+    )
+    plan = _SchemaUpgradePlan(operations, records_mode)
+    if plan.rows_read > 9007199254740991 or plan.rows_written > 9007199254740991:
+        raise BudgetError("PREVIEW_DATA_BOUND")
+    return plan
+
+
+def begin_product_schema_upgrade_v8(journal, plan, *, now):
+    """One append-only case in the same singleton journal and database."""
+    state = journal.snapshot()
+    if (state.get("schema_ready") is not True or state.get("schema_version") != 7
+            or state.get("schema_fingerprint") != V7_SCHEMA_FINGERPRINT
+            or state.get("product_data_verified") is not True
+            or state["cases"].get("product-schema") != 1
+            or state["cases"].get(_UPGRADE_V8_CASE, 0) != 0
+            or state.get("schema_upgrade_v8") is not None
+            or any((state.get(marker) or {}).get("complete", True) is not True
+                   for marker in ("schema_upgrade", "schema_upgrade_v6", "schema_upgrade_v7", "state_record_migration"))
+            or plan != _upgrade_v8_plan(state)):
+        raise BudgetError("SCHEMA_V8_UPGRADE_UNREVIEWED")
+    if (not journal.product_operations and
+            (state["reserved_read"] + plan.rows_read > journal.read_ceiling
+             or state["reserved_written"] + plan.rows_written > WRITE_CEILING)):
+        journal._reject("BUDGET_EXHAUSTED")
+    ticket = journal.begin_product(now=now)
+    journal.reserve_operation(ticket, reads=plan.rows_read, writes=plan.rows_written, now=now)
+    state = journal.check(ticket, now=now)
+    state["cases"][_UPGRADE_V8_CASE] = 1
+    state["schema_upgrade_v8"] = {"from": 7, "to": 8, "request": ticket, "complete": False,
+        "reserved_read": plan.rows_read, "reserved_written": plan.rows_written}
+    state["product_data_verified"] = False
+    journal._save(state)
+    return ticket
+
+
+async def upgrade_product_schema_v8(binding, journal, *, clock=time.time):
+    """Flagged atomic v7-to-v8 extension; the caller holds the existing DO lock.
+
+    All prior markers and accounting are retained. Unknown outcomes cannot be
+    retried, resumed or reset. Read groups reserve all three possible attempts
+    even when native attempt metadata is absent; the exact compiled write
+    group instead uses D1's nonretryable write contract. Every result still
+    requires complete numeric rows-read/written metadata.
+    """
+    state = journal.snapshot()
+    if state["stopped"]:
+        raise BudgetError(state["stopped"])
+    if (_current_schema(state) or
+            (state.get("schema_version") == 8 and state.get("schema_fingerprint") == SCHEMA_FINGERPRINT)):
+        marker = state.get("schema_upgrade_v8")
+        if marker is not None and marker.get("complete") is not True:
+            raise BudgetError("SCHEMA_V8_UPGRADE_UNREVIEWED")
+        return
+    plan = _upgrade_v8_plan(state)
+    ticket = begin_product_schema_upgrade_v8(journal, plan, now=clock())
+    meter = MeteredD1(binding, journal, ticket, plan, clock=clock)
+    upper = {**state["product_data"]["rows"], "workspace_join_requests": 0}
+
+    async def execute(index):
+        results = await meter.batch([meter.prepare(sql) for sql in plan.operations[index].sql])
+        attempts = [_field(_field(result, "meta"), "total_attempts") for result in results]
+        if any(value is not None and
+               (type(value) is not int or not 1 <= value <= (1 if index == 2 else 3))
+               for value in attempts):
+            journal._reject("MIGRATION_ATTEMPTS_UNPROVEN")
+        if index == 2:
+            saved = journal.check(ticket, now=clock())
+            saved["schema_upgrade_v8"]["write_execution"] = {
+                "native_attempts": attempts, "provenance": "d1-nonretryable-write-contract-v1"}
+            journal._save(saved)
+        return results
+
+    def validate(results, offset, *, old=False):
+        tables = V7_INDEX_COUNTS if old else INDEX_COUNTS
+        ceiling = state["product_data"]["rows"] if old else upper
+        if plan.records_mode:
+            data = _record_product_data(results[offset], results[offset + 1], ceiling,
+                                        results[offset + 2], tables=tables)
+        else:
+            data = _validated_product_data(results[offset], results[offset + 1], ceiling, tables)
+        if data["rows"] != ceiling:
+            raise BudgetError("PREVIEW_DATA_BOUND")
+        fk = list(_field(results[-1], "results", []))
+        if len(fk) != 1 or _field(fk[0], "violations") != 0:
+            raise BudgetError("PREVIEW_FOREIGN_KEY_MISMATCH")
+        return data
+
+    try:
+        schema = await execute(0)
+        if _schema_objects(schema[0]) != V7_SCHEMA_OBJECTS:
+            journal._reject("PREVIEW_SCHEMA_MISMATCH")
+        validate(await execute(1), 0, old=True)
+        await execute(2)
+        verified = await execute(3)
+        if _schema_objects(verified[0]) != SCHEMA_OBJECTS:
+            journal._reject("PREVIEW_SCHEMA_MISMATCH")
+        data = validate(verified, 1)
+        saved = journal.check(ticket, now=clock())
+        saved.update(product_data=data, schema_version=8,
+                     schema_fingerprint=SCHEMA_FINGERPRINT, product_data_verified=True)
+        saved["schema_upgrade_v8"]["complete"] = True
+        journal._save(saved)
+        journal.finish(ticket, now=clock())
+    except BaseException:
+        journal.stop("SCHEMA_V8_UPGRADE_OUTCOME_UNKNOWN")
         raise
 
 

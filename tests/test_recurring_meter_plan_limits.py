@@ -9,7 +9,7 @@ from ledger_d1_fixture import D1ShapedSQLite
 from test_ledger_plan_limits import setup
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1, PlanLimitError
 from pullwise_server.cloudflare_preview_budget import _input_bound, sql_write_bound
-from pullwise_server.cloudflare_preview_schema import INDEX_COUNTS, UPGRADE_V6_SQL, UPGRADE_V7_SQL
+from pullwise_server.cloudflare_preview_schema import INDEX_COUNTS, UPGRADE_V6_SQL, UPGRADE_V7_SQL, UPGRADE_V8_SQL
 from pullwise_server.cloudflare_state_records import record_name
 from pullwise_server.ledger_plan_policy import default_policy
 
@@ -21,7 +21,7 @@ def recurring(setup):
         db.executescript((Path(__file__).resolve().parents[1] /
             "cloudflare/server/migrations/0005_workspaces_repositories.sql").read_text())
         db.execute("BEGIN")
-        for sql in (*UPGRADE_V6_SQL, *UPGRADE_V7_SQL):
+        for sql in (*UPGRADE_V6_SQL, *UPGRADE_V7_SQL, *UPGRADE_V8_SQL):
             db.execute(sql)
         db.execute("INSERT INTO expense_categories(id,owner_id,name,created_at,updated_at) "
                    "VALUES('category','owner','Hosting','local','local')")

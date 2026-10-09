@@ -1,0 +1,3426 @@
+{
+  "passed": true,
+  "date": "2026-10-09",
+  "localOnly": true,
+  "nativePythonFFI": true,
+  "nativeDurableObjectSQLite": true,
+  "canonicalApplicationEntrySha256": "9a6f9fa3c19d6698f2257d8da6af9e112f7383dbfc7feb9b11d5cd6c8e5c1fcd",
+  "canonicalSourceTreeSha256": "6ab8c3b661a1a0fc494565d1f248f318659af8ae61a0439ff14a320e28b1165c",
+  "canonicalSourceFileCount": 50,
+  "fixtureEntrySha256": "98fd1704ac81a16dc942c5a5292027b470ec7a215fcc0509fbcba58fe20fed8d",
+  "dependencySha256": {
+    "pyproject.toml": "56d0701742d5cef95b710dbb3a31acf3b630eaaa8d84b49dd1ae035e84d24917",
+    "uv.lock": "aea70025439004f1a9f620893451948e49ba15a61d86df800c2c451bdedc05bb",
+    "pylock.toml": "d7a3bb80dc3055b5abd8b0bc2414b38c5cd6929f5c19434260a1b5c6654fa54e",
+    "package.json": "e05670dd516ab014e0504f36969200f7edfdba8900b0ef75d6697124214e046b",
+    "package-lock.json": "0dda8adc25430a835cf489c62c0298905eb0f29cdde08cc2373ea3e31a57dbc1"
+  },
+  "sourceSha256": {
+    "pullwise_server/cloudflare_native_d1.py": "5408b843e5e2d02cf153b89457210fd60d47ff20150a35fbf280593df466eaa0",
+    "pullwise_server/cloudflare_plan_limits.py": "7c0180b2663ed75771db302401cadc8693770f647988d3ab71df333e483386aa",
+    "pullwise_server/cloudflare_preview_budget.py": "31c290bb41249ba6648e4cda62f212c66ac0e81974ec68b816ac14353b3faa8e",
+    "pullwise_server/cloudflare_validation_budget.py": "48deb528340ba172c56052b7dd7fa2a56792863ea0a7f2315c9b015b594e500d",
+    "pullwise_server/cloudflare_workspaces.py": "6fee8198a4c501892266b6e1c43f910583118d4c0aa36d55948f257696d194ec"
+  },
+  "runtimeProvenance": {
+    "workerdSha256": "eb449c84ddd55ea357dc73e6c1b50bd255ccdc5d1875544c162435b7bd6168b6",
+    "runtimeBundleSha256": "3c3fd5a4179230e21e018e28b0e735e7c4abd8fe8e4ff39d2fd6bb2ea3a2e260",
+    "miniflareD1SourceSha256": "eb213ff08bfc9f2992253e8ff01fe31229a069728431df54a3f44c9c4c191ee7"
+  },
+  "productMeterAndCommercialPlanAdapter": true,
+  "trustedOriginCheckedByCanonicalApplication": true,
+  "syntheticCookieAccounts": 3,
+  "remoteD1Operations": 0,
+  "remoteApplicationRequests": 0,
+  "realProviderRequests": 0,
+  "realAccounts": 0,
+  "realPayments": 0,
+  "clientRetries": 0,
+  "localHttpCap": 30,
+  "nativeAttemptsFabricated": false,
+  "scope": "Synthetic authenticated native approval flow; real-account/browser/remote acceptance separate",
+  "localHttpRequestsAttempted": 23,
+  "localHttpRequestsCompleted": 23,
+  "cases": [
+    {
+      "name": "setup",
+      "method": "POST",
+      "path": "/_fixture/setup",
+      "status": 200,
+      "result": {
+        "passed": true,
+        "syntheticCookieAccounts": 3,
+        "seedThroughCanonicalMeter": true,
+        "canonicalFreshSchemaVersion": 8
+      }
+    },
+    {
+      "name": "untrusted_origin",
+      "method": "POST",
+      "path": "/api/v1/workspaces/usr_github_760001/invites",
+      "status": 403,
+      "result": {
+        "error": {
+          "code": "UNTRUSTED_ORIGIN"
+        }
+      }
+    },
+    {
+      "name": "role_only_create",
+      "method": "POST",
+      "path": "/api/v1/workspaces/usr_github_760001/invites",
+      "status": 201,
+      "result": {
+        "id": "win_0fd319856c5e491e959404bd8254b165",
+        "recipient": null,
+        "createdByUserId": "usr_github_760001",
+        "canReview": true,
+        "role": "editor",
+        "status": "pending",
+        "revision": 1,
+        "expiresAt": "2026-10-10T03:51:50Z",
+        "createdAt": "2026-10-09T03:51:50Z"
+      }
+    },
+    {
+      "name": "login_required",
+      "method": "POST",
+      "path": "/api/v1/workspace-invitations/preview",
+      "status": 401,
+      "result": {
+        "error": {
+          "code": "UNAUTHENTICATED"
+        }
+      }
+    },
+    {
+      "name": "applicant_preview",
+      "method": "POST",
+      "path": "/api/v1/workspace-invitations/preview",
+      "status": 200,
+      "result": {
+        "id": "win_0fd319856c5e491e959404bd8254b165",
+        "recipient": null,
+        "createdByUserId": "usr_github_760001",
+        "canReview": false,
+        "role": "editor",
+        "status": "pending",
+        "revision": 1,
+        "expiresAt": "2026-10-10T03:51:50Z",
+        "createdAt": "2026-10-09T03:51:50Z",
+        "request": null,
+        "workspace": {
+          "id": "usr_github_760001",
+          "ownerId": "usr_github_760001",
+          "name": "Synthetic owner ledger",
+          "role": "editor",
+          "revision": 1,
+          "permissions": {
+            "writeExpenses": false,
+            "manageProjects": false,
+            "manageCategories": false,
+            "manageMembers": false,
+            "manageAdmins": false
+          }
+        }
+      }
+    },
+    {
+      "name": "first_request",
+      "method": "POST",
+      "path": "/api/v1/workspace-invitations/accept",
+      "status": 202,
+      "result": {
+        "id": "win_0fd319856c5e491e959404bd8254b165",
+        "recipient": null,
+        "createdByUserId": "usr_github_760001",
+        "canReview": false,
+        "role": "editor",
+        "status": "pending",
+        "revision": 1,
+        "expiresAt": "2026-10-10T03:51:50Z",
+        "createdAt": "2026-10-09T03:51:50Z",
+        "request": {
+          "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+          "invitationId": "win_0fd319856c5e491e959404bd8254b165",
+          "workspaceId": "usr_github_760001",
+          "applicant": {
+            "userId": "usr_github_760002",
+            "name": "Synthetic rejected",
+            "githubLogin": "synthetic-rejected"
+          },
+          "status": "pending",
+          "revision": 1,
+          "createdAt": "2026-10-09T03:51:51Z",
+          "updatedAt": "2026-10-09T03:51:51Z",
+          "reviewedAt": null
+        },
+        "workspace": {
+          "id": "usr_github_760001",
+          "ownerId": "usr_github_760001",
+          "name": "Synthetic owner ledger",
+          "role": "editor",
+          "revision": 1,
+          "permissions": {
+            "writeExpenses": false,
+            "manageProjects": false,
+            "manageCategories": false,
+            "manageMembers": false,
+            "manageAdmins": false
+          }
+        }
+      }
+    },
+    {
+      "name": "repeat_request",
+      "method": "POST",
+      "path": "/api/v1/workspace-invitations/accept",
+      "status": 200,
+      "result": {
+        "id": "win_0fd319856c5e491e959404bd8254b165",
+        "recipient": null,
+        "createdByUserId": "usr_github_760001",
+        "canReview": false,
+        "role": "editor",
+        "status": "pending",
+        "revision": 1,
+        "expiresAt": "2026-10-10T03:51:50Z",
+        "createdAt": "2026-10-09T03:51:50Z",
+        "request": {
+          "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+          "invitationId": "win_0fd319856c5e491e959404bd8254b165",
+          "workspaceId": "usr_github_760001",
+          "applicant": {
+            "userId": "usr_github_760002",
+            "name": "Synthetic rejected",
+            "githubLogin": "synthetic-rejected"
+          },
+          "status": "pending",
+          "revision": 1,
+          "createdAt": "2026-10-09T03:51:51Z",
+          "updatedAt": "2026-10-09T03:51:51Z",
+          "reviewedAt": null
+        },
+        "workspace": {
+          "id": "usr_github_760001",
+          "ownerId": "usr_github_760001",
+          "name": "Synthetic owner ledger",
+          "role": "editor",
+          "revision": 1,
+          "permissions": {
+            "writeExpenses": false,
+            "manageProjects": false,
+            "manageCategories": false,
+            "manageMembers": false,
+            "manageAdmins": false
+          }
+        }
+      }
+    },
+    {
+      "name": "pending_ledger_denied",
+      "method": "GET",
+      "path": "/api/v1/expenses",
+      "status": 404,
+      "result": {
+        "error": {
+          "code": "WORKSPACE_NOT_FOUND"
+        }
+      }
+    },
+    {
+      "name": "applicant_inbox_isolated",
+      "method": "GET",
+      "path": "/api/v1/workspace-invitation-requests",
+      "status": 200,
+      "result": {
+        "items": [],
+        "hasMore": false
+      }
+    },
+    {
+      "name": "inviter_identity_notification",
+      "method": "GET",
+      "path": "/api/v1/workspace-invitation-requests",
+      "status": 200,
+      "result": {
+        "items": [
+          {
+            "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+            "invitationId": "win_0fd319856c5e491e959404bd8254b165",
+            "workspaceId": "usr_github_760001",
+            "applicant": {
+              "userId": "usr_github_760002",
+              "name": "Synthetic rejected",
+              "githubLogin": "synthetic-rejected"
+            },
+            "status": "pending",
+            "revision": 1,
+            "createdAt": "2026-10-09T03:51:51Z",
+            "updatedAt": "2026-10-09T03:51:51Z",
+            "reviewedAt": null,
+            "invitation": {
+              "id": "win_0fd319856c5e491e959404bd8254b165",
+              "recipient": null,
+              "createdByUserId": "usr_github_760001",
+              "canReview": true,
+              "role": "editor",
+              "status": "pending",
+              "revision": 1,
+              "expiresAt": "2026-10-10T03:51:50Z",
+              "createdAt": "2026-10-09T03:51:50Z"
+            },
+            "workspace": {
+              "id": "usr_github_760001",
+              "ownerId": "usr_github_760001",
+              "name": "Synthetic owner ledger",
+              "role": "owner",
+              "revision": 1,
+              "permissions": {
+                "writeExpenses": true,
+                "manageProjects": true,
+                "manageCategories": true,
+                "manageMembers": true,
+                "manageAdmins": true
+              }
+            }
+          }
+        ],
+        "hasMore": false
+      }
+    },
+    {
+      "name": "scoped_identity_notification",
+      "method": "GET",
+      "path": "/api/v1/workspaces/usr_github_760001/join-requests",
+      "status": 200,
+      "result": {
+        "items": [
+          {
+            "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+            "invitationId": "win_0fd319856c5e491e959404bd8254b165",
+            "workspaceId": "usr_github_760001",
+            "applicant": {
+              "userId": "usr_github_760002",
+              "name": "Synthetic rejected",
+              "githubLogin": "synthetic-rejected"
+            },
+            "status": "pending",
+            "revision": 1,
+            "createdAt": "2026-10-09T03:51:51Z",
+            "updatedAt": "2026-10-09T03:51:51Z",
+            "reviewedAt": null,
+            "invitation": {
+              "id": "win_0fd319856c5e491e959404bd8254b165",
+              "recipient": null,
+              "createdByUserId": "usr_github_760001",
+              "canReview": true,
+              "role": "editor",
+              "status": "pending",
+              "revision": 1,
+              "expiresAt": "2026-10-10T03:51:50Z",
+              "createdAt": "2026-10-09T03:51:50Z"
+            },
+            "workspace": {
+              "id": "usr_github_760001",
+              "ownerId": "usr_github_760001",
+              "name": "Synthetic owner ledger",
+              "role": "owner",
+              "revision": 1,
+              "permissions": {
+                "writeExpenses": true,
+                "manageProjects": true,
+                "manageCategories": true,
+                "manageMembers": true,
+                "manageAdmins": true
+              }
+            }
+          }
+        ],
+        "hasMore": false
+      }
+    },
+    {
+      "name": "inviter_reject",
+      "method": "POST",
+      "path": "/api/v1/workspaces/usr_github_760001/invites/win_0fd319856c5e491e959404bd8254b165/requests/wjr_9fd0dd2e4456478cb7c74a29fd4e9c96/reject",
+      "status": 200,
+      "result": {
+        "request": {
+          "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+          "invitationId": "win_0fd319856c5e491e959404bd8254b165",
+          "workspaceId": "usr_github_760001",
+          "applicant": {
+            "userId": "usr_github_760002",
+            "name": "Synthetic rejected",
+            "githubLogin": "synthetic-rejected"
+          },
+          "status": "rejected",
+          "revision": 2,
+          "createdAt": "2026-10-09T03:51:51Z",
+          "updatedAt": "2026-10-09T03:51:51Z",
+          "reviewedAt": "2026-10-09T03:51:51Z"
+        },
+        "workspace": {
+          "id": "usr_github_760001",
+          "ownerId": "usr_github_760001",
+          "name": "Synthetic owner ledger",
+          "role": "owner",
+          "revision": 1,
+          "permissions": {
+            "writeExpenses": true,
+            "manageProjects": true,
+            "manageCategories": true,
+            "manageMembers": true,
+            "manageAdmins": true
+          }
+        }
+      }
+    },
+    {
+      "name": "rejected_retry_no_write",
+      "method": "POST",
+      "path": "/api/v1/workspace-invitations/accept",
+      "status": 200,
+      "result": {
+        "id": "win_0fd319856c5e491e959404bd8254b165",
+        "recipient": null,
+        "createdByUserId": "usr_github_760001",
+        "canReview": false,
+        "role": "editor",
+        "status": "pending",
+        "revision": 1,
+        "expiresAt": "2026-10-10T03:51:50Z",
+        "createdAt": "2026-10-09T03:51:50Z",
+        "request": {
+          "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+          "invitationId": "win_0fd319856c5e491e959404bd8254b165",
+          "workspaceId": "usr_github_760001",
+          "applicant": {
+            "userId": "usr_github_760002",
+            "name": "Synthetic rejected",
+            "githubLogin": "synthetic-rejected"
+          },
+          "status": "rejected",
+          "revision": 2,
+          "createdAt": "2026-10-09T03:51:51Z",
+          "updatedAt": "2026-10-09T03:51:51Z",
+          "reviewedAt": "2026-10-09T03:51:51Z"
+        },
+        "workspace": {
+          "id": "usr_github_760001",
+          "ownerId": "usr_github_760001",
+          "name": "Synthetic owner ledger",
+          "role": "editor",
+          "revision": 1,
+          "permissions": {
+            "writeExpenses": false,
+            "manageProjects": false,
+            "manageCategories": false,
+            "manageMembers": false,
+            "manageAdmins": false
+          }
+        }
+      }
+    },
+    {
+      "name": "rejected_ledger_denied",
+      "method": "GET",
+      "path": "/api/v1/expenses",
+      "status": 404,
+      "result": {
+        "error": {
+          "code": "WORKSPACE_NOT_FOUND"
+        }
+      }
+    },
+    {
+      "name": "second_applicant_request",
+      "method": "POST",
+      "path": "/api/v1/workspace-invitations/accept",
+      "status": 202,
+      "result": {
+        "id": "win_0fd319856c5e491e959404bd8254b165",
+        "recipient": null,
+        "createdByUserId": "usr_github_760001",
+        "canReview": false,
+        "role": "editor",
+        "status": "pending",
+        "revision": 1,
+        "expiresAt": "2026-10-10T03:51:50Z",
+        "createdAt": "2026-10-09T03:51:50Z",
+        "request": {
+          "id": "wjr_1090f943263949e2be67fb05593a94f3",
+          "invitationId": "win_0fd319856c5e491e959404bd8254b165",
+          "workspaceId": "usr_github_760001",
+          "applicant": {
+            "userId": "usr_github_760003",
+            "name": "Synthetic approved",
+            "githubLogin": "synthetic-approved"
+          },
+          "status": "pending",
+          "revision": 1,
+          "createdAt": "2026-10-09T03:51:51Z",
+          "updatedAt": "2026-10-09T03:51:51Z",
+          "reviewedAt": null
+        },
+        "workspace": {
+          "id": "usr_github_760001",
+          "ownerId": "usr_github_760001",
+          "name": "Synthetic owner ledger",
+          "role": "editor",
+          "revision": 1,
+          "permissions": {
+            "writeExpenses": false,
+            "manageProjects": false,
+            "manageCategories": false,
+            "manageMembers": false,
+            "manageAdmins": false
+          }
+        }
+      }
+    },
+    {
+      "name": "inviter_approve",
+      "method": "POST",
+      "path": "/api/v1/workspaces/usr_github_760001/invites/win_0fd319856c5e491e959404bd8254b165/requests/wjr_1090f943263949e2be67fb05593a94f3/approve",
+      "status": 200,
+      "result": {
+        "request": {
+          "id": "wjr_1090f943263949e2be67fb05593a94f3",
+          "invitationId": "win_0fd319856c5e491e959404bd8254b165",
+          "workspaceId": "usr_github_760001",
+          "applicant": {
+            "userId": "usr_github_760003",
+            "name": "Synthetic approved",
+            "githubLogin": "synthetic-approved"
+          },
+          "status": "approved",
+          "revision": 2,
+          "createdAt": "2026-10-09T03:51:51Z",
+          "updatedAt": "2026-10-09T03:51:51Z",
+          "reviewedAt": "2026-10-09T03:51:51Z"
+        },
+        "workspace": {
+          "id": "usr_github_760001",
+          "ownerId": "usr_github_760001",
+          "name": "Synthetic owner ledger",
+          "role": "editor",
+          "revision": 1,
+          "permissions": {
+            "writeExpenses": true,
+            "manageProjects": false,
+            "manageCategories": false,
+            "manageMembers": false,
+            "manageAdmins": false
+          }
+        }
+      }
+    },
+    {
+      "name": "approved_ledger_access",
+      "method": "GET",
+      "path": "/api/v1/expenses",
+      "status": 200,
+      "result": {
+        "items": [
+          {
+            "id": "exp_native_invitation",
+            "target": {
+              "kind": "shared"
+            },
+            "occurredOn": "2026-10-09",
+            "amount": "12.50",
+            "amountMinor": 1250,
+            "currency": "USD",
+            "categoryId": "cat_native_invitation",
+            "purpose": "Protected historical expense",
+            "note": null,
+            "quantity": null,
+            "unit": null,
+            "revision": 1,
+            "createdAt": "local",
+            "updatedAt": "local"
+          }
+        ],
+        "nextCursor": null
+      }
+    },
+    {
+      "name": "consumed_link_replay",
+      "method": "POST",
+      "path": "/api/v1/workspace-invitations/accept",
+      "status": 410,
+      "result": {
+        "error": {
+          "code": "INVITATION_ACCEPTED"
+        }
+      }
+    },
+    {
+      "name": "accepted_preview_recovery",
+      "method": "POST",
+      "path": "/api/v1/workspace-invitations/preview",
+      "status": 200,
+      "result": {
+        "id": "win_0fd319856c5e491e959404bd8254b165",
+        "recipient": null,
+        "createdByUserId": "usr_github_760001",
+        "canReview": false,
+        "role": "editor",
+        "status": "accepted",
+        "revision": 2,
+        "expiresAt": "2026-10-10T03:51:50Z",
+        "createdAt": "2026-10-09T03:51:50Z",
+        "request": {
+          "id": "wjr_1090f943263949e2be67fb05593a94f3",
+          "invitationId": "win_0fd319856c5e491e959404bd8254b165",
+          "workspaceId": "usr_github_760001",
+          "applicant": {
+            "userId": "usr_github_760003",
+            "name": "Synthetic approved",
+            "githubLogin": "synthetic-approved"
+          },
+          "status": "approved",
+          "revision": 2,
+          "createdAt": "2026-10-09T03:51:51Z",
+          "updatedAt": "2026-10-09T03:51:51Z",
+          "reviewedAt": "2026-10-09T03:51:51Z"
+        },
+        "workspace": {
+          "id": "usr_github_760001",
+          "ownerId": "usr_github_760001",
+          "name": "Synthetic owner ledger",
+          "role": "editor",
+          "revision": 1,
+          "permissions": {
+            "writeExpenses": true,
+            "manageProjects": false,
+            "manageCategories": false,
+            "manageMembers": false,
+            "manageAdmins": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_member",
+      "method": "DELETE",
+      "path": "/api/v1/workspaces/usr_github_760001/members/usr_github_760003",
+      "status": 204,
+      "result": null
+    },
+    {
+      "name": "removed_ledger_denied",
+      "method": "GET",
+      "path": "/api/v1/expenses",
+      "status": 404,
+      "result": {
+        "error": {
+          "code": "WORKSPACE_NOT_FOUND"
+        }
+      }
+    },
+    {
+      "name": "removed_old_preview_denied",
+      "method": "POST",
+      "path": "/api/v1/workspace-invitations/preview",
+      "status": 410,
+      "result": {
+        "error": {
+          "code": "INVITATION_ACCEPTED"
+        }
+      }
+    },
+    {
+      "name": "final_journal",
+      "method": "GET",
+      "path": "/_fixture/final",
+      "status": 200,
+      "result": {
+        "passed": true,
+        "journalHealthy": true,
+        "schemaVersion": 8,
+        "stateStorageVersion": 1,
+        "counters": {
+          "requests": 23,
+          "reserved_read": 16027,
+          "reserved_written": 402,
+          "actual_read": 506,
+          "actual_written": 210
+        },
+        "nativeAttemptsFabricated": false
+      }
+    }
+  ],
+  "nativeRequests": [
+    {
+      "call": 1,
+      "path": "/_fixture/setup",
+      "method": "POST",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 38,
+          "rowsRead": 53,
+          "rowsWritten": 96,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 17,
+          "rowsRead": 3,
+          "rowsWritten": 33,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 25,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "business": {
+        "tables": {
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_invites": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_join_requests": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "activeMembers": 0,
+        "members": [],
+        "invitations": [],
+        "requests": [],
+        "eventActions": [],
+        "commercialWrites": 0,
+        "commercialProjects": 0,
+        "commercialRecords": 0
+      },
+      "resourceFinanceTablesRead": [],
+      "providerCalls": 0,
+      "accountingFinanceTablesCounted": [
+        "expense_categories",
+        "expense_create_idempotency",
+        "expense_events",
+        "expense_recurring_occurrences",
+        "expense_recurring_rules",
+        "expense_suggestion_budget",
+        "expense_suggestion_events",
+        "expenses",
+        "ledger_project_repositories",
+        "ledger_projects"
+      ],
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 2,
+      "path": "/api/v1/workspaces/usr_github_760001/invites",
+      "method": "POST",
+      "status": 403,
+      "meteredGroups": [],
+      "business": {
+        "tables": {
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_invites": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_join_requests": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "activeMembers": 0,
+        "members": [],
+        "invitations": [],
+        "requests": [],
+        "eventActions": [],
+        "commercialWrites": 0,
+        "commercialProjects": 0,
+        "commercialRecords": 0
+      },
+      "resourceFinanceTablesRead": [],
+      "providerCalls": 0,
+      "accountingFinanceTablesCounted": [],
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 3,
+      "path": "/api/v1/workspaces/usr_github_760001/invites",
+      "method": "POST",
+      "status": 201,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 6,
+          "rowsRead": 6,
+          "rowsWritten": 14,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 28,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "business": {
+        "tables": {
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_invites": {
+            "rows": 1,
+            "sha256": "b7679d60e7ff5748290c40d72e072df1e482a655435610a94e972a3855b3208c"
+          },
+          "workspace_join_requests": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 1,
+            "sha256": "064281b13e9f19a20fb8701ecfe811b260323618c56d9ca373087b5bc7572e79"
+          },
+          "ledger_plan_usage": {
+            "rows": 1,
+            "sha256": "4a3f5eb955e17a2a2c2fccc94c3900e6b4951adbf952171a18e374202e410f2d"
+          }
+        },
+        "activeMembers": 0,
+        "members": [],
+        "invitations": [
+          {
+            "id": "win_0fd319856c5e491e959404bd8254b165",
+            "status": "pending",
+            "revision": 1,
+            "recipientNull": true,
+            "acceptedBy": null
+          }
+        ],
+        "requests": [],
+        "eventActions": [
+          "invite"
+        ],
+        "commercialWrites": 1,
+        "commercialProjects": 0,
+        "commercialRecords": 1
+      },
+      "resourceFinanceTablesRead": [],
+      "providerCalls": 0,
+      "accountingFinanceTablesCounted": [
+        "expense_categories",
+        "expense_create_idempotency",
+        "expense_events",
+        "expense_recurring_occurrences",
+        "expense_recurring_rules",
+        "expense_suggestion_budget",
+        "expense_suggestion_events",
+        "expenses",
+        "ledger_project_repositories",
+        "ledger_projects"
+      ],
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 4,
+      "path": "/api/v1/workspace-invitations/preview",
+      "method": "POST",
+      "status": 401,
+      "meteredGroups": [],
+      "business": {
+        "tables": {
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_invites": {
+            "rows": 1,
+            "sha256": "b7679d60e7ff5748290c40d72e072df1e482a655435610a94e972a3855b3208c"
+          },
+          "workspace_join_requests": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 1,
+            "sha256": "064281b13e9f19a20fb8701ecfe811b260323618c56d9ca373087b5bc7572e79"
+          },
+          "ledger_plan_usage": {
+            "rows": 1,
+            "sha256": "4a3f5eb955e17a2a2c2fccc94c3900e6b4951adbf952171a18e374202e410f2d"
+          }
+        },
+        "activeMembers": 0,
+        "members": [],
+        "invitations": [
+          {
+            "id": "win_0fd319856c5e491e959404bd8254b165",
+            "status": "pending",
+            "revision": 1,
+            "recipientNull": true,
+            "acceptedBy": null
+          }
+        ],
+        "requests": [],
+        "eventActions": [
+          "invite"
+        ],
+        "commercialWrites": 1,
+        "commercialProjects": 0,
+        "commercialRecords": 1
+      },
+      "resourceFinanceTablesRead": [],
+      "providerCalls": 0,
+      "accountingFinanceTablesCounted": [],
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 5,
+      "path": "/api/v1/workspace-invitations/preview",
+      "method": "POST",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 8,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "business": {
+        "tables": {
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_invites": {
+            "rows": 1,
+            "sha256": "b7679d60e7ff5748290c40d72e072df1e482a655435610a94e972a3855b3208c"
+          },
+          "workspace_join_requests": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 1,
+            "sha256": "064281b13e9f19a20fb8701ecfe811b260323618c56d9ca373087b5bc7572e79"
+          },
+          "ledger_plan_usage": {
+            "rows": 1,
+            "sha256": "4a3f5eb955e17a2a2c2fccc94c3900e6b4951adbf952171a18e374202e410f2d"
+          }
+        },
+        "activeMembers": 0,
+        "members": [],
+        "invitations": [
+          {
+            "id": "win_0fd319856c5e491e959404bd8254b165",
+            "status": "pending",
+            "revision": 1,
+            "recipientNull": true,
+            "acceptedBy": null
+          }
+        ],
+        "requests": [],
+        "eventActions": [
+          "invite"
+        ],
+        "commercialWrites": 1,
+        "commercialProjects": 0,
+        "commercialRecords": 1
+      },
+      "resourceFinanceTablesRead": [],
+      "providerCalls": 0,
+      "accountingFinanceTablesCounted": [],
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 6,
+      "path": "/api/v1/workspace-invitations/accept",
+      "method": "POST",
+      "status": 202,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 8,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 6,
+          "rowsRead": 9,
+          "rowsWritten": 14,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 30,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "business": {
+        "tables": {
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_invites": {
+            "rows": 1,
+            "sha256": "b7679d60e7ff5748290c40d72e072df1e482a655435610a94e972a3855b3208c"
+          },
+          "workspace_join_requests": {
+            "rows": 1,
+            "sha256": "f8792da539d6065743ed1a70bb108f684025eb3d546ce6e3682d3223bb7db1f6"
+          },
+          "workspace_events": {
+            "rows": 2,
+            "sha256": "e62a761dc42d9b7bcc3dadbfb4a902df43d84dab9121cf12b7bda72774d85da0"
+          },
+          "ledger_plan_usage": {
+            "rows": 1,
+            "sha256": "a40f9c074e1f86733f385d3e57a96e4ee8e352b022694d576297861ec9343db2"
+          }
+        },
+        "activeMembers": 0,
+        "members": [],
+        "invitations": [
+          {
+            "id": "win_0fd319856c5e491e959404bd8254b165",
+            "status": "pending",
+            "revision": 1,
+            "recipientNull": true,
+            "acceptedBy": null
+          }
+        ],
+        "requests": [
+          {
+            "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+            "userId": "usr_github_760002",
+            "status": "pending",
+            "revision": 1
+          }
+        ],
+        "eventActions": [
+          "invite",
+          "request_join"
+        ],
+        "commercialWrites": 2,
+        "commercialProjects": 0,
+        "commercialRecords": 1
+      },
+      "resourceFinanceTablesRead": [],
+      "providerCalls": 0,
+      "accountingFinanceTablesCounted": [
+        "expense_categories",
+        "expense_create_idempotency",
+        "expense_events",
+        "expense_recurring_occurrences",
+        "expense_recurring_rules",
+        "expense_suggestion_budget",
+        "expense_suggestion_events",
+        "expenses",
+        "ledger_project_repositories",
+        "ledger_projects"
+      ],
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 7,
+      "path": "/api/v1/workspace-invitations/accept",
+      "method": "POST",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 8,
+          "rowsRead": 5,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "business": {
+        "tables": {
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_invites": {
+            "rows": 1,
+            "sha256": "b7679d60e7ff5748290c40d72e072df1e482a655435610a94e972a3855b3208c"
+          },
+          "workspace_join_requests": {
+            "rows": 1,
+            "sha256": "f8792da539d6065743ed1a70bb108f684025eb3d546ce6e3682d3223bb7db1f6"
+          },
+          "workspace_events": {
+            "rows": 2,
+            "sha256": "e62a761dc42d9b7bcc3dadbfb4a902df43d84dab9121cf12b7bda72774d85da0"
+          },
+          "ledger_plan_usage": {
+            "rows": 1,
+            "sha256": "a40f9c074e1f86733f385d3e57a96e4ee8e352b022694d576297861ec9343db2"
+          }
+        },
+        "activeMembers": 0,
+        "members": [],
+        "invitations": [
+          {
+            "id": "win_0fd319856c5e491e959404bd8254b165",
+            "status": "pending",
+            "revision": 1,
+            "recipientNull": true,
+            "acceptedBy": null
+          }
+        ],
+        "requests": [
+          {
+            "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+            "userId": "usr_github_760002",
+            "status": "pending",
+            "revision": 1
+          }
+        ],
+        "eventActions": [
+          "invite",
+          "request_join"
+        ],
+        "commercialWrites": 2,
+        "commercialProjects": 0,
+        "commercialRecords": 1
+      },
+      "resourceFinanceTablesRead": [],
+      "providerCalls": 0,
+      "accountingFinanceTablesCounted": [],
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 8,
+      "path": "/api/v1/expenses",
+      "method": "GET",
+      "status": 404,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "business": {
+        "tables": {
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_invites": {
+            "rows": 1,
+            "sha256": "b7679d60e7ff5748290c40d72e072df1e482a655435610a94e972a3855b3208c"
+          },
+          "workspace_join_requests": {
+            "rows": 1,
+            "sha256": "f8792da539d6065743ed1a70bb108f684025eb3d546ce6e3682d3223bb7db1f6"
+          },
+          "workspace_events": {
+            "rows": 2,
+            "sha256": "e62a761dc42d9b7bcc3dadbfb4a902df43d84dab9121cf12b7bda72774d85da0"
+          },
+          "ledger_plan_usage": {
+            "rows": 1,
+            "sha256": "a40f9c074e1f86733f385d3e57a96e4ee8e352b022694d576297861ec9343db2"
+          }
+        },
+        "activeMembers": 0,
+        "members": [],
+        "invitations": [
+          {
+            "id": "win_0fd319856c5e491e959404bd8254b165",
+            "status": "pending",
+            "revision": 1,
+            "recipientNull": true,
+            "acceptedBy": null
+          }
+        ],
+        "requests": [
+          {
+            "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+            "userId": "usr_github_760002",
+            "status": "pending",
+            "revision": 1
+          }
+        ],
+        "eventActions": [
+          "invite",
+          "request_join"
+        ],
+        "commercialWrites": 2,
+        "commercialProjects": 0,
+        "commercialRecords": 1
+      },
+      "resourceFinanceTablesRead": [],
+      "providerCalls": 0,
+      "accountingFinanceTablesCounted": [],
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 9,
+      "path": "/api/v1/workspace-invitation-requests",
+      "method": "GET",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "business": {
+        "tables": {
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_invites": {
+            "rows": 1,
+            "sha256": "b7679d60e7ff5748290c40d72e072df1e482a655435610a94e972a3855b3208c"
+          },
+          "workspace_join_requests": {
+            "rows": 1,
+            "sha256": "f8792da539d6065743ed1a70bb108f684025eb3d546ce6e3682d3223bb7db1f6"
+          },
+          "workspace_events": {
+            "rows": 2,
+            "sha256": "e62a761dc42d9b7bcc3dadbfb4a902df43d84dab9121cf12b7bda72774d85da0"
+          },
+          "ledger_plan_usage": {
+            "rows": 1,
+            "sha256": "a40f9c074e1f86733f385d3e57a96e4ee8e352b022694d576297861ec9343db2"
+          }
+        },
+        "activeMembers": 0,
+        "members": [],
+        "invitations": [
+          {
+            "id": "win_0fd319856c5e491e959404bd8254b165",
+            "status": "pending",
+            "revision": 1,
+            "recipientNull": true,
+            "acceptedBy": null
+          }
+        ],
+        "requests": [
+          {
+            "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+            "userId": "usr_github_760002",
+            "status": "pending",
+            "revision": 1
+          }
+        ],
+        "eventActions": [
+          "invite",
+          "request_join"
+        ],
+        "commercialWrites": 2,
+        "commercialProjects": 0,
+        "commercialRecords": 1
+      },
+      "resourceFinanceTablesRead": [],
+      "providerCalls": 0,
+      "accountingFinanceTablesCounted": [],
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 10,
+      "path": "/api/v1/workspace-invitation-requests",
+      "method": "GET",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 7,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "business": {
+        "tables": {
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_invites": {
+            "rows": 1,
+            "sha256": "b7679d60e7ff5748290c40d72e072df1e482a655435610a94e972a3855b3208c"
+          },
+          "workspace_join_requests": {
+            "rows": 1,
+            "sha256": "f8792da539d6065743ed1a70bb108f684025eb3d546ce6e3682d3223bb7db1f6"
+          },
+          "workspace_events": {
+            "rows": 2,
+            "sha256": "e62a761dc42d9b7bcc3dadbfb4a902df43d84dab9121cf12b7bda72774d85da0"
+          },
+          "ledger_plan_usage": {
+            "rows": 1,
+            "sha256": "a40f9c074e1f86733f385d3e57a96e4ee8e352b022694d576297861ec9343db2"
+          }
+        },
+        "activeMembers": 0,
+        "members": [],
+        "invitations": [
+          {
+            "id": "win_0fd319856c5e491e959404bd8254b165",
+            "status": "pending",
+            "revision": 1,
+            "recipientNull": true,
+            "acceptedBy": null
+          }
+        ],
+        "requests": [
+          {
+            "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+            "userId": "usr_github_760002",
+            "status": "pending",
+            "revision": 1
+          }
+        ],
+        "eventActions": [
+          "invite",
+          "request_join"
+        ],
+        "commercialWrites": 2,
+        "commercialProjects": 0,
+        "commercialRecords": 1
+      },
+      "resourceFinanceTablesRead": [],
+      "providerCalls": 0,
+      "accountingFinanceTablesCounted": [],
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 11,
+      "path": "/api/v1/workspaces/usr_github_760001/join-requests",
+      "method": "GET",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 7,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "business": {
+        "tables": {
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_invites": {
+            "rows": 1,
+            "sha256": "b7679d60e7ff5748290c40d72e072df1e482a655435610a94e972a3855b3208c"
+          },
+          "workspace_join_requests": {
+            "rows": 1,
+            "sha256": "f8792da539d6065743ed1a70bb108f684025eb3d546ce6e3682d3223bb7db1f6"
+          },
+          "workspace_events": {
+            "rows": 2,
+            "sha256": "e62a761dc42d9b7bcc3dadbfb4a902df43d84dab9121cf12b7bda72774d85da0"
+          },
+          "ledger_plan_usage": {
+            "rows": 1,
+            "sha256": "a40f9c074e1f86733f385d3e57a96e4ee8e352b022694d576297861ec9343db2"
+          }
+        },
+        "activeMembers": 0,
+        "members": [],
+        "invitations": [
+          {
+            "id": "win_0fd319856c5e491e959404bd8254b165",
+            "status": "pending",
+            "revision": 1,
+            "recipientNull": true,
+            "acceptedBy": null
+          }
+        ],
+        "requests": [
+          {
+            "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+            "userId": "usr_github_760002",
+            "status": "pending",
+            "revision": 1
+          }
+        ],
+        "eventActions": [
+          "invite",
+          "request_join"
+        ],
+        "commercialWrites": 2,
+        "commercialProjects": 0,
+        "commercialRecords": 1
+      },
+      "resourceFinanceTablesRead": [],
+      "providerCalls": 0,
+      "accountingFinanceTablesCounted": [],
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 12,
+      "path": "/api/v1/workspaces/usr_github_760001/invites/win_0fd319856c5e491e959404bd8254b165/requests/wjr_9fd0dd2e4456478cb7c74a29fd4e9c96/reject",
+      "method": "POST",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 5,
+          "rowsRead": 5,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 6,
+          "rowsRead": 12,
+          "rowsWritten": 12,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 31,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "business": {
+        "tables": {
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_invites": {
+            "rows": 1,
+            "sha256": "b7679d60e7ff5748290c40d72e072df1e482a655435610a94e972a3855b3208c"
+          },
+          "workspace_join_requests": {
+            "rows": 1,
+            "sha256": "e96971d3a9c7c365c383f743686103da25377cc3723839e7a19ce682fffffda6"
+          },
+          "workspace_events": {
+            "rows": 3,
+            "sha256": "bdc6a99ea8d711b32f8863f651bcaaa594322e53732a85d77dd3611437a9f7ae"
+          },
+          "ledger_plan_usage": {
+            "rows": 1,
+            "sha256": "f9034a712ba8a2aa9d263650c970d68e3708ce25fdad54ebfb3b3b821e8f4675"
+          }
+        },
+        "activeMembers": 0,
+        "members": [],
+        "invitations": [
+          {
+            "id": "win_0fd319856c5e491e959404bd8254b165",
+            "status": "pending",
+            "revision": 1,
+            "recipientNull": true,
+            "acceptedBy": null
+          }
+        ],
+        "requests": [
+          {
+            "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+            "userId": "usr_github_760002",
+            "status": "rejected",
+            "revision": 2
+          }
+        ],
+        "eventActions": [
+          "invite",
+          "request_join",
+          "reject_join"
+        ],
+        "commercialWrites": 3,
+        "commercialProjects": 0,
+        "commercialRecords": 1
+      },
+      "resourceFinanceTablesRead": [],
+      "providerCalls": 0,
+      "accountingFinanceTablesCounted": [
+        "expense_categories",
+        "expense_create_idempotency",
+        "expense_events",
+        "expense_recurring_occurrences",
+        "expense_recurring_rules",
+        "expense_suggestion_budget",
+        "expense_suggestion_events",
+        "expenses",
+        "ledger_project_repositories",
+        "ledger_projects"
+      ],
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 13,
+      "path": "/api/v1/workspace-invitations/accept",
+      "method": "POST",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 8,
+          "rowsRead": 5,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "business": {
+        "tables": {
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_invites": {
+            "rows": 1,
+            "sha256": "b7679d60e7ff5748290c40d72e072df1e482a655435610a94e972a3855b3208c"
+          },
+          "workspace_join_requests": {
+            "rows": 1,
+            "sha256": "e96971d3a9c7c365c383f743686103da25377cc3723839e7a19ce682fffffda6"
+          },
+          "workspace_events": {
+            "rows": 3,
+            "sha256": "bdc6a99ea8d711b32f8863f651bcaaa594322e53732a85d77dd3611437a9f7ae"
+          },
+          "ledger_plan_usage": {
+            "rows": 1,
+            "sha256": "f9034a712ba8a2aa9d263650c970d68e3708ce25fdad54ebfb3b3b821e8f4675"
+          }
+        },
+        "activeMembers": 0,
+        "members": [],
+        "invitations": [
+          {
+            "id": "win_0fd319856c5e491e959404bd8254b165",
+            "status": "pending",
+            "revision": 1,
+            "recipientNull": true,
+            "acceptedBy": null
+          }
+        ],
+        "requests": [
+          {
+            "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+            "userId": "usr_github_760002",
+            "status": "rejected",
+            "revision": 2
+          }
+        ],
+        "eventActions": [
+          "invite",
+          "request_join",
+          "reject_join"
+        ],
+        "commercialWrites": 3,
+        "commercialProjects": 0,
+        "commercialRecords": 1
+      },
+      "resourceFinanceTablesRead": [],
+      "providerCalls": 0,
+      "accountingFinanceTablesCounted": [],
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 14,
+      "path": "/api/v1/expenses",
+      "method": "GET",
+      "status": 404,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "business": {
+        "tables": {
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_invites": {
+            "rows": 1,
+            "sha256": "b7679d60e7ff5748290c40d72e072df1e482a655435610a94e972a3855b3208c"
+          },
+          "workspace_join_requests": {
+            "rows": 1,
+            "sha256": "e96971d3a9c7c365c383f743686103da25377cc3723839e7a19ce682fffffda6"
+          },
+          "workspace_events": {
+            "rows": 3,
+            "sha256": "bdc6a99ea8d711b32f8863f651bcaaa594322e53732a85d77dd3611437a9f7ae"
+          },
+          "ledger_plan_usage": {
+            "rows": 1,
+            "sha256": "f9034a712ba8a2aa9d263650c970d68e3708ce25fdad54ebfb3b3b821e8f4675"
+          }
+        },
+        "activeMembers": 0,
+        "members": [],
+        "invitations": [
+          {
+            "id": "win_0fd319856c5e491e959404bd8254b165",
+            "status": "pending",
+            "revision": 1,
+            "recipientNull": true,
+            "acceptedBy": null
+          }
+        ],
+        "requests": [
+          {
+            "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+            "userId": "usr_github_760002",
+            "status": "rejected",
+            "revision": 2
+          }
+        ],
+        "eventActions": [
+          "invite",
+          "request_join",
+          "reject_join"
+        ],
+        "commercialWrites": 3,
+        "commercialProjects": 0,
+        "commercialRecords": 1
+      },
+      "resourceFinanceTablesRead": [],
+      "providerCalls": 0,
+      "accountingFinanceTablesCounted": [],
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 15,
+      "path": "/api/v1/workspace-invitations/accept",
+      "method": "POST",
+      "status": 202,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 8,
+          "rowsRead": 4,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 6,
+          "rowsRead": 10,
+          "rowsWritten": 14,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 33,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "business": {
+        "tables": {
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_invites": {
+            "rows": 1,
+            "sha256": "b7679d60e7ff5748290c40d72e072df1e482a655435610a94e972a3855b3208c"
+          },
+          "workspace_join_requests": {
+            "rows": 2,
+            "sha256": "bf5401dfb7575289336f6e855c19b02b39a6d6fe3934ccc7517e8aa6cb5c0d6b"
+          },
+          "workspace_events": {
+            "rows": 4,
+            "sha256": "b99373401a9c5746bb99cc1c73ca17ecdd06d406f705e205de60734fb37912ec"
+          },
+          "ledger_plan_usage": {
+            "rows": 1,
+            "sha256": "6b8976f6f8e50a4e2ff1fee8ee8d880f9b65cd3bc63769d2e99ee7996a5a9f45"
+          }
+        },
+        "activeMembers": 0,
+        "members": [],
+        "invitations": [
+          {
+            "id": "win_0fd319856c5e491e959404bd8254b165",
+            "status": "pending",
+            "revision": 1,
+            "recipientNull": true,
+            "acceptedBy": null
+          }
+        ],
+        "requests": [
+          {
+            "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+            "userId": "usr_github_760002",
+            "status": "rejected",
+            "revision": 2
+          },
+          {
+            "id": "wjr_1090f943263949e2be67fb05593a94f3",
+            "userId": "usr_github_760003",
+            "status": "pending",
+            "revision": 1
+          }
+        ],
+        "eventActions": [
+          "invite",
+          "request_join",
+          "reject_join",
+          "request_join"
+        ],
+        "commercialWrites": 4,
+        "commercialProjects": 0,
+        "commercialRecords": 1
+      },
+      "resourceFinanceTablesRead": [],
+      "providerCalls": 0,
+      "accountingFinanceTablesCounted": [
+        "expense_categories",
+        "expense_create_idempotency",
+        "expense_events",
+        "expense_recurring_occurrences",
+        "expense_recurring_rules",
+        "expense_suggestion_budget",
+        "expense_suggestion_events",
+        "expenses",
+        "ledger_project_repositories",
+        "ledger_projects"
+      ],
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 16,
+      "path": "/api/v1/workspaces/usr_github_760001/invites/win_0fd319856c5e491e959404bd8254b165/requests/wjr_1090f943263949e2be67fb05593a94f3/approve",
+      "method": "POST",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 5,
+          "rowsRead": 5,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 5,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 8,
+          "rowsRead": 15,
+          "rowsWritten": 18,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 35,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "business": {
+        "tables": {
+          "workspace_members": {
+            "rows": 1,
+            "sha256": "aea2ce6e21adcb5359b072a12a5271ffdfc444fbe04b91f625deb13068249aec"
+          },
+          "workspace_invites": {
+            "rows": 1,
+            "sha256": "53687a02fe4f9f81d50a5867eeb2ece25317c27f8a56383dab6930049559ae2d"
+          },
+          "workspace_join_requests": {
+            "rows": 2,
+            "sha256": "d6daeb902c0c512a3ec5c3a51e107ed56f6c3660d269edcbb35b2d4bc66749eb"
+          },
+          "workspace_events": {
+            "rows": 5,
+            "sha256": "fa96bda5141b399cc835d677bc09408ecaa78ecd50a49c4d75b1e1ec1f49944b"
+          },
+          "ledger_plan_usage": {
+            "rows": 1,
+            "sha256": "07179fa62e00243beff74595f0e4b395e9e5b08b092d898053c2853b6a5aacf2"
+          }
+        },
+        "activeMembers": 1,
+        "members": [
+          {
+            "userId": "usr_github_760003",
+            "role": "editor",
+            "revision": 1,
+            "removed": false
+          }
+        ],
+        "invitations": [
+          {
+            "id": "win_0fd319856c5e491e959404bd8254b165",
+            "status": "accepted",
+            "revision": 2,
+            "recipientNull": true,
+            "acceptedBy": "usr_github_760003"
+          }
+        ],
+        "requests": [
+          {
+            "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+            "userId": "usr_github_760002",
+            "status": "rejected",
+            "revision": 2
+          },
+          {
+            "id": "wjr_1090f943263949e2be67fb05593a94f3",
+            "userId": "usr_github_760003",
+            "status": "approved",
+            "revision": 2
+          }
+        ],
+        "eventActions": [
+          "invite",
+          "request_join",
+          "reject_join",
+          "request_join",
+          "approve_join"
+        ],
+        "commercialWrites": 5,
+        "commercialProjects": 0,
+        "commercialRecords": 1
+      },
+      "resourceFinanceTablesRead": [],
+      "providerCalls": 0,
+      "accountingFinanceTablesCounted": [
+        "expense_categories",
+        "expense_create_idempotency",
+        "expense_events",
+        "expense_recurring_occurrences",
+        "expense_recurring_rules",
+        "expense_suggestion_budget",
+        "expense_suggestion_events",
+        "expenses",
+        "ledger_project_repositories",
+        "ledger_projects"
+      ],
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 17,
+      "path": "/api/v1/expenses",
+      "method": "GET",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 6,
+          "rowsRead": 5,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "business": {
+        "tables": {
+          "workspace_members": {
+            "rows": 1,
+            "sha256": "aea2ce6e21adcb5359b072a12a5271ffdfc444fbe04b91f625deb13068249aec"
+          },
+          "workspace_invites": {
+            "rows": 1,
+            "sha256": "53687a02fe4f9f81d50a5867eeb2ece25317c27f8a56383dab6930049559ae2d"
+          },
+          "workspace_join_requests": {
+            "rows": 2,
+            "sha256": "d6daeb902c0c512a3ec5c3a51e107ed56f6c3660d269edcbb35b2d4bc66749eb"
+          },
+          "workspace_events": {
+            "rows": 5,
+            "sha256": "fa96bda5141b399cc835d677bc09408ecaa78ecd50a49c4d75b1e1ec1f49944b"
+          },
+          "ledger_plan_usage": {
+            "rows": 1,
+            "sha256": "07179fa62e00243beff74595f0e4b395e9e5b08b092d898053c2853b6a5aacf2"
+          }
+        },
+        "activeMembers": 1,
+        "members": [
+          {
+            "userId": "usr_github_760003",
+            "role": "editor",
+            "revision": 1,
+            "removed": false
+          }
+        ],
+        "invitations": [
+          {
+            "id": "win_0fd319856c5e491e959404bd8254b165",
+            "status": "accepted",
+            "revision": 2,
+            "recipientNull": true,
+            "acceptedBy": "usr_github_760003"
+          }
+        ],
+        "requests": [
+          {
+            "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+            "userId": "usr_github_760002",
+            "status": "rejected",
+            "revision": 2
+          },
+          {
+            "id": "wjr_1090f943263949e2be67fb05593a94f3",
+            "userId": "usr_github_760003",
+            "status": "approved",
+            "revision": 2
+          }
+        ],
+        "eventActions": [
+          "invite",
+          "request_join",
+          "reject_join",
+          "request_join",
+          "approve_join"
+        ],
+        "commercialWrites": 5,
+        "commercialProjects": 0,
+        "commercialRecords": 1
+      },
+      "resourceFinanceTablesRead": [
+        "expenses"
+      ],
+      "providerCalls": 0,
+      "accountingFinanceTablesCounted": [],
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 18,
+      "path": "/api/v1/workspace-invitations/accept",
+      "method": "POST",
+      "status": 410,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "business": {
+        "tables": {
+          "workspace_members": {
+            "rows": 1,
+            "sha256": "aea2ce6e21adcb5359b072a12a5271ffdfc444fbe04b91f625deb13068249aec"
+          },
+          "workspace_invites": {
+            "rows": 1,
+            "sha256": "53687a02fe4f9f81d50a5867eeb2ece25317c27f8a56383dab6930049559ae2d"
+          },
+          "workspace_join_requests": {
+            "rows": 2,
+            "sha256": "d6daeb902c0c512a3ec5c3a51e107ed56f6c3660d269edcbb35b2d4bc66749eb"
+          },
+          "workspace_events": {
+            "rows": 5,
+            "sha256": "fa96bda5141b399cc835d677bc09408ecaa78ecd50a49c4d75b1e1ec1f49944b"
+          },
+          "ledger_plan_usage": {
+            "rows": 1,
+            "sha256": "07179fa62e00243beff74595f0e4b395e9e5b08b092d898053c2853b6a5aacf2"
+          }
+        },
+        "activeMembers": 1,
+        "members": [
+          {
+            "userId": "usr_github_760003",
+            "role": "editor",
+            "revision": 1,
+            "removed": false
+          }
+        ],
+        "invitations": [
+          {
+            "id": "win_0fd319856c5e491e959404bd8254b165",
+            "status": "accepted",
+            "revision": 2,
+            "recipientNull": true,
+            "acceptedBy": "usr_github_760003"
+          }
+        ],
+        "requests": [
+          {
+            "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+            "userId": "usr_github_760002",
+            "status": "rejected",
+            "revision": 2
+          },
+          {
+            "id": "wjr_1090f943263949e2be67fb05593a94f3",
+            "userId": "usr_github_760003",
+            "status": "approved",
+            "revision": 2
+          }
+        ],
+        "eventActions": [
+          "invite",
+          "request_join",
+          "reject_join",
+          "request_join",
+          "approve_join"
+        ],
+        "commercialWrites": 5,
+        "commercialProjects": 0,
+        "commercialRecords": 1
+      },
+      "resourceFinanceTablesRead": [],
+      "providerCalls": 0,
+      "accountingFinanceTablesCounted": [],
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 19,
+      "path": "/api/v1/workspace-invitations/preview",
+      "method": "POST",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 8,
+          "rowsRead": 7,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "business": {
+        "tables": {
+          "workspace_members": {
+            "rows": 1,
+            "sha256": "aea2ce6e21adcb5359b072a12a5271ffdfc444fbe04b91f625deb13068249aec"
+          },
+          "workspace_invites": {
+            "rows": 1,
+            "sha256": "53687a02fe4f9f81d50a5867eeb2ece25317c27f8a56383dab6930049559ae2d"
+          },
+          "workspace_join_requests": {
+            "rows": 2,
+            "sha256": "d6daeb902c0c512a3ec5c3a51e107ed56f6c3660d269edcbb35b2d4bc66749eb"
+          },
+          "workspace_events": {
+            "rows": 5,
+            "sha256": "fa96bda5141b399cc835d677bc09408ecaa78ecd50a49c4d75b1e1ec1f49944b"
+          },
+          "ledger_plan_usage": {
+            "rows": 1,
+            "sha256": "07179fa62e00243beff74595f0e4b395e9e5b08b092d898053c2853b6a5aacf2"
+          }
+        },
+        "activeMembers": 1,
+        "members": [
+          {
+            "userId": "usr_github_760003",
+            "role": "editor",
+            "revision": 1,
+            "removed": false
+          }
+        ],
+        "invitations": [
+          {
+            "id": "win_0fd319856c5e491e959404bd8254b165",
+            "status": "accepted",
+            "revision": 2,
+            "recipientNull": true,
+            "acceptedBy": "usr_github_760003"
+          }
+        ],
+        "requests": [
+          {
+            "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+            "userId": "usr_github_760002",
+            "status": "rejected",
+            "revision": 2
+          },
+          {
+            "id": "wjr_1090f943263949e2be67fb05593a94f3",
+            "userId": "usr_github_760003",
+            "status": "approved",
+            "revision": 2
+          }
+        ],
+        "eventActions": [
+          "invite",
+          "request_join",
+          "reject_join",
+          "request_join",
+          "approve_join"
+        ],
+        "commercialWrites": 5,
+        "commercialProjects": 0,
+        "commercialRecords": 1
+      },
+      "resourceFinanceTablesRead": [],
+      "providerCalls": 0,
+      "accountingFinanceTablesCounted": [],
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 20,
+      "path": "/api/v1/workspaces/usr_github_760001/members/usr_github_760003",
+      "method": "DELETE",
+      "status": 204,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 4,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 5,
+          "rowsRead": 5,
+          "rowsWritten": 9,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 36,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "business": {
+        "tables": {
+          "workspace_members": {
+            "rows": 1,
+            "sha256": "a0490621f72ecd78833b56895436be86928ecc9c5126d25739b4a011c3c6f1bb"
+          },
+          "workspace_invites": {
+            "rows": 1,
+            "sha256": "53687a02fe4f9f81d50a5867eeb2ece25317c27f8a56383dab6930049559ae2d"
+          },
+          "workspace_join_requests": {
+            "rows": 2,
+            "sha256": "d6daeb902c0c512a3ec5c3a51e107ed56f6c3660d269edcbb35b2d4bc66749eb"
+          },
+          "workspace_events": {
+            "rows": 6,
+            "sha256": "e0a670e1f84e93b7ccdecc1f266abcc710dd6fcddc6abe64b11d584575739cfb"
+          },
+          "ledger_plan_usage": {
+            "rows": 1,
+            "sha256": "07179fa62e00243beff74595f0e4b395e9e5b08b092d898053c2853b6a5aacf2"
+          }
+        },
+        "activeMembers": 0,
+        "members": [
+          {
+            "userId": "usr_github_760003",
+            "role": "editor",
+            "revision": 2,
+            "removed": true
+          }
+        ],
+        "invitations": [
+          {
+            "id": "win_0fd319856c5e491e959404bd8254b165",
+            "status": "accepted",
+            "revision": 2,
+            "recipientNull": true,
+            "acceptedBy": "usr_github_760003"
+          }
+        ],
+        "requests": [
+          {
+            "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+            "userId": "usr_github_760002",
+            "status": "rejected",
+            "revision": 2
+          },
+          {
+            "id": "wjr_1090f943263949e2be67fb05593a94f3",
+            "userId": "usr_github_760003",
+            "status": "approved",
+            "revision": 2
+          }
+        ],
+        "eventActions": [
+          "invite",
+          "request_join",
+          "reject_join",
+          "request_join",
+          "approve_join",
+          "remove_member"
+        ],
+        "commercialWrites": 5,
+        "commercialProjects": 0,
+        "commercialRecords": 1
+      },
+      "resourceFinanceTablesRead": [],
+      "providerCalls": 0,
+      "accountingFinanceTablesCounted": [
+        "expense_categories",
+        "expense_create_idempotency",
+        "expense_events",
+        "expense_recurring_occurrences",
+        "expense_recurring_rules",
+        "expense_suggestion_budget",
+        "expense_suggestion_events",
+        "expenses",
+        "ledger_project_repositories",
+        "ledger_projects"
+      ],
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 21,
+      "path": "/api/v1/expenses",
+      "method": "GET",
+      "status": 404,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "business": {
+        "tables": {
+          "workspace_members": {
+            "rows": 1,
+            "sha256": "a0490621f72ecd78833b56895436be86928ecc9c5126d25739b4a011c3c6f1bb"
+          },
+          "workspace_invites": {
+            "rows": 1,
+            "sha256": "53687a02fe4f9f81d50a5867eeb2ece25317c27f8a56383dab6930049559ae2d"
+          },
+          "workspace_join_requests": {
+            "rows": 2,
+            "sha256": "d6daeb902c0c512a3ec5c3a51e107ed56f6c3660d269edcbb35b2d4bc66749eb"
+          },
+          "workspace_events": {
+            "rows": 6,
+            "sha256": "e0a670e1f84e93b7ccdecc1f266abcc710dd6fcddc6abe64b11d584575739cfb"
+          },
+          "ledger_plan_usage": {
+            "rows": 1,
+            "sha256": "07179fa62e00243beff74595f0e4b395e9e5b08b092d898053c2853b6a5aacf2"
+          }
+        },
+        "activeMembers": 0,
+        "members": [
+          {
+            "userId": "usr_github_760003",
+            "role": "editor",
+            "revision": 2,
+            "removed": true
+          }
+        ],
+        "invitations": [
+          {
+            "id": "win_0fd319856c5e491e959404bd8254b165",
+            "status": "accepted",
+            "revision": 2,
+            "recipientNull": true,
+            "acceptedBy": "usr_github_760003"
+          }
+        ],
+        "requests": [
+          {
+            "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+            "userId": "usr_github_760002",
+            "status": "rejected",
+            "revision": 2
+          },
+          {
+            "id": "wjr_1090f943263949e2be67fb05593a94f3",
+            "userId": "usr_github_760003",
+            "status": "approved",
+            "revision": 2
+          }
+        ],
+        "eventActions": [
+          "invite",
+          "request_join",
+          "reject_join",
+          "request_join",
+          "approve_join",
+          "remove_member"
+        ],
+        "commercialWrites": 5,
+        "commercialProjects": 0,
+        "commercialRecords": 1
+      },
+      "resourceFinanceTablesRead": [],
+      "providerCalls": 0,
+      "accountingFinanceTablesCounted": [],
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 22,
+      "path": "/api/v1/workspace-invitations/preview",
+      "method": "POST",
+      "status": 410,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 8,
+          "rowsRead": 7,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "business": {
+        "tables": {
+          "workspace_members": {
+            "rows": 1,
+            "sha256": "a0490621f72ecd78833b56895436be86928ecc9c5126d25739b4a011c3c6f1bb"
+          },
+          "workspace_invites": {
+            "rows": 1,
+            "sha256": "53687a02fe4f9f81d50a5867eeb2ece25317c27f8a56383dab6930049559ae2d"
+          },
+          "workspace_join_requests": {
+            "rows": 2,
+            "sha256": "d6daeb902c0c512a3ec5c3a51e107ed56f6c3660d269edcbb35b2d4bc66749eb"
+          },
+          "workspace_events": {
+            "rows": 6,
+            "sha256": "e0a670e1f84e93b7ccdecc1f266abcc710dd6fcddc6abe64b11d584575739cfb"
+          },
+          "ledger_plan_usage": {
+            "rows": 1,
+            "sha256": "07179fa62e00243beff74595f0e4b395e9e5b08b092d898053c2853b6a5aacf2"
+          }
+        },
+        "activeMembers": 0,
+        "members": [
+          {
+            "userId": "usr_github_760003",
+            "role": "editor",
+            "revision": 2,
+            "removed": true
+          }
+        ],
+        "invitations": [
+          {
+            "id": "win_0fd319856c5e491e959404bd8254b165",
+            "status": "accepted",
+            "revision": 2,
+            "recipientNull": true,
+            "acceptedBy": "usr_github_760003"
+          }
+        ],
+        "requests": [
+          {
+            "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+            "userId": "usr_github_760002",
+            "status": "rejected",
+            "revision": 2
+          },
+          {
+            "id": "wjr_1090f943263949e2be67fb05593a94f3",
+            "userId": "usr_github_760003",
+            "status": "approved",
+            "revision": 2
+          }
+        ],
+        "eventActions": [
+          "invite",
+          "request_join",
+          "reject_join",
+          "request_join",
+          "approve_join",
+          "remove_member"
+        ],
+        "commercialWrites": 5,
+        "commercialProjects": 0,
+        "commercialRecords": 1
+      },
+      "resourceFinanceTablesRead": [],
+      "providerCalls": 0,
+      "accountingFinanceTablesCounted": [],
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 23,
+      "path": "/_fixture/final",
+      "method": "GET",
+      "status": 200,
+      "meteredGroups": [],
+      "business": {
+        "tables": {
+          "workspace_members": {
+            "rows": 1,
+            "sha256": "a0490621f72ecd78833b56895436be86928ecc9c5126d25739b4a011c3c6f1bb"
+          },
+          "workspace_invites": {
+            "rows": 1,
+            "sha256": "53687a02fe4f9f81d50a5867eeb2ece25317c27f8a56383dab6930049559ae2d"
+          },
+          "workspace_join_requests": {
+            "rows": 2,
+            "sha256": "d6daeb902c0c512a3ec5c3a51e107ed56f6c3660d269edcbb35b2d4bc66749eb"
+          },
+          "workspace_events": {
+            "rows": 6,
+            "sha256": "e0a670e1f84e93b7ccdecc1f266abcc710dd6fcddc6abe64b11d584575739cfb"
+          },
+          "ledger_plan_usage": {
+            "rows": 1,
+            "sha256": "07179fa62e00243beff74595f0e4b395e9e5b08b092d898053c2853b6a5aacf2"
+          }
+        },
+        "activeMembers": 0,
+        "members": [
+          {
+            "userId": "usr_github_760003",
+            "role": "editor",
+            "revision": 2,
+            "removed": true
+          }
+        ],
+        "invitations": [
+          {
+            "id": "win_0fd319856c5e491e959404bd8254b165",
+            "status": "accepted",
+            "revision": 2,
+            "recipientNull": true,
+            "acceptedBy": "usr_github_760003"
+          }
+        ],
+        "requests": [
+          {
+            "id": "wjr_9fd0dd2e4456478cb7c74a29fd4e9c96",
+            "userId": "usr_github_760002",
+            "status": "rejected",
+            "revision": 2
+          },
+          {
+            "id": "wjr_1090f943263949e2be67fb05593a94f3",
+            "userId": "usr_github_760003",
+            "status": "approved",
+            "revision": 2
+          }
+        ],
+        "eventActions": [
+          "invite",
+          "request_join",
+          "reject_join",
+          "request_join",
+          "approve_join",
+          "remove_member"
+        ],
+        "commercialWrites": 5,
+        "commercialProjects": 0,
+        "commercialRecords": 1
+      },
+      "resourceFinanceTablesRead": [],
+      "providerCalls": 0,
+      "accountingFinanceTablesCounted": [],
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    }
+  ],
+  "nativeStatements": 421,
+  "meteredNativeRowsRead": 506,
+  "meteredNativeRowsWritten": 210,
+  "integrityProbeNativeRowsRead": 175,
+  "nativeAttemptsObserved": [
+    null
+  ],
+  "runtimeStopped": true,
+  "integrityProbesReadOnlyAndOutsideJournal": true,
+  "noAccessBeforeApproval": true,
+  "noMembershipBeforeApproval": true,
+  "noFinancialResourceReadsWhilePendingOrDenied": true,
+  "repeatAndReplayNoWrites": true,
+  "inviterInboxIdentifiesActualApplicant": true,
+  "applicantInboxIsolated": true,
+  "approvalGrantsMembershipAndLedgerAccess": true,
+  "rejectionGrantsNoAccess": true,
+  "removedMembershipOldLinkCannotRecover": true,
+  "commercialWrites": 5,
+  "workspaceAuditEvents": 6,
+  "seededHistoricalExpenseCapacityPreserved": true,
+  "allJournalActualDeltasMatchRawMeta": true
+}

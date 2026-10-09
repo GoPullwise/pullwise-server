@@ -162,7 +162,7 @@ async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path
         validate_json_unicode(body)
     except UnicodeError:
         return _error(422, "INVALID_INPUT")
-    if path == "/api/v1/workspaces" or path.startswith(("/api/v1/workspaces/", "/api/v1/workspace-invitations/")):
+    if path in {"/api/v1/workspaces", "/api/v1/workspace-invitation-requests"} or path.startswith(("/api/v1/workspaces/", "/api/v1/workspace-invitations/")):
         from .cloudflare_workspaces import handle_workspace_request
         return await handle_workspace_request(binding=binding, gateway=gateway,
             method=method, path=path, headers=headers, body=body, now=now)
