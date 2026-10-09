@@ -1,0 +1,72 @@
+{
+  "date": "2026-10-09",
+  "passed": true,
+  "scope": "English-only verification-code subject, plain text and HTML; preview Server only",
+  "serverSourceCommit": "509d528",
+  "serverVersion": "34b4dea7-efb2-4b88-baca-f98f0293dc55",
+  "webVersionUnchanged": true,
+  "webVersion": "f622fa30-cfdf-480d-a9df-a349e94fc67a",
+  "gatewaySha256": "0ba5edff3a986216744f31874bc5982cab8fea69e796fe2de6e35ec99626de83",
+  "packagedSourceModules": {
+    "count": 53,
+    "mirrorsByteExact": true,
+    "generatedPackageInitializerEmpty": true,
+    "workerEntrySha256": "73e80af951fe46ea88cf1aa5fb2b410478ea71b1997bcb35a7ff03c466dde110",
+    "manifestSha256": "c7e35960cf01c360b1cde2294214c0766c5e62558cf00782a07642d31dcef817",
+    "manifestAlgorithm": "sha256 of sorted compact JSON filename-to-content-sha256 mapping for sync_server_modules.MODULES"
+  },
+  "checks": {
+    "completeSuiteBeforeConcurrentMerge": {
+      "initialFullSuite": {
+        "passed": 1736,
+        "subtestsPassed": 60,
+        "environmentFailures": 1
+      },
+      "narrowLoopbackRerun": {
+        "passed": 1,
+        "httpRequests": 4,
+        "loopbackOnly": true
+      },
+      "verifiedTotal": 1737
+    },
+    "python": "3.10.12",
+    "mergedEmailSuites": {
+      "passed": 139,
+      "files": 5,
+      "sourceCommit": "509d528"
+    },
+    "mirror": true,
+    "ledgerStatic": true,
+    "deployBashSyntax": true,
+    "diff": true
+  },
+  "concurrentMainPreserved": "b5682b1 linked email ownership precheck; net copy patch leaves auth/OpenAPI behavior unchanged from remote main",
+  "bindingsPreserved": true,
+  "schedulesPreserved": true,
+  "schemaVersion": 10,
+  "schemaMigration": false,
+  "productionD1Paused": true,
+  "realEmailsSent": 0,
+  "remoteProviderCalls": 0,
+  "remoteBusinessMutations": 0,
+  "realEmailDeliveryAcceptance": false,
+  "deliveryValidation": "Mock EMAIL binding validates all three fields are ASCII English, leading-zero code, ten-minute expiry, ignore hint, recipient privacy and one send. Existing provider binding/sender settings are preserved; real delivery was not triggered.",
+  "retention": "No storage or retention changes. User-created ledger content survives plan expiry; the existing generated activity projection retains its rolling 24-hour window.",
+  "budgetJournal": {
+    "healthy": true,
+    "originalDatabaseAndSingletonPreserved": true,
+    "beforeObserved": {
+      "rowsRead": 97953,
+      "rowsWritten": 2678
+    },
+    "afterObserved": {
+      "rowsRead": 98524,
+      "rowsWritten": 2691
+    },
+    "liveWindowDelta": {
+      "rowsRead": 571,
+      "rowsWritten": 13
+    },
+    "attribution": "Live snapshots include other traffic and are not deployment cost. This release performed no business API or remote SQL mutations."
+  }
+}

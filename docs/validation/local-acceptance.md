@@ -23,6 +23,19 @@ Module generation and `--check`, `check-ledger-s01.py --allow-placeholders` and
 request or deployment was performed for this local acceptance. Publication is
 recorded separately after the checked source is released to Server preview.
 
+Publication preserves concurrent main's mailbox-ownership precheck (`b5682b1`)
+at source `509d528`; all **139 tests in five email-related files** pass on the
+merged source. Source mirror, static and script checks pass again. The net
+English-copy patch does not modify that upstream authentication behavior.
+
+[Preview receipt](english-verification-email-preview-release-2026-10-09.json)
+records Server version `34b4dea7-efb2-4b88-baca-f98f0293dc55`. Management readback
+confirms that EMAIL sender/configuration, original database/coordinator, Jev and
+plan configuration, existing schedules and Web version are preserved. The
+original schema-10 journal remains healthy; no schema migration, real email,
+business API mutation or production activation was performed. Live budget
+counter deltas include other traffic and are not measured deployment effects.
+
 ## Explicit category removal (2026-10-09)
 
 `POST /api/v1/categories/{id}/remove` removes an unused active or archived
