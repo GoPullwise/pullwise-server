@@ -1,0 +1,221 @@
+{
+  "date": "2026-10-09",
+  "passed": true,
+  "scope": "Shared REST API, full integration Docs, plan capacity/Billing charts and optional oldest-expense replacement; preview publication",
+  "sourceCommits": {
+    "server": "ec000b4062587c2abeb1bbd03937cbdd04cabf1e",
+    "web": "f541f9970906edb753f2d4ce3752e185261297de"
+  },
+  "schemaVersion": 10,
+  "schemaMigration": false,
+  "remoteBusinessMutations": 0,
+  "remoteForcedTicks": 0,
+  "realProviderCalls": 0,
+  "realPayments": 0,
+  "realAccountWorkflowAcceptance": false,
+  "checks": {
+    "web": {
+      "filesPassed": 60,
+      "testsPassed": 1167,
+      "lint": true,
+      "build": true,
+      "workerConfig": true
+    },
+    "server": {
+      "testsPassed": 2069
+    },
+    "postDescriptionClarification": {
+      "change": "Explicitly distinguish auto-removal-enabled above-capacity RETENTION_CLEANUP_REQUIRED from disabled RECORD_LIMIT; description only, no DTO/endpoint/layout/business change",
+      "serverContractTestsPassed": 6,
+      "browserReceiptRetainsMeasuredPriorDescriptionHash": true,
+      "webContractTestsPassed": 47
+    }
+  },
+  "contract": {
+    "paths": 43,
+    "operations": 59,
+    "sourceYamlSha256": "4fb4268d37b9363d1726a02e573e9534a82d0bdb378fabdc919aad14697ca42c",
+    "distributedJsonSha256": "9cf6020465dcf8ff4b12af4ef71496318effa33fbb9d866d4cdc04009e69f9f3",
+    "generatedCopiesEqual": true
+  },
+  "localBrowser": {
+    "settingsContextsPassed": 36,
+    "settingsFrenchFollowupContextsPassed": 6,
+    "final59DocsContextsPassed": 13,
+    "settingsSyntheticPreferenceGETs": 74,
+    "settingsSyntheticPreferencePATCHes": 3,
+    "docsSyntheticSessionGETs": 91,
+    "simulatedChromiumOnly": true,
+    "realUpstreamCalls": 0
+  },
+  "nativeLocal": {
+    "passed": true,
+    "localHttpRequestsCompleted": 39,
+    "meteredNativeRowsRead": 7288,
+    "meteredNativeRowsWritten": 859,
+    "integrityProbeNativeRowsRead": 5332,
+    "canonicalSourceTreeSha256": "6f0757bed57f2c863cc6b2da342112e45d5ec6e3620ea584220b36b1681f4737",
+    "runtimeStopped": true
+  },
+  "management": {
+    "versions": {
+      "pullwise-server-preview": [
+        {
+          "version_id": "bc747bda-d570-42ab-8e76-cc100e27c21f",
+          "percentage": 100
+        }
+      ],
+      "pullwise-web-preview": [
+        {
+          "version_id": "7c760adb-fcab-4d8f-a066-5f3ae293be3b",
+          "percentage": 100
+        }
+      ],
+      "pullwise-server-production": [
+        {
+          "version_id": "b54d8e12-e001-47e7-9af1-692ee069e2de",
+          "percentage": 100
+        }
+      ]
+    },
+    "comparison": {
+      "pullwise-server-preview": {
+        "changedBindings": [
+          "PULLWISE_PLAN_LIMITS_JSON"
+        ],
+        "missingBindings": [],
+        "versions": [
+          {
+            "version_id": "bc747bda-d570-42ab-8e76-cc100e27c21f",
+            "percentage": 100
+          }
+        ],
+        "previousVersions": [
+          {
+            "version_id": "011edd25-03eb-4d7b-8738-7e55a69bf937",
+            "percentage": 100
+          }
+        ]
+      },
+      "pullwise-web-preview": {
+        "changedBindings": [],
+        "missingBindings": [],
+        "versions": [
+          {
+            "version_id": "7c760adb-fcab-4d8f-a066-5f3ae293be3b",
+            "percentage": 100
+          }
+        ],
+        "previousVersions": [
+          {
+            "version_id": "fa0386f8-6717-4c54-aa59-8bb29c8c5339",
+            "percentage": 100
+          }
+        ]
+      },
+      "pullwise-server-production": {
+        "changedBindings": [
+          "PULLWISE_PLAN_LIMITS_JSON"
+        ],
+        "missingBindings": [],
+        "versions": [
+          {
+            "version_id": "b54d8e12-e001-47e7-9af1-692ee069e2de",
+            "percentage": 100
+          }
+        ],
+        "previousVersions": [
+          {
+            "version_id": "db3340d6-b461-4d84-be57-a39e5ec6fc88",
+            "percentage": 100
+          }
+        ]
+      }
+    },
+    "quotaLimits": {
+      "free": {
+        "projects": 3,
+        "records": 100,
+        "writesPerMinute": 10,
+        "writesPerMonth": 1000,
+        "jevMonthlyBudgetUsd": "0.00"
+      },
+      "pro": {
+        "projects": 20,
+        "records": 20000,
+        "writesPerMinute": 60,
+        "writesPerMonth": 10000,
+        "jevMonthlyBudgetUsd": "3.00"
+      },
+      "max": {
+        "projects": 100,
+        "records": 100000,
+        "writesPerMinute": 60,
+        "writesPerMonth": 10000,
+        "jevMonthlyBudgetUsd": "5.00"
+      }
+    },
+    "previewDatabaseId": "e9dc3b89-f81f-4fce-87ef-d8797d879fb4",
+    "previewJournalNamespaceId": "0e0ce4946c5e4d5f81c606273ba94b5d",
+    "singletonScope": "pullwise-s17-s18-2026-09-28",
+    "previewCron": [
+      "0 * * * *"
+    ],
+    "allOtherPublicBindingsAndSecretNamesTypesPreserved": true,
+    "productionD1Paused": true,
+    "productionDeploymentExecutedByThisWorkflow": false,
+    "productionNote": "The observed production version and plan binding differ from the initial management snapshot; this workflow deploys only preview and does not attribute concurrent production publication."
+  },
+  "staticPublication": {
+    "passed": true,
+    "origin": "https://preview.pull-wise.com",
+    "staticGETs": 4,
+    "redirects": 0,
+    "retries": 0,
+    "javascriptExecuted": false,
+    "businessAPIRequests": 0,
+    "results": [
+      {
+        "path": "/",
+        "status": 200,
+        "bytes": 5206,
+        "sha256": "077b3f7179bbe803c14da936e6a96a425c7dc7c7c2e2ab9892dfa685864c8976",
+        "homepageAssetReferencesMatch": true
+      },
+      {
+        "path": "/assets/settings-DdqfFHUU.js",
+        "status": 200,
+        "bytes": 29142,
+        "sha256": "1d41a5f3a1645f5134e15f504b6fdabd37054205750f974d4a6501d55c56454d",
+        "matchesBuiltArtifact": true
+      },
+      {
+        "path": "/assets/api-docs-Di0uzMLG.js",
+        "status": 200,
+        "bytes": 276433,
+        "sha256": "c609f771e086fd69d698e94e952189713dbe27026c84a5edcc2f04da7308026c",
+        "matchesBuiltArtifact": true
+      },
+      {
+        "path": "/assets/index-xFSGeu05.css",
+        "status": 200,
+        "bytes": 85612,
+        "sha256": "66b409c3479f65cc805546c06f912f8ace3d2dcb1a33722d086b25cfa5a3dff3",
+        "matchesBuiltArtifact": true
+      }
+    ]
+  },
+  "packageChecks": {
+    "serverModules": 721,
+    "serverUploadKiB": 1482.29,
+    "serverPinnedSDKAndTzdataIncluded": true,
+    "serverMirrorCheck": true,
+    "webAssets": 51,
+    "webWorkerConfig": true,
+    "previewEnvBuild": true
+  },
+  "localReceipts": [
+    "rest-capacity-and-retention-local-2026-10-09.json",
+    "expense-retention-native-local-2026-10-09.json"
+  ]
+}

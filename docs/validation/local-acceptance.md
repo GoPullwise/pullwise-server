@@ -1,5 +1,11 @@
 # Current local acceptance
 
+[Final preview publication receipt](rest-capacity-and-retention-preview-release-2026-10-09.json) records the released Web/Server
+versions, exact three-asset/static-homepage readback, configured plan capacities
+and preserved database, journal, hourly schedule and production D1 pause. No
+remote business mutation, forced tick, provider call or real payment is performed
+by this publication check. Local fixture acceptance is recorded separately below.
+
 ## Optional oldest-expense replacement (2026-10-09)
 
 Owner account Settings offers two expense-capacity modes without overage billing.
