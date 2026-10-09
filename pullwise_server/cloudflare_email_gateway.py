@@ -32,27 +32,24 @@ class WorkerEmailGateway:
         text = (
             f"Your Pullwise verification code is {code}.\n\n"
             "This code expires in 10 minutes. Enter it only in Pullwise. "
-            "If you did not request it, you can ignore this email.\n\n"
-            f"Pullwise 验证码：{code}\n"
-            "验证码 10 分钟内有效，仅在 Pullwise 页面输入。如非本人操作，请忽略此邮件。"
+            "If you did not request it, you can ignore this email."
         )
         html = (
-            '<!doctype html><html><body style="margin:0;padding:32px 16px;'
+            '<!doctype html><html lang="en"><body style="margin:0;padding:32px 16px;'
             'background:#f7f7f7;font-family:Arial,sans-serif;color:#171717">'
             '<div style="max-width:480px;margin:auto;padding:32px;'
             'background:#fff;border:1px solid #dedede">'
             '<strong style="font-size:20px">Pullwise</strong>'
-            '<p>Your verification code / 你的验证码</p>'
+            '<p>Your verification code</p>'
             f'<p style="font-family:monospace;font-size:32px;font-weight:bold;'
             f'letter-spacing:6px;color:#5741d9">{code}</p>'
             '<p>This code expires in 10 minutes. Enter it only in Pullwise.</p>'
-            '<p>验证码 10 分钟内有效，仅在 Pullwise 页面输入。</p>'
             '<p style="font-size:13px;color:#626262">If you did not request '
-            'this code, ignore this email. 如非本人操作，请忽略此邮件。</p>'
+            'this code, ignore this email.</p>'
             '</div></body></html>'
         )
         payload = {"to": email, "from": {"email": self.sender, "name": "Pullwise"},
-                   "subject": "Your Pullwise verification code / Pullwise 验证码",
+                   "subject": "Your Pullwise verification code",
                    "text": text, "html": html}
         try:
             import js

@@ -1,5 +1,16 @@
 # Pullwise Server
 
+## Verification email language (2026-10-09)
+
+The user requires verification-code emails to use English only in the subject,
+plain-text body and HTML body, regardless of the interface language. Keep the
+six-digit code (including leading zeros), ten-minute lifetime and ignore-email
+hint. This applies to both email login and linking through the shared template.
+Preserve recipient privacy, delivery configuration, no-retry behavior,
+authentication, rate limits and storage. Complete this copy change after the
+member-role refresh release; publish Server preview only after offline checks.
+Do not send real verification emails as acceptance for this text-only change.
+
 ## Category removal (2026-10-09)
 
 Categories keep Archive for historical use and add explicit Remove for unused

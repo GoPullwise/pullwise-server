@@ -1,5 +1,28 @@
 # Current local acceptance
 
+## English-only verification emails (2026-10-09)
+
+After the member-role refresh preview release, the shared verification template
+uses English only for its subject, plain text and HTML, regardless of interface
+language. Both login and email linking keep their existing six-digit code,
+leading zeros, ten-minute expiry, ignore-email hint and delivery behavior.
+The HTML declares `lang="en"`. Authentication, schemas, bindings, rate limits
+and no-retry delivery behavior are unchanged.
+
+The existing mock-binding gateway assertion verifies English-only output in all
+three fields, both code copies, expiry and ignore hints, recipient privacy and
+one send. Python 3.10.12 collected the complete current suite: **1,736 tests and
+60 subtests passed**, with one environment failure because the sandbox blocked
+the existing loopback socket test. A narrowly approved rerun of that one test
+passed: its server binds only `127.0.0.1`, makes four requests to the local mock
+and bypasses system proxies. Thus all **1,737 tests and 60 subtests** are verified
+across the two runs; no test was skipped or changed for the socket restriction.
+
+Module generation and `--check`, `check-ledger-s01.py --allow-placeholders` and
+`bash -n scripts/deploy-cloudflare.sh` pass. No real email, remote D1/provider
+request or deployment was performed for this local acceptance. Publication is
+recorded separately after the checked source is released to Server preview.
+
 ## Explicit category removal (2026-10-09)
 
 `POST /api/v1/categories/{id}/remove` removes an unused active or archived

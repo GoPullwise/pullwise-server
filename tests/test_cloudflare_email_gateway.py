@@ -21,10 +21,16 @@ def test_sends_structured_plain_text_and_html_without_recipient_reflection():
     body = mail.binding.send.await_args.args[0]
     assert body["to"] == "user+local@example.com"
     assert body["from"] == {"email": "login@auth.pull-wise.com", "name": "Pullwise"}
+    assert body["subject"] == "Your Pullwise verification code"
+    assert all(body[field].isascii() for field in ("subject", "text", "html"))
     assert "001234" in body["text"] and "001234" in body["html"]
     assert "001234" not in body["subject"]
-    assert "10 minutes" in body["text"] and "10 分钟" in body["text"]
-    assert "user+local@example.com" not in body["html"]
+    for field in ("text", "html"):
+        assert "10 minutes" in body[field]
+        assert "Enter it only in Pullwise." in body[field]
+        assert "ignore this email." in body[field]
+        assert "user+local@example.com" not in body[field]
+    assert '<html lang="en">' in body["html"]
     assert "http" not in body["html"]
     mail.binding.send.assert_awaited_once()
 
