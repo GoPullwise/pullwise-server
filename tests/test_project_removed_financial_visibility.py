@@ -19,10 +19,7 @@ def ledger():
     fixture = route_fixture.LedgerRoutesTests()
     fixture.setUp()
     try:
-        migrations = Path(__file__).resolve().parents[1] / "cloudflare/server/migrations"
         with fixture.store.connect() as db:
-            for name in ("0003_ledger_suggestions.sql", "0004_ledger_plan_usage.sql"):
-                db.executescript((migrations / name).read_text())
             name = record_name("users", "usr_github_77")
             user = json.loads(db.execute("SELECT payload FROM app_state WHERE name=?", (name,)).fetchone()[0])
             user["billing"] = {"plan": "max", "status": "active", "currentPeriodEnd": fixture.now + 86400}

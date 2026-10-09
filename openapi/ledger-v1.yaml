@@ -29,16 +29,20 @@ info:
     Project development and product links are optional absolute HTTP(S) URLs.
     Only the selected ledger Owner using a current cookie session or an API key
     with projects:write and permission for that project may remove a
-    project. Removal is a soft tombstone, distinct from reversible archiving:
-    the project and its expenses disappear from resource reads, reports and
-    exports, and its recurring plans cannot generate further expenses. Stored
-    financial records, audit history and commercial capacity accounting remain
-    intact. Repository associations are released atomically; removed projects
-    cannot be restored through PATCH.
+    project. Removal permanently erases that project, its current expenses,
+    recurring plans and attributable business history. Archived projects remain
+    recoverable until explicitly removed. Current expenses already moved to
+    another project or Shared pool survive, while their erased-project snapshots
+    disappear. Unrelated schedules retain consumed-period fences without a
+    removed expense identifier. Active expense capacity is released;
+    cumulative project capacity is retained;
+    prior write and model-fee counters remain charged. Ledger-wide categories,
+    account identity, billing and membership remain.
     Recurring expense rules use the same REST resource for browser sessions and
     API keys with explicit expense authority. A key-created or key-resumed rule
     retains only a credential hash; execution rechecks its current key scopes,
     expiration, revocation, ledger binding and target restrictions. Each
+
     generated occurrence uses the current ledger owner's plan and the rule
     saved execution actor's current membership and GitHub access. A rule records one ordinary
     expense per calendar period without making a payment or extending a
@@ -640,25 +644,30 @@ paths:
       operationId: removeLedgerProject
       x-pullwise-scope: projects:write
       security: [{cookieSession: []}, {bearerKey: []}]
-      description: Current Owner of the selected ledger only. An Owner API key requires projects:write and permission for this project; Admin, Editor and Viewer cannot remove projects. Cookie writes require a trusted app Origin. Both forms require the current If-Match revision. Atomically tombstones the project, releases at most 30 repository associations and records the actual actor. Retains all financial, recurring and audit rows without a bulk cascade. The removed project's expenses and recurring rules become inaccessible, leave list/report/export results and cannot generate new expenses. Shared-pool expenses are unchanged. Capacity totals are not reclaimed. Repeating removal of the same authorized tombstone is read-only; PATCH cannot resurrect it.
+      description: Current actual Owner of the selected ledger only. Owner API keys require projects:write and current permission for this project; Admin, Editor and Viewer are rejected. Cookie writes require a trusted app Origin; both forms require current If-Match revision. One atomic closed transaction erases the project, repository bindings, all currently assigned expenses including soft-deleted rows, its recurring rules and attributable financial/replay/Jev/activity history. Moved-out current expenses and unrelated schedules survive; external consumed periods retain a fence with no erased expense ID. Ledger-wide categories, identity, billing, membership, cumulative project capacity and prior fee/usage counters remain. Active expense capacity is released, and the accepted erasure counts as one ordinary write. An absent project is an explicitly empty outcome in the authorized Owner scope; an existing foreign project is hidden. No deletion activity snapshot is recreated. PATCH cannot restore a physically removed project.
+
       parameters: [{$ref: '#/components/parameters/IfMatch'}, {$ref: '#/components/parameters/WorkspaceHeader'}, {$ref: '#/components/parameters/AuthOrigin'}]
       responses:
         '204': {description: Project removed or already removed within the same authorized ledger}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
-        '409': {description: Revision or repository-binding limit reached, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '409': {description: QUOTA_WINDOW_CHANGED; request clock precedes persisted usage window, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+
         '412': {$ref: '#/components/responses/PreconditionFailed'}
         '422': {$ref: '#/components/responses/InvalidInput'}
         '428': {description: If-Match is required, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '429': {$ref: '#/components/responses/RateLimited'}
   /api/v1/categories:
     get:
-      parameters: [{$ref: '#/components/parameters/WorkspaceHeader'}]
+      parameters:
+        - {$ref: '#/components/parameters/WorkspaceHeader'}
+        - {name: includeRemoved, in: query, schema: {type: boolean, default: false}, description: Include removed category metadata for existing expense/history labels; accepts one literal true or false}
       operationId: listExpenseCategories
       x-pullwise-scope: categories:read
       responses:
-        '200': {description: Selected ledger categories including archived entries, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Category'}}}}}
+        '200': {description: Selected ledger categories including archived entries; removed entries appear only with includeRemoved=true, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Category'}}}}}
+        '422': {$ref: '#/components/responses/InvalidInput'}
     post:
       parameters: [{$ref: '#/components/parameters/WorkspaceHeader'}]
       operationId: createExpenseCategory
@@ -697,13 +706,17 @@ paths:
       operationId: removeExpenseCategory
       x-pullwise-scope: categories:write
       description: |
-        Permanently remove an unused active or archived category. Any reference
-        in expenses (including deleted entries), durable expense history,
-        original creation responses, recurring rules or chosen/accepted Jev
-        suggestions prevents removal. Evaluated candidate probabilities alone
-        do not prevent removal.
-        Referenced categories must be archived instead; removal never deletes
-        or rewrites expenses, schedules, history or idempotency responses.
+        Remove an active or archived category from management and new choices
+        with a permanent tombstone, even if it has historical references.
+        Existing expenses, audit/replay rows and names remain unchanged;
+        includeRemoved=true supplies metadata for those historical labels.
+        Existing expense edits may explicitly retain their original removed
+        category, but new assignments and model choices require an active one.
+        Referencing recurring rules are blocked with INVALID_CATEGORY at their
+        next due run until explicitly updated and resumed; removal itself does
+        not rewrite their schedule or consumed periods. Removed categories
+        cannot be renamed or restored. Repeating with the current removed
+        revision is read-only.
       parameters: [{$ref: '#/components/parameters/IfMatch'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       requestBody:
         required: true
@@ -711,8 +724,9 @@ paths:
           application/json:
             schema: {type: object, additionalProperties: false}
       responses:
-        '204': {description: Removed unused category}
-        '409': {description: CATEGORY_IN_USE; archive this category to retain its history, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '204': {description: Category removed from management/new choices, or already removed at the supplied current revision}
+        '409': {description: REVISION_LIMIT; the tombstone would exceed the safe revision limit, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+
         '404': {$ref: '#/components/responses/NotFound'}
         '412': {$ref: '#/components/responses/PreconditionFailed'}
         '428': {description: If-Match is required, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
@@ -1368,7 +1382,7 @@ components:
     LedgerUsage:
       type: object
       required: [workspaceId, projects, expenseRecords]
-      description: Read-only selected-ledger capacity. Project counts retain archived and removed projects. Expense counts include undeleted Shared pool expenses and undeleted expenses in nonremoved projects, including archived projects and recurring-generated expenses. Soft deletion and project removal release expense capacity while preserving financial audit and replay history. Current effective plan and operator configuration set the limits.
+      description: Read-only selected-ledger capacity. Cumulative project counts retain archived and removed projects. Expense counts include undeleted Shared pool expenses and undeleted expenses in nonremoved projects, including archived projects and recurring-generated expenses. Soft deletion releases expense capacity while preserving financial audit and replay history. Permanent project removal releases its active expense places and erases its attributable business history. Current effective plan and operator configuration set the limits.
       properties:
         workspaceId: {type: string}
         projects: {$ref: '#/components/schemas/CapacityUsage'}
@@ -1582,11 +1596,13 @@ components:
         color: {type: [string, 'null']}
         revision: {type: integer, minimum: 1}
         archivedAt: {type: [string, 'null'], format: date-time}
+        removedAt: {type: string, format: date-time, description: Present only for a removed row requested with includeRemoved=true}
     CurrencyCode:
       type: string
       enum: [AED, AFN, ALL, AMD, ANG, AOA, ARS, AUD, AWG, AZN, BAM, BBD, BDT, BGN, BHD, BIF, BMD, BND, BOB, BOV, BRL, BSD, BTN, BWP, BYN, BZD, CAD, CDF, CHE, CHF, CHW, CLF, CLP, CNY, COP, COU, CRC, CUC, CUP, CVE, CZK, DJF, DKK, DOP, DZD, EGP, ERN, ETB, EUR, FJD, FKP, GBP, GEL, GHS, GIP, GMD, GNF, GTQ, GYD, HKD, HNL, HRK, HTG, HUF, IDR, ILS, INR, IQD, IRR, ISK, JMD, JOD, JPY, KES, KGS, KHR, KMF, KPW, KRW, KWD, KYD, KZT, LAK, LBP, LKR, LRD, LSL, LYD, MAD, MDL, MGA, MKD, MMK, MNT, MOP, MRU, MUR, MVR, MWK, MXN, MXV, MYR, MZN, NAD, NGN, NIO, NOK, NPR, NZD, OMR, PAB, PEN, PGK, PHP, PKR, PLN, PYG, QAR, RON, RSD, RUB, RWF, SAR, SBD, SCR, SDG, SEK, SGD, SHP, SLE, SLL, SOS, SRD, SSP, STN, SVC, SYP, SZL, THB, TJS, TMT, TND, TOP, TRY, TTD, TWD, TZS, UAH, UGX, USD, USN, UYI, UYU, UYW, UZS, VED, VES, VND, VUV, WST, YER, ZAR, ZMW, ZWL]
       description: Supported uppercase currencies. Writes use decimal strings and fixed currency exponents; JPY has zero fractional digits, USD has two, KWD has three, and CLF has four. Amount minor units must not exceed 9007199254740991. Values across currencies are never combined or converted.
     ExpenseFields:
+
       type: object
       required: [target, occurredOn, amount, currency, purpose]
       properties:

@@ -67,7 +67,8 @@ def free_fixture(tmp_path):
         normalize_legacy_state(db, now=fixture.now)
         db.execute("UPDATE app_state SET payload=? WHERE name='record:users:owner'", (json.dumps(user),))
         db.execute("UPDATE account_entitlement_authority SET plan='free' WHERE owner_id='owner'")
-        db.execute("INSERT INTO expense_categories VALUES(?,?,?,?,?,?,?,?)",
+        db.execute("INSERT INTO expense_categories(id,owner_id,name,color,archived_at,revision,created_at,updated_at) "
+                   "VALUES(?,?,?,?,?,?,?,?)",
             ("cat_local", "owner", "Hosting", None, None, 1, "2026-10-06", "2026-10-06"))
         db.execute("""INSERT INTO expenses(id,owner_id,target_kind,category_id,occurred_on,
             amount_minor,currency,purpose,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)""",

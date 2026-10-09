@@ -41,7 +41,9 @@ from pullwise_server.cloudflare_preview_budget import (
 )
 from pullwise_server.cloudflare_preview_schema import (
     V9_SCHEMA_SQL, V9_SCHEMA_OBJECTS, V9_SCHEMA_FINGERPRINT, V9_INDEX_COUNTS,
-    SCHEMA_SQL, SCHEMA_OBJECTS, SCHEMA_FINGERPRINT, SCHEMA_VERSION, UPGRADE_V10_SQL,
+    V10_SCHEMA_SQL as SCHEMA_SQL, V10_SCHEMA_OBJECTS as SCHEMA_OBJECTS,
+    V10_SCHEMA_FINGERPRINT as SCHEMA_FINGERPRINT, V10_SCHEMA_VERSION as SCHEMA_VERSION,
+    UPGRADE_V10_SQL,
 )
 from pullwise_server.cloudflare_state_records import STATE_KINDS, record_name, encode_record
 

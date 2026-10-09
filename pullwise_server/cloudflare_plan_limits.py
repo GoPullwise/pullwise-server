@@ -125,6 +125,15 @@ class PlanLimitedD1:
 
     async def batch(self, statements):
         statements = list(statements)
+        # A closed Owner erasure carries its own exact capacity/one-write
+        # counter in the guarded batch. Validate the entire canonical recipe;
+        # never infer negative capacity from an arbitrary DELETE statement.
+        from .cloudflare_project_erasure import erasure_candidate, recipe_identity
+        if recipe_identity(statements, policy=self.plan_policy, now=self.now) is not None:
+            return await self.binding.batch([
+                self.binding.prepare(item.sql).bind(*item.params) for item in statements])
+        if erasure_candidate(statements):
+            raise PlanLimitError(503, "USAGE_GUARD_UNAVAILABLE")
         mutations = [(item, _MUTATION.match(item.sql)) for item in statements]
         mutations = [(item, match.group(1).lower()) for item, match in mutations if match]
         # Rolling activity is bookkeeping within the same fenced business batch.

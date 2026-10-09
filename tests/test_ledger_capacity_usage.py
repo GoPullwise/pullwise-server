@@ -28,7 +28,7 @@ def capacity(tmp_path):
             db.execute("""INSERT INTO ledger_projects(id,owner_id,name,description,status,
                 revision,created_at,updated_at,deleted_at) VALUES(?, 'owner',?,'',?,1,'created','updated',?)""",
                 ("prj_" + identifier, identifier, status, deleted))
-        db.execute("INSERT INTO expense_categories VALUES('cat_usage','owner','Hosting',NULL,NULL,1,'created','updated')")
+        db.execute("INSERT INTO expense_categories(id,owner_id,name,color,archived_at,revision,created_at,updated_at) VALUES('cat_usage','owner','Hosting',NULL,NULL,1,'created','updated')")
         for identifier, kind, project, deleted in (("shared", "shared", None, None),
                                                     ("deleted", "shared", None, "deleted"),
                                                     ("project", "project", "prj_active", None)):

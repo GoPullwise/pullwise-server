@@ -140,7 +140,8 @@ def test_write_batch_cannot_use_stale_authority(workspace_db, changed):
             db.execute("UPDATE app_state SET payload=? WHERE name=?",
                 (encode_record("users", identifier, user), record_name("users", identifier)))
     commands = [_write_guard(binding, proof, "owner", fixture.now),
-                binding.prepare("INSERT INTO expense_categories VALUES('cat_guard','owner','Guard',NULL,NULL,1,'now','now')"),
+                binding.prepare("INSERT INTO expense_categories(id,owner_id,name,color,archived_at,revision,created_at,updated_at) "
+                                "VALUES('cat_guard','owner','Guard',NULL,NULL,1,'now','now')"),
                 binding.prepare("DELETE FROM d1_command_guard")]
     with pytest.raises(Exception):
         asyncio.run(binding.batch(commands))

@@ -1,4 +1,5 @@
-"""Project removal requires the actual Owner and retains financial facts."""
+"""Project removal requires the actual Owner and erases project business facts."""
+
 import asyncio
 import json
 
@@ -26,44 +27,28 @@ def rows(ledger):
             "ledger_activity_events", "d1_command_guard")}
 
 
-def test_owner_removal_preserves_financial_rows_and_releases_repository_anchors(ledger):
-    # Legacy linked projects legitimately have an empty financial name.
+def test_owner_removal_erases_financial_rows_history_and_releases_repository_anchors(ledger):
     project = create(ledger, ids=[101, 102])
-    assert project["name"] == ""
-    draft = expense_body(category(ledger), project)
-    status, expense = ledger.call("POST", "/api/v1/expenses", draft,
-        {**ledger.headers, "Idempotency-Key": "retained-removal"})
+    chosen = category(ledger)
+    status, saved = ledger.call("POST", "/api/v1/expenses", expense_body(chosen, project),
+        {**ledger.headers, "Idempotency-Key": "erased-removal"})
     assert status == 201
-    before = rows(ledger)
     ledger.gateway.calls.clear()
     assert remove(ledger, project) == (204, None)
     assert ledger.gateway.calls == []
     after = rows(ledger)
-    for table in ("expenses", "expense_events", "expense_create_idempotency", "expense_recurring_rules", "expense_recurring_occurrences"):
-        assert after[table] == before[table]
+    assert all(not values for values in after.values())
     with ledger.store.connect() as db:
-        saved = dict(db.execute("SELECT * FROM ledger_projects WHERE id=?", (project["id"],)).fetchone())
-        assert saved["deleted_at"] and saved["status"] == "archived" and saved["revision"] == 2
-        assert saved["name"] == "" and saved["description"] == project["description"]
-        assert saved["github_repo_id"] is saved["github_full_name"] is saved["github_organization_id"] is None
-        assert db.execute("SELECT COUNT(*) FROM ledger_project_repositories WHERE project_id=?", (project["id"],)).fetchone()[0] == 0
-        events = list(db.execute("SELECT * FROM ledger_activity_events WHERE action='delete' AND resource_kind='project'"))
-        assert len(events) == 1
-        event = dict(events[0])
-        assert json.loads(event["actor_json"])["userId"] == OWNER
-        assert json.loads(event["before_json"])["githubRepoIds"] == [101, 102]
-        assert event["after_json"] is None
+        assert db.execute("SELECT id FROM expense_categories").fetchone()[0] == chosen
+        assert db.execute("SELECT projects,records,writes FROM ledger_plan_usage").fetchone()[:] == (1, 0, 1)
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
     assert ledger.call("GET", "/api/v1/projects/" + project["id"])[0] == 404
-    assert update(ledger, {**project, "revision": 2}, {"status": "active"})[0] == 404
-    assert all(item["id"] != project["id"] for item in ledger.call("GET", "/api/v1/projects")[1]["items"])
-    assert ledger.call("GET", "/api/v1/expenses/" + expense["id"])[0] == 404
-    assert ledger.call("GET", "/api/v1/activity", params={"target": "project", "projectId": project["id"]})[0] == 404
+    assert ledger.call("GET", "/api/v1/expenses/" + saved["id"])[0] == 404
     replacement = create(ledger, ids=[101, 102], name="Replacement")
+    before_repeat = rows(ledger)
     assert replacement["id"] != project["id"]
     assert remove(ledger, project) == (204, None)
-    with ledger.store.connect() as db:
-        assert db.execute("SELECT COUNT(*) FROM ledger_activity_events WHERE action='delete'").fetchone()[0] == 1
+    assert rows(ledger) == before_repeat
 
 
 @pytest.mark.parametrize("role", ["admin", "editor", "viewer"])
@@ -91,9 +76,9 @@ def test_owner_api_key_with_project_write_scope_removes_only_allowed_project(led
     assert rows(ledger) == before
     assert remove(ledger, project, headers=headers) == (204, None)
     with ledger.store.connect() as db:
-        assert db.execute("SELECT deleted_at FROM ledger_projects WHERE id=?", (project["id"],)).fetchone()[0]
-        actor = json.loads(db.execute("SELECT actor_json FROM ledger_activity_events WHERE action='delete'").fetchone()[0])
-        assert actor["userId"] == OWNER and actor["kind"] == "api_key"
+        assert db.execute("SELECT COUNT(*) FROM ledger_projects WHERE id=?", (project["id"],)).fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM ledger_projects WHERE id=?", (outside["id"],)).fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM ledger_activity_events WHERE project_id=?", (project["id"],)).fetchone()[0] == 0
 
 
 def test_admin_api_key_cannot_remove_project(ledger):
@@ -120,7 +105,7 @@ def test_owner_key_removal_rechecks_credential_in_atomic_write(ledger, race):
         raced = False
         async def batch(self, statements):
             statements = list(statements)
-            if not self.raced and any(item.sql.lstrip().startswith("UPDATE ledger_projects SET deleted_at=") for item in statements):
+            if not self.raced and any(item.sql.lstrip().startswith("DELETE FROM ledger_projects") for item in statements):
                 self.raced = True
                 with self.store.connect() as db:
                     if race == "revoke":
@@ -135,7 +120,11 @@ def test_owner_key_removal_rechecks_credential_in_atomic_write(ledger, race):
 
     binding = Racing(ledger.store)
     add_usage_meter(ledger, binding)
-    assert remove(ledger, project, headers={"Authorization": "Bearer " + result["key"]})[0] == 412
+    expected = {"revoke": (401, "UNAUTHENTICATED"), "expire": (401, "UNAUTHENTICATED"),
+        "restriction": (403, "TARGET_FORBIDDEN"), "scope": (403, "INSUFFICIENT_SCOPE")}
+    code, error = expected[race]
+    assert remove(ledger, project, headers={"Authorization": "Bearer " + result["key"]}) == (
+        code, {"error": {"code": error}})
     assert binding.raced
     assert rows(ledger) == before
     with ledger.store.connect() as db:
@@ -173,13 +162,12 @@ def test_removal_requires_current_quoted_revision(ledger, header, status):
     assert rows(ledger) == before
 
 
-def test_removal_checks_maximum_revision_before_native_dispatch(ledger):
+def test_physical_removal_accepts_current_maximum_revision_without_increment(ledger):
     project = blank(ledger)
     with ledger.store.connect() as db:
         db.execute("UPDATE ledger_projects SET revision=9007199254740991 WHERE id=?", (project["id"],))
-    before = rows(ledger)
-    assert remove(ledger, project, revision=9007199254740991) == (409, {"error": {"code": "REVISION_LIMIT"}})
-    assert rows(ledger) == before
+    assert remove(ledger, project, revision=9007199254740991) == (204, None)
+    assert rows(ledger)["ledger_projects"] == []
 
 
 def test_email_only_owner_removes_without_github_and_lost_bound_owner_also_can_remove(ledger):
@@ -198,8 +186,8 @@ def test_email_only_owner_removes_without_github_and_lost_bound_owner_also_can_r
     assert ledger.gateway.calls == []
 
 
-@pytest.mark.parametrize("race", ["session", "user", "project", "binding"])
-def test_same_batch_removal_fences_roll_back_tombstone_unlink_activity_and_usage(ledger, race):
+@pytest.mark.parametrize("race", ["session", "user", "project"])
+def test_same_batch_erasure_fences_roll_back_business_children_and_usage(ledger, race):
     project = create(ledger, ids=[101], name="Race proof")
     before = rows(ledger)
     session_id = ledger.headers["Cookie"].split("=", 1)[1]
@@ -208,7 +196,7 @@ def test_same_batch_removal_fences_roll_back_tombstone_unlink_activity_and_usage
         raced = False
         async def batch(self, statements):
             statements = list(statements)
-            if not self.raced and any(item.sql.lstrip().startswith("UPDATE ledger_projects SET deleted_at=") for item in statements):
+            if not self.raced and any(item.sql.lstrip().startswith("DELETE FROM ledger_projects WHERE") for item in statements):
                 self.raced = True
                 with self.store.connect() as db:
                     if race == "session":
@@ -228,7 +216,7 @@ def test_same_batch_removal_fences_roll_back_tombstone_unlink_activity_and_usage
     binding = Racing(ledger.store)
     add_usage_meter(ledger, binding)
     ledger.gateway.calls.clear()
-    assert remove(ledger, project)[0] == 412
+    assert remove(ledger, project)[0] == {"session": 401, "user": 403, "project": 412}[race]
     assert binding.raced and ledger.gateway.calls == []
     after = rows(ledger)
     assert after["ledger_activity_events"] == before["ledger_activity_events"]
@@ -241,7 +229,7 @@ def test_same_batch_removal_fences_roll_back_tombstone_unlink_activity_and_usage
         assert db.execute("SELECT COUNT(*) FROM ledger_plan_usage").fetchone()[0] == 0
 
 
-def test_removal_uses_bounded_scalar_unlinks_and_never_reclaims_stored_capacity(ledger):
+def test_erasure_uses_one_closed_bounded_batch_and_releases_actual_capacity(ledger):
     ledger.gateway.visible["synthetic-access-token"] = list(range(101, 131))
     project = create(ledger, ids=range(101, 131), name="Thirty repositories")
 
@@ -249,7 +237,7 @@ def test_removal_uses_bounded_scalar_unlinks_and_never_reclaims_stored_capacity(
         mutations = []
         async def batch(self, statements):
             statements = list(statements)
-            if any(item.sql.lstrip().startswith("UPDATE ledger_projects SET deleted_at=") for item in statements):
+            if any(item.sql.lstrip().startswith("DELETE FROM ledger_projects WHERE") for item in statements):
                 self.mutations.append(statements)
             return await super().batch(statements)
 
@@ -260,10 +248,11 @@ def test_removal_uses_bounded_scalar_unlinks_and_never_reclaims_stored_capacity(
     assert ledger.gateway.calls == [] and len(binding.mutations) == 1
     batch = binding.mutations[0]
     unlinks = [item for item in batch if item.sql.lstrip().startswith("DELETE FROM ledger_project_repositories")]
-    assert len(unlinks) == 30 and len(batch) <= 64
-    assert all("github_repo_id=?" in item.sql for item in unlinks)
-    assert not any(item.sql.lstrip().startswith(("UPDATE expenses", "DELETE FROM expenses", "UPDATE expense_recurring_rules")) for item in batch)
+    assert len(unlinks) == 1 and len(batch) == 17
+    assert all("owner_id=? AND project_id=?" in item.sql for item in unlinks)
+    assert any(item.sql.lstrip().startswith("DELETE FROM expenses") for item in batch)
     with ledger.store.connect() as db:
         assert db.execute("SELECT projects,writes FROM ledger_plan_usage").fetchone()["writes"] == 1
-        # The retained project still counts in storage capacity.
-        assert db.execute("SELECT COUNT(*) FROM ledger_projects").fetchone()[0] == 1
+        # Active expense slots are released; cumulative projects/spend remain.
+        assert db.execute("SELECT COUNT(*) FROM ledger_projects").fetchone()[0] == 0
+        assert db.execute("SELECT projects,records FROM ledger_plan_usage").fetchone()[:] == (1, 0)

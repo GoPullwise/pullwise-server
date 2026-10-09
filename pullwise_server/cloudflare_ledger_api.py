@@ -276,7 +276,7 @@ async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path
     try:
         if kind == "projects":
             return await _projects(binding, gateway, method, item_id, headers, params, body, now, scope)
-        return await _categories(binding, method, item_id, headers, body, now, scope)
+        return await _categories(binding, method, item_id, headers, body, now, scope, params)
     except PrincipalAuthError as exc:
         return _error(exc.status, exc.code)
     except GitHubFailure as exc:
@@ -369,6 +369,8 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
     existing = rows[0][0] if rows[0] and rows[0][0]["owner_id"] == user["id"] else None
     if item_id and existing is None:
         return _error(404, "NOT_FOUND")
+    if existing and existing.get("deleted_at") is not None:
+        return _error(409, "CATEGORY_REMOVED")
     current_bindings = rows[1] if existing else []
     if method == "PATCH":
         expected = _revision(headers)
@@ -491,63 +493,9 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
 
 
 async def _remove_project(binding, item_id, headers, now, scope):
-    """Owner-authorized tombstone and bounded unlink, never financial cascade."""
-    user, _, proof, rows = await _authorized(binding, headers, scope, now,
-        [binding.prepare("SELECT * FROM ledger_projects WHERE id=?").bind(item_id),
-         binding.prepare("SELECT * FROM ledger_project_repositories WHERE project_id=? ORDER BY github_repo_id LIMIT 31").bind(item_id)],
-        "project", item_id)
-    # The effective user is the selected ledger Owner even for members. Both
-    # API keys and browser sessions must belong to the actual ledger Owner.
-    if (proof.get("workspace_role") != "owner"
-            or proof.get("actor_user_id") != user["id"]
-            or proof.get("workspace_id") != user["id"]):
-        return _error(403, "PROJECT_OWNER_REQUIRED")
-    if (proof.get("key") is None and (
-            _header(headers, "Authorization") or _header(headers, "X-Pullwise-Api-Key")
-            or proof.get("session_id") not in _cookie_sessions(headers))):
-        return _error(403, "PROJECT_OWNER_SESSION_REQUIRED")
-    expected = _revision(headers)
-    if expected is None:
-        return _error(428, "PRECONDITION_REQUIRED")
-    if expected < 0:
-        return _error(422, "INVALID_INPUT")
-    # The workspace is resolved by authentication, never by a caller-owned ID.
-    existing = rows[0][0] if rows[0] and rows[0][0]["owner_id"] == user["id"] else None
-    if existing is None:
-        return _error(404, "NOT_FOUND")
-    if existing["deleted_at"] is not None:
-        return 204, None
-    if expected != existing["revision"]:
-        return _error(412, "PRECONDITION_FAILED")
-    if expected >= MAX_REVISION:
-        return _error(409, "REVISION_LIMIT")
-    bindings = [row for row in rows[1] if row["owner_id"] == user["id"]]
-    if len(bindings) > MAX_REPOSITORIES:
-        return _error(409, "PROJECT_BINDINGS_INVALID")
-    stamp = _timestamp(now)
-    from .cloudflare_ledger_activity import activity_commands, project_snapshot
-    activity = await activity_commands(binding, user, "project", item_id, "delete",
-        project_snapshot(existing, bindings), None, now, proof=proof)
-    commands = [_write_guard(binding, proof, user["id"], now),
-        binding.prepare("""UPDATE ledger_projects SET deleted_at=?,status='archived',
-            github_repo_id=NULL,github_full_name=NULL,github_organization_id=NULL,
-            revision=revision+1,updated_at=? WHERE id=? AND owner_id=? AND revision=?
-            AND deleted_at IS NULL""").bind(stamp, stamp, item_id, user["id"], expected),
-        binding.prepare("INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN changes()=1 THEN 1 ELSE 0 END)")]
-    commands.extend(binding.prepare("""DELETE FROM ledger_project_repositories
-        WHERE project_id=? AND github_repo_id=? AND owner_id=?""").bind(
-            item_id, row["github_repo_id"], user["id"]) for row in bindings)
-    commands.extend([binding.prepare("""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN
-        NOT EXISTS(SELECT 1 FROM ledger_project_repositories WHERE owner_id=? AND project_id=?)
-        THEN 1 ELSE 0 END)""").bind(user["id"], item_id),
-        *activity, binding.prepare("DELETE FROM d1_command_guard")])
-    try:
-        await binding.batch(commands)
-    except PlanLimitError as error:
-        return error.response()
-    except Exception:
-        return _error(412, "PRECONDITION_FAILED")
-    return 204, None
+    from .cloudflare_project_erasure import remove_project
+    return await remove_project(binding=binding, item_id=item_id, headers=headers, now=now)
+
 
 
 async def _repository_conflict(binding, owner_id, selected, project_id):
@@ -565,16 +513,12 @@ def _insert_repository_bindings(binding, owner_id, project_id, selected, repos, 
         for repo_id in selected]
 
 
-async def _categories(binding, method, item_id, headers, body, now, scope):
+async def _categories(binding, method, item_id, headers, body, now, scope, params=None):
     if method == "GET" and item_id:
         return _error(405, "METHOD_NOT_ALLOWED")
     if method == "GET":
-        user, _, auth, validate = await ledger_principal(
-            binding=binding, headers=headers, scope=scope, now=now)
-        parts = await binding.batch([*auth, binding.prepare(
-            "SELECT * FROM expense_categories WHERE owner_id=? ORDER BY name,id").bind(user["id"])])
-        validate([part.results for part in parts[:len(auth)]])
-        return 200, [_category(row) for row in parts[-1].results]
+        from .cloudflare_ledger_categories import list_categories
+        return await list_categories(binding=binding, headers=headers, params=params or {}, now=now)
     if method in {"POST", "PATCH"}:
         if (not isinstance(body, dict) or set(body) - {"name", "color"}
                 or not isinstance(body.get("name"), str) or not 1 <= len(body["name"].strip()) <= 80
@@ -586,6 +530,8 @@ async def _categories(binding, method, item_id, headers, body, now, scope):
     existing = rows[0][0] if rows[0] and rows[0][0]["owner_id"] == user["id"] else None
     if item_id and existing is None:
         return _error(404, "NOT_FOUND")
+    if existing and existing.get("deleted_at") is not None:
+        return _error(409, "CATEGORY_REMOVED")
     stamp = _timestamp(now)
     if method == "POST":
         category_id = "cat_" + uuid.uuid4().hex
@@ -643,79 +589,6 @@ async def _categories(binding, method, item_id, headers, body, now, scope):
         "archivedAt": None})
 
 
-# Keep every historical reference, including deleted expenses and creation
-# replays after a record changes category. Each EXISTS has an indexed owner
-# prefix and short-circuits; it returns no business records or JSON payloads.
-# JSON predicates can still traverse an owner's history in the worst case;
-# the preview meter reserves that bounded physical traversal without json_each.
-_CATEGORY_REFERENCES = """EXISTS(SELECT 1 FROM expenses WHERE owner_id=? AND category_id=?)
-    OR EXISTS(SELECT 1 FROM expense_events WHERE owner_id=? AND
-        (json_extract(before_json,'$.categoryId')=? OR json_extract(after_json,'$.categoryId')=?
-            OR json_extract(after_json,'$.assistance.suggestions.categoryId')=?))
-    OR EXISTS(SELECT 1 FROM expense_create_idempotency WHERE owner_id=?
-        AND (json_extract(response_json,'$.categoryId')=?
-            OR json_extract(response_json,'$.assistance.suggestions.categoryId')=?))
-    OR EXISTS(SELECT 1 FROM expense_recurring_rules WHERE owner_id=? AND
-        (json_extract(template_json,'$.category_id')=? OR json_extract(create_response_json,'$.categoryId')=?))
-    OR EXISTS(SELECT 1 FROM expense_suggestion_events WHERE owner_id=?
-        AND (category_id=? OR accepted_category_id=?))"""
-
-
-def _category_reference_values(owner, category):
-    return (owner, category, owner, category, category, category, owner, category, category,
-            owner, category, category, owner, category, category)
-
-
-def _category_reference_statement(binding, owner, category):
-    return binding.prepare("SELECT CASE WHEN " + _CATEGORY_REFERENCES +
-        " THEN 1 ELSE 0 END AS in_use").bind(*_category_reference_values(owner, category))
-
-
-async def _category_removal_snapshot(binding, item_id, headers, now):
-    proof = {}
-    user, _, auth, validate = await ledger_principal(
-        binding=binding, headers=headers, scope="categories:write", now=now, proof=proof)
-    parts = await binding.batch([*auth,
-        binding.prepare("SELECT * FROM expense_categories WHERE id=?").bind(item_id),
-        _category_reference_statement(binding, user["id"], item_id)])
-    validate([part.results for part in parts[:len(auth)]])
-    rows = parts[-2].results
-    existing = rows[0] if rows and rows[0]["owner_id"] == user["id"] else None
-    return user, proof, existing, parts[-1].results[0]["in_use"]
-
-
 async def _remove_category(binding, item_id, headers, body, now):
-    if body is not None and body != {}:
-        return _error(422, "INVALID_INPUT")
-    user, proof, existing, in_use = await _category_removal_snapshot(binding, item_id, headers, now)
-    if existing is None:
-        return _error(404, "NOT_FOUND")
-    expected = _revision(headers)
-    if expected is None:
-        return _error(428, "PRECONDITION_REQUIRED")
-    if expected < 0:
-        return _error(422, "INVALID_INPUT")
-    if expected != existing["revision"]:
-        return _error(412, "PRECONDITION_FAILED")
-    if in_use:
-        return _error(409, "CATEGORY_IN_USE")
-    commands = [_write_guard(binding, proof, user["id"], now),
-        binding.prepare("DELETE FROM expense_categories WHERE id=? AND owner_id=? AND revision=? AND NOT (" +
-            _CATEGORY_REFERENCES + ")").bind(item_id, user["id"], expected,
-                *_category_reference_values(user["id"], item_id)),
-        binding.prepare("INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN changes()=1 THEN 1 ELSE 0 END)"),
-        binding.prepare("DELETE FROM d1_command_guard")]
-    try:
-        await binding.batch(commands)
-    except PlanLimitError as error:
-        return error.response()
-    except Exception as error:
-        # Only a known, rolled-back CHECK fence may be reclassified. Unknown
-        # native outcomes and preview accounting stops must remain failures.
-        if "CHECK constraint failed: ok=1" not in str(error):
-            raise
-        _, _, row, in_use = await _category_removal_snapshot(binding, item_id, headers, now)
-        if row is None or row["revision"] != expected:
-            return _error(412, "PRECONDITION_FAILED")
-        return _error(409, "CATEGORY_IN_USE") if in_use else _error(412, "PRECONDITION_FAILED")
-    return 204, None
+    from .cloudflare_ledger_categories import remove_category
+    return await remove_category(binding=binding, item_id=item_id, headers=headers, body=body, now=now)

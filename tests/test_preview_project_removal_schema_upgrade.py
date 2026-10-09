@@ -15,13 +15,16 @@ from test_preview_recurring_schema_upgrade import v6, schema
 from test_preview_blank_schema_upgrade import v5
 from test_preview_schema_upgrade import SQLiteD1
 from pullwise_server.cloudflare_preview_schema import (
-    SCHEMA_VERSION, SCHEMA_FINGERPRINT, SCHEMA_OBJECTS, SCHEMA_SQL, INDEX_COUNTS,
+    V10_SCHEMA_VERSION as SCHEMA_VERSION, V10_SCHEMA_FINGERPRINT as SCHEMA_FINGERPRINT,
+    V10_SCHEMA_OBJECTS as SCHEMA_OBJECTS, V10_SCHEMA_SQL as SCHEMA_SQL,
+    V10_INDEX_COUNTS as INDEX_COUNTS,
     V9_SCHEMA_VERSION, V9_SCHEMA_FINGERPRINT, V9_SCHEMA_OBJECTS, V9_INDEX_COUNTS,
     UPGRADE_V10_SQL,
 )
 from pullwise_server.cloudflare_preview_budget import (
     upgrade_product_schema, upgrade_product_schema_v6, upgrade_product_schema_v7,
     upgrade_product_schema_v8, upgrade_product_schema_v9, upgrade_product_schema_v10,
+    upgrade_product_schema_v11,
     migrate_product_state_records, _upgrade_v10_plan,
     begin_product_schema_upgrade_v10, _V9_COUNT_SQL, ProductMeteredD1,
 )
@@ -124,10 +127,12 @@ def test_upgrade_preserves_every_history_marker_and_cumulative_budget_across_res
     restarted = BudgetJournal(LocalSql(storage), preview_product=True, product_operations=True)
     asyncio.run(completed_paths(raw, restarted, include_current=True))
     assert raw.calls == 4 and restarted.snapshot() == after
+    asyncio.run(upgrade_product_schema_v11(raw, restarted, clock=lambda: 12))
+    calls = raw.calls
     ticket = restarted.begin_product(now=13)
     meter = ProductMeteredD1(raw, restarted, ticket, clock=lambda: 14)
     asyncio.run(meter.ensure_cardinality())
-    assert raw.calls == 4 and meter.records_integrity_verified is True
+    assert raw.calls == calls and meter.records_integrity_verified is True
     restarted.finish(ticket, now=15)
 
 
@@ -282,7 +287,9 @@ def test_tombstone_constraints_preserve_legacy_empty_name_and_financial_foreign_
 
 
 def test_fresh_schema_matches_canonical_v10_migration_without_new_tables_or_indexes():
-    migrations = sorted((Path(__file__).resolve().parents[1] / 'cloudflare/server/migrations').glob('*.sql'))
+    migrations = sorted(path for path in
+        (Path(__file__).resolve().parents[1] / 'cloudflare/server/migrations').glob('*.sql')
+        if int(path.name[:4]) <= 10)
     assert migrations[-1].name == '0010_project_removal.sql'
     with sqlite3.connect(':memory:') as canonical, sqlite3.connect(':memory:') as compiled:
         for migration in migrations:
@@ -304,7 +311,7 @@ def test_fresh_schema_matches_canonical_v10_migration_without_new_tables_or_inde
         assert [len(pattern.encode()) for pattern in patterns] == [42, 32]
 
 
-def test_native_fixture_seed_is_valid_v9_and_imports_true_current_v10_target():
+def test_native_fixture_seed_is_valid_v9_and_imports_frozen_v10_target():
     """Validate fixture inputs locally without starting or simulating Workerd."""
     script = Path(__file__).resolve().parents[1] / 'scripts/check-project-removal-schema-native.py'
     driver = ast.parse(script.read_text())

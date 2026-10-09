@@ -142,6 +142,23 @@ def test_every_current_literal_update_has_a_unique_key_fence():
     from pathlib import Path
     from pullwise_server.cloudflare_preview_budget import sql_write_bound
     from pullwise_server.cloudflare_preview_schema import INDEX_COUNTS
+    from pullwise_server.cloudflare_preview_business_clear import BUSINESS_TABLES, CLEAR_SQL
+    from pullwise_server.cloudflare_project_erasure import D, PROJECT_MUTATIONS, compile_named
+    capacity_reset = "UPDATE ledger_plan_usage SET projects=0,records=0,project_delta=0,record_delta=0"
+    # The sole whole-table literal update is private one-use maintenance. Its
+    # complete fixed group is admitted by its own pre-reserved plan, while the
+    # ordinary scalar SQL meter must continue to reject this exact statement.
+    assert CLEAR_SQL == (*("DELETE FROM " + table for table in BUSINESS_TABLES),
+        capacity_reset, "SELECT 1 AS maintenance_applied") and len(CLEAR_SQL) == 12
+    with pytest.raises(ValueError, match="unique key"):
+        sql_write_bound(capacity_reset)
+    unlink_sql = PROJECT_MUTATIONS[4][1]
+    # The f-string's first constant is a fragment of the fixed private unlink,
+    # whose complete SQL remains unadmitted by the generic scalar matcher.
+    unlink_fragment = unlink_sql.split(D, 1)[0].strip()
+    unlinked, _ = compile_named(unlink_sql, {"owner": "o", "project": "p"})
+    with pytest.raises(ValueError, match="unique key"):
+        sql_write_bound(unlinked)
     count = 0
     for path in (Path(__file__).resolve().parents[1] / "pullwise_server").glob("cloudflare_*.py"):
         if path.stem in {"cloudflare_validation_budget", "cloudflare_preview_budget",
@@ -155,6 +172,10 @@ def test_every_current_literal_update_has_a_unique_key_fence():
                     # A scalar row can remove/add every reviewed index entry.
                     # Incomplete quoted fragments in trusted SQL concatenation
                     # are covered by runtime metering and the domain tests.
+                    if path.stem == "cloudflare_preview_business_clear" and sql == capacity_reset:
+                        continue
+                    if path.stem == "cloudflare_project_erasure" and sql == unlink_fragment:
+                        continue
                     assert 0 <= sql_write_bound(sql) <= 1 + 2 * max(INDEX_COUNTS.values())
                     count += 1
     assert count >= 15

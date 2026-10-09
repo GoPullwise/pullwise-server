@@ -58,7 +58,8 @@ def save_user_with_unusable_github_token(ledger, user_id):
 def add_usage_meter(ledger, binding=None, policy=None):
     root = Path(__file__).resolve().parents[1] / "cloudflare/server/migrations"
     with ledger.store.connect() as db:
-        db.executescript((root / "0004_ledger_plan_usage.sql").read_text())
+        if not db.execute("SELECT 1 FROM sqlite_schema WHERE name='ledger_plan_usage'").fetchone():
+            db.executescript((root / "0004_ledger_plan_usage.sql").read_text())
     ledger.binding = PlanLimitedD1(binding or ledger.binding, policy=policy, now=ledger.now + 3)
 
 

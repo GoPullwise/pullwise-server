@@ -62,7 +62,8 @@ def app(tmp_path):
             db.execute("INSERT INTO workspace_members VALUES(?,?,?,1,'joined','updated',NULL,'owner')", ("owner", identifier, role))
         db.execute("""INSERT INTO ledger_projects(id,owner_id,name,github_repo_id,github_full_name,
             description,status,revision,created_at,updated_at) VALUES('prj_1','owner','Standalone',NULL,NULL,'','active',1,'created','updated')""")
-        db.execute("INSERT INTO expense_categories VALUES('cat_1','owner','Hosting',NULL,NULL,1,'created','updated')")
+        db.execute("INSERT INTO expense_categories(id,owner_id,name,color,archived_at,revision,created_at,updated_at) "
+                   "VALUES('cat_1','owner','Hosting',NULL,NULL,1,'created','updated')")
         db.commit()
     raw, policy = SafeD1(store), default_policy()
 

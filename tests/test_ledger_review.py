@@ -65,9 +65,34 @@ def test_saved_review_has_per_dimension_results_without_financial_or_commercial_
     with ledger.store.connect() as db:
         assert db.execute("SELECT attempts FROM expense_suggestion_budget").fetchone()[0] == 1
         assert db.execute("SELECT count(*) FROM expense_suggestion_events").fetchone()[0] == 1
+        assert db.execute("SELECT recorded_expense_id FROM expense_suggestion_events").fetchone()[0] == saved["id"]
         assert db.execute("SELECT count(*) FROM d1_command_guard").fetchone()[0] == 0
     assert automatic.call(ledger, method="GET", path=f"/api/v1/expenses/{saved['id']}")[1] == {
         key: value for key, value in saved.items() if key != "assistance"}
+
+
+def test_saved_shared_review_is_attributed_and_erased_after_source_moves_into_project(ledger):
+    body, saved, _ = setup_expense(ledger)
+    status, checked = review(ledger, saved, automatic.Provider())
+    assert status == 200
+    status, project = automatic.call(ledger, {"name": "Erase current attribution"}, path="/api/v1/projects")
+    assert status == 201
+    status, moved = automatic.call(ledger, {**body,
+        "target": {"kind": "project", "projectId": project["id"]}}, method="PATCH",
+        path=f"/api/v1/expenses/{saved['id']}", headers={**ledger.headers, "If-Match": '"1"'})
+    assert status == 200 and moved["revision"] == 2
+    with ledger.store.connect() as db:
+        row = db.execute("SELECT draft_target_kind,recorded_expense_id FROM expense_suggestion_events WHERE id=?",
+            (checked["suggestionId"],)).fetchone()
+        assert tuple(row) == ("shared", saved["id"])
+        reserved = db.execute("SELECT jev_reserved_microusd FROM ledger_plan_usage").fetchone()[0]
+    assert automatic.call(ledger, method="DELETE", path=f"/api/v1/projects/{project['id']}",
+        headers={**ledger.headers, "If-Match": '"1"'}) == (204, None)
+    with ledger.store.connect() as db:
+        assert db.execute("SELECT count(*) FROM expense_suggestion_events WHERE id=?",
+            (checked["suggestionId"],)).fetchone()[0] == 0
+        assert db.execute("SELECT count(*) FROM expenses WHERE id=?", (saved["id"],)).fetchone()[0] == 0
+        assert db.execute("SELECT jev_reserved_microusd FROM ledger_plan_usage").fetchone()[0] == reserved
 
 
 @pytest.mark.parametrize("provider", [None, automatic.Provider(failure=TimeoutError("synthetic transport")),

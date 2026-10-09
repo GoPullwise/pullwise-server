@@ -173,8 +173,8 @@ def validate_contract() -> None:
         from pullwise_server.cloudflare_preview_schema import (
             SCHEMA_VERSION, SCHEMA_SQL, SCHEMA_OBJECTS, SCHEMA_FINGERPRINT, MIGRATIONS,
         )
-        if SCHEMA_VERSION != 10 or len(SCHEMA_SQL) > 64:
-            raise ValueError("project removal schema authority or fresh batch bound is invalid")
+        if SCHEMA_VERSION != 11 or len(SCHEMA_SQL) > 64:
+            raise ValueError("business erasure schema authority or fresh batch bound is invalid")
         def objects(connection):
             return tuple((kind, name, table, " ".join(sql.split()) if sql else None)
                          for kind, name, table, sql in connection.execute(
@@ -182,7 +182,7 @@ def validate_contract() -> None:
         canonical = objects(database)
         if canonical != SCHEMA_OBJECTS or hashlib.sha256(json.dumps(
                 canonical, separators=(",", ":")).encode()).hexdigest() != SCHEMA_FINGERPRINT:
-            raise ValueError("canonical migrations and project removal schema authority disagree")
+            raise ValueError("canonical migrations and business erasure schema authority disagree")
         declared = {item["name"]: item["sha256"] for item in MIGRATIONS}
         if declared != {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in migrations}:
             raise ValueError("canonical migration hashes disagree with packaged authority")
@@ -190,7 +190,7 @@ def validate_contract() -> None:
             for sql in SCHEMA_SQL:
                 compiled.execute(sql)
             if objects(compiled) != canonical:
-                raise ValueError("fresh project removal schema differs from canonical migrations")
+                raise ValueError("fresh business erasure schema differs from canonical migrations")
 
 
 def main() -> int:

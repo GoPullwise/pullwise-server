@@ -220,12 +220,12 @@ async def _review(binding, headers, item_id, expected, now, gateway):
         outcome = "available" if chosen_category or chosen_target else ("uncertain" if answer else "unavailable")
         commands.append(binding.prepare("""INSERT INTO expense_suggestion_events(id,owner_id,created_at,
             question_version,draft_target_kind,draft_project_id,model_version,outcome,category_id,target_kind,
-            category_probabilities_json,target_probabilities_json)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""").bind(event_id, user["id"], _timestamp(now), QUESTION_VERSION,
+            category_probabilities_json,target_probabilities_json,recorded_expense_id)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""").bind(event_id, user["id"], _timestamp(now), QUESTION_VERSION,
                 source["target_kind"], source["project_id"], DEFAULT_JEV_MODEL if answer else None, outcome,
                 chosen_category, chosen_target,
                 json.dumps(category_answer["probabilities"]) if category_answer else None,
-                json.dumps(target_answer["probabilities"]) if target_answer else None))
+                json.dumps(target_answer["probabilities"]) if target_answer else None, source["id"]))
         result["suggestionId"] = event_id
     commands.append(binding.prepare("DELETE FROM d1_command_guard"))
     try:

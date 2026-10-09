@@ -185,7 +185,9 @@ def test_archived_project_consumes_capacity_removed_project_releases_it_and_repa
     assert request(app, "/api/v1/projects/prj_1", method="DELETE", revision=1)[0] == 204
     usage = app.rows("ledger_plan_usage")[0]
     assert (usage["projects"], usage["records"]) == (1, 1)
-    assert next(row for row in app.rows("expenses") if row["id"] == project_expense["id"])["deleted_at"] is None
+    assert all(row["id"] != project_expense["id"] for row in app.rows("expenses"))
+    assert all(row["expense_id"] != project_expense["id"] for row in app.rows("expense_events"))
+    assert all(row["expense_id"] != project_expense["id"] for row in app.rows("expense_create_idempotency"))
     assert request(app, "/api/v1/expenses/" + project_expense["id"], method="GET")[0] == 404
     assert [item["id"] for item in request(app, method="GET")[1]["items"]] == [shared["id"]]
     create(app, key="available")

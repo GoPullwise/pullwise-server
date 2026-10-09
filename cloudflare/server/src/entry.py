@@ -30,7 +30,9 @@ from pullwise_server.cloudflare_jev_gateway import WorkerJevGateway
 from pullwise_server.cloudflare_ledger_reports import CsvExport
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1, PlanLimitError
 from pullwise_server.ledger_plan_policy import parse_policy
-from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initialize_product, reconcile_schema_reads, upgrade_product_schema, upgrade_product_schema_v6, upgrade_product_schema_v7, upgrade_product_schema_v8, upgrade_product_schema_v9, upgrade_product_schema_v10, migrate_product_state_records
+from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initialize_product, reconcile_schema_reads, upgrade_product_schema, upgrade_product_schema_v6, upgrade_product_schema_v7, upgrade_product_schema_v8, upgrade_product_schema_v9, upgrade_product_schema_v10, upgrade_product_schema_v11, migrate_product_state_records
+from pullwise_server.cloudflare_preview_schema import SCHEMA_VERSION
+from pullwise_server.cloudflare_preview_business_clear import business_clear_pending, clear_preview_business, business_clear_receipt
 from pullwise_server.cloudflare_preview_rate import PreviewRateLimiter, PreviewRateLimit, EmailRateLimiter, EmailRateLimit, request_channel
 from pullwise_server.cloudflare_native_d1 import NativeD1
 from pullwise_server.json_input import validate_json_unicode
@@ -492,7 +494,12 @@ class ValidationBudget(DurableObject):
             async with self._product_lock:
                 journal = self._journal()
                 state = journal.snapshot()
-                if (not state.get("schema_ready") or state.get("schema_version") != 10
+                try:
+                    if business_clear_pending(self.env, journal):
+                        return {"ok": False, "error": "PREVIEW_BUSINESS_CLEAR_PENDING"}
+                except BudgetError as error:
+                    return {"ok": False, "error": str(error)}
+                if (not state.get("schema_ready") or state.get("schema_version") != SCHEMA_VERSION
                         or state.get("state_storage_version") != 1):
                     return {"ok": False, "error": "SCHEMA_UPGRADE_REQUIRED"}
                 ticket = binding = None
@@ -604,9 +611,14 @@ class ValidationBudget(DurableObject):
             async with self._product_lock:
                 journal = self._journal()
                 state = journal.snapshot()
+                try:
+                    if business_clear_pending(self.env, journal):
+                        return {"ok": False, "error": "PREVIEW_BUSINESS_CLEAR_PENDING"}
+                except BudgetError as error:
+                    return {"ok": False, "error": str(error)}
                 # Scheduler never initializes or migrates user data. Publication
                 # upgrades once through the reviewed ordinary preview path first.
-                if not state.get("schema_ready") or state.get("schema_version") != 10:
+                if not state.get("schema_ready") or state.get("schema_version") != SCHEMA_VERSION:
                     return {"ok": False, "error": "SCHEMA_UPGRADE_REQUIRED"}
                 ticket = binding = None
                 try:
@@ -668,6 +680,7 @@ class ValidationBudget(DurableObject):
                 "schemaReady": bool(state.get("schema_ready")),
                 "schemaVersion": state.get("schema_version", 4 if state.get("schema_ready") else 0),
                 "stateStorageVersion": state.get("state_storage_version", 0),
+                "businessClear": business_clear_receipt(journal),
                 "stopped": state["stopped"]},
                 headers={"Cache-Control": "no-store"})
         if (request.method not in {"GET", "POST", "PATCH", "DELETE"} or
@@ -685,6 +698,13 @@ class ValidationBudget(DurableObject):
                 try:
                     async def execute():
                         nonlocal ticket, binding
+                        # An armed one-use maintenance action excludes business
+                        # and scheduler work under the original product lock.
+                        # Only ordinary health can perform the reviewed upgrade
+                        # and closed clear; HTTP inputs never select its recipe.
+                        if business_clear_pending(self.env, journal) and not (
+                                request.method == "GET" and path == "/health"):
+                            raise BudgetError("PREVIEW_BUSINESS_CLEAR_PENDING")
                         reconcile_schema_reads(journal)
                         native = NativeD1(self.env.DB)
                         if (str(getattr(self.env, "PULLWISE_PREVIEW_SCHEMA_UPGRADE_ENABLED", "0")) == "1"
@@ -705,8 +725,12 @@ class ValidationBudget(DurableObject):
                         if (str(getattr(self.env, "PULLWISE_PREVIEW_SCHEMA_V10_UPGRADE_ENABLED", "0")) == "1"
                                 and journal.snapshot().get("schema_ready")):
                             await upgrade_product_schema_v10(native, journal)
+                        if (str(getattr(self.env, "PULLWISE_PREVIEW_SCHEMA_V11_UPGRADE_ENABLED", "0")) == "1"
+                                and journal.snapshot().get("schema_ready")):
+                            await upgrade_product_schema_v11(native, journal)
                         await initialize_product(native, journal)
                         await migrate_product_state_records(native, journal)
+                        await clear_preview_business(native, journal, self.env)
                         ticket = journal.begin_product(now=time.time())
                         binding = ProductMeteredD1(native, journal, ticket, rate_limiter=self.rate_limiter,
                             rate_channel=request_channel(request.method, path))

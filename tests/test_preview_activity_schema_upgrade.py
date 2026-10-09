@@ -18,7 +18,7 @@ from pullwise_server.cloudflare_preview_schema import (
 from pullwise_server.cloudflare_preview_budget import (
     upgrade_product_schema_v8, upgrade_product_schema_v9, _upgrade_v9_plan,
     begin_product_schema_upgrade_v9, _V8_COUNT_SQL, _input_bound, sql_write_bound,
-    ProductMeteredD1, upgrade_product_schema_v10,
+    ProductMeteredD1, upgrade_product_schema_v10, upgrade_product_schema_v11,
 )
 from pullwise_server.cloudflare_validation_budget import BudgetJournal, BudgetError
 
@@ -75,9 +75,10 @@ def test_activity_extension_preserves_identity_finance_membership_and_journal(v8
     restarted = BudgetJournal(LocalSql(storage), preview_product=True, product_operations=True)
     run(raw, restarted)
     assert raw.calls == 4 and restarted.snapshot() == after
-    # Current product reads use v10. Both extensions prove strict auth records
+    # Current product reads use v11. Every extension proves strict auth records
     # within their bounded upgrade, so a healthy first read needs no scan.
     asyncio.run(upgrade_product_schema_v10(raw, restarted, clock=lambda: 12))
+    asyncio.run(upgrade_product_schema_v11(raw, restarted, clock=lambda: 12))
     calls = raw.calls
     ticket = restarted.begin_product(now=12)
     meter = ProductMeteredD1(raw, restarted, ticket, clock=lambda: 13)
@@ -181,6 +182,6 @@ def test_fresh_schema_matches_canonical_migrations_within_original_batch_cap():
             canonical.executescript(migration.read_text())
         for sql in SCHEMA_SQL:
             compiled.execute(sql)
-        assert len(SCHEMA_SQL) == 41 <= 64
+        assert len(SCHEMA_SQL) == 48 <= 64
         assert schema(canonical) == schema(compiled) == SCHEMA_OBJECTS
-        assert len(INDEX_COUNTS) == 22 and sum(INDEX_COUNTS.values()) == 49
+        assert len(INDEX_COUNTS) == 22 and sum(INDEX_COUNTS.values()) == 50

@@ -82,7 +82,7 @@ def test_max_capacity_accepts_final_project_and_record_and_downgrade_keeps_histo
     limited = PlanLimitedD1(raw, now=fixture.now)
     write(limited, frozen, fixture, 1)
     with fixture.store._immediate() as db:
-        db.execute("INSERT INTO expense_categories VALUES('category','owner','Hosting',NULL,NULL,1,'created','updated')")
+        db.execute("INSERT INTO expense_categories(id,owner_id,name,color,archived_at,revision,created_at,updated_at) VALUES('category','owner','Hosting',NULL,NULL,1,'created','updated')")
         # Project capacity is cumulative; expense capacity follows active rows,
         # so a legacy cumulative record counter cannot stand in for them.
         db.execute("UPDATE ledger_plan_usage SET projects=99,records=99999 WHERE owner_id='owner'")

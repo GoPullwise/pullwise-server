@@ -43,10 +43,11 @@ def test_identity_trace_replays_fresh_schema_and_keeps_providers_synthetic(tmp_p
     assert {"schema", "login_authorize", "login_callback", "callback_replay",
             "session", "install_authorize", "install_callback", "repositories",
             "sign_out", "signed_out_session"} <= cases
-    assert manifest["tables"] == 22 and manifest["indexes"] == 49
+    assert manifest["tables"] == 22 and manifest["indexes"] == 50
     assert manifest["http_cases"] == 9
     assert manifest["remote_admissible"] is False
     assert manifest["final_state"] == {"users": 1, "sessions": 0, "githubStates": 0}
     assert manifest["state_storage_version"] == 1
-    # The activity projection adds three finite schema statements.
-    assert len(trace) < 128
+    # Current v11 adds the preserving occurrence rebuild and replay index.
+    # This is an offline trace, explicitly not an admitted remote plan.
+    assert len(trace) == 128
