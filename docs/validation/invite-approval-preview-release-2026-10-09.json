@@ -1,0 +1,296 @@
+{
+  "kind": "invitation-approval-preview-publication",
+  "date": "2026-10-09",
+  "recordedAt": "2026-10-09T04:03:10.350539+00:00",
+  "passed": true,
+  "sourceCommits": {
+    "server": "af97fac619e8d5abe1a358650a4092b0acf4a524",
+    "web": "f8637652af94c625b491f18e804ee6f2914d7108"
+  },
+  "product": {
+    "create": "Role-only invitation link; no preselected recipient",
+    "applicant": "Restore login/return invitation hash; explicit pending join request",
+    "review": "Original inviter sees actual account identity and approves/rejects",
+    "access": "Only approved active membership grants ledger access",
+    "link": "One successful approval consumes link; legacy targeted links retained",
+    "notifications": "Global in-app inbox; login/navigation/focus/manual refresh, no interval polling"
+  },
+  "localVerification": {
+    "server": {
+      "tests": 1330,
+      "subtests": 56,
+      "python": "3.10.12",
+      "staticContractAndMirrorChecks": true
+    },
+    "web": {
+      "completeSuiteTests": 776,
+      "completeSuiteFiles": 44,
+      "finalAppTargetedTests": 25,
+      "finalAppRegressionAddedAfterSuite": 1,
+      "lintBuildAndWorkerChecks": true
+    },
+    "nativeSchema": "invite-approval-schema-native-local-2026-10-09.json",
+    "nativeWorkflow": "invite-approval-native-runtime-local-2026-10-09.json",
+    "browser": "invite-approval-local-2026-10-09.json",
+    "browserEngine": "Chromium; Firefox/WebKit not run",
+    "browserStates": 17,
+    "browserContexts": 5,
+    "persistentLayoutStates": 250,
+    "persistentLayoutContexts": 4,
+    "visuallyReviewedUneditedScreenshots": 6
+  },
+  "managementReadback": {
+    "passed": true,
+    "server": {
+      "name": "pullwise-server-preview",
+      "deployment": "1e3ea6f5-e2e2-451b-a0d9-dcc9f9f3f991",
+      "version": {
+        "version_id": "be3c2974-dcf3-4a7c-937f-07c2da956fec",
+        "percentage": 100
+      },
+      "databaseId": "e9dc3b89-f81f-4fce-87ef-d8797d879fb4",
+      "namespaceId": "0e0ce4946c5e4d5f81c606273ba94b5d",
+      "singletonName": "pullwise-s17-s18-2026-09-28",
+      "preservedExistingBindings": true,
+      "addedBinding": {
+        "name": "PULLWISE_PREVIEW_SCHEMA_V8_UPGRADE_ENABLED",
+        "text": "1",
+        "type": "plain_text"
+      },
+      "preservedSecretNames": [
+        "PULLWISE_CREEM_API_KEY",
+        "PULLWISE_CREEM_WEBHOOK_SECRET",
+        "PULLWISE_EMAIL_CODE_SECRET",
+        "PULLWISE_GITHUB_CLIENT_SECRET",
+        "PULLWISE_GITHUB_TOKEN_KEY",
+        "TYPESAFE_API_KEY"
+      ],
+      "schedule": [
+        "0 * * * *"
+      ]
+    },
+    "web": {
+      "name": "pullwise-web-preview",
+      "deployment": "d94505a4-58b3-4b91-b844-077b1787fb96",
+      "version": {
+        "version_id": "7f80f333-ba45-4398-ae40-efd86658c503",
+        "percentage": 100
+      },
+      "preservedExistingBindings": true,
+      "serverBinding": {
+        "environment": "production",
+        "name": "PULLWISE_SERVER",
+        "service": "pullwise-server-preview",
+        "type": "service"
+      }
+    },
+    "production": {
+      "d1Access": "0",
+      "crons": [],
+      "readOnlyManagementCheck": true,
+      "manualProductionDeploy": false
+    }
+  },
+  "packaging": {
+    "passed": true,
+    "vendorFilesCompared": 664,
+    "representativeHashes": {
+      "workers/__init__.py": "7c3c5bcc3c2ca594238b96c9a0aa94ef2e45e758bdd9b608c3c747b11c8f6e25",
+      "workers/entrypoints.py": "07dc371cf68e5ebd4683a8c46cf515654798c5320a33f2e014c588b15e89ae49",
+      "workers/utils.py": "722d886d6f970e67673a28d5cfe3706c72ed301e643e954b18574003a5b5c382",
+      "workers_runtime_sdk-1.9.0.dist-info/METADATA": "75f7e579b24fa3532f377fa0a7d49b8ba60b7d0cf01c7e9b432d2f1435817b3c",
+      "tzdata/__init__.py": "71df42918330781675fb39c7a66c669968dc114c082c0d49b46e180a148c07b8"
+    },
+    "versionsUnchanged": {
+      "workers-py": "1.17.4",
+      "workers-runtime-sdk": "1.9.0"
+    },
+    "packagingFix": "Vendored modules available beside relocated config; no compatibility flag override"
+  },
+  "knownPackagingFailure": {
+    "code": 10021,
+    "cause": "Relocated config directory omitted vendored SDK; corrected vendor lookup",
+    "failedUploadChangedDeployment": false,
+    "dependencyPinsCompatibilityDateFlagsPreserved": true
+  },
+  "runtimePublication": {
+    "health": {
+      "status": 200,
+      "body": {
+        "ok": true,
+        "service": "pullwise-server",
+        "database": {
+          "type": "d1",
+          "configured": true
+        }
+      }
+    },
+    "budgetBefore": {
+      "productOperationMode": true,
+      "limits": {
+        "rowsRead": null,
+        "rowsWritten": null
+      },
+      "historicalCeilings": {
+        "rowsRead": 100000,
+        "rowsWritten": 1000
+      },
+      "reserved": {
+        "rowsRead": 171482,
+        "rowsWritten": 3540
+      },
+      "observed": {
+        "rowsRead": 64340,
+        "rowsWritten": 1796
+      },
+      "schemaReady": true,
+      "schemaVersion": 7,
+      "stateStorageVersion": 1,
+      "stopped": null
+    },
+    "budgetAfter": {
+      "productOperationMode": true,
+      "limits": {
+        "rowsRead": null,
+        "rowsWritten": null
+      },
+      "historicalCeilings": {
+        "rowsRead": 100000,
+        "rowsWritten": 1000
+      },
+      "reserved": {
+        "rowsRead": 221866,
+        "rowsWritten": 4077
+      },
+      "observed": {
+        "rowsRead": 66340,
+        "rowsWritten": 1948
+      },
+      "schemaReady": true,
+      "schemaVersion": 8,
+      "stateStorageVersion": 1,
+      "stopped": null
+    },
+    "schemaVersion": 8,
+    "stateStorageVersion": 1,
+    "stopped": null,
+    "sameDatabaseNamespaceAndJournal": true,
+    "cumulativeCountersNondecreasing": true,
+    "counterDeltaAttribution": "Interval includes possible concurrent product/authorized scheduled traffic; not migration-only metrics",
+    "admission": "Explicit preview v8 flag plus reviewed atomic one-shot upgrade; no direct D1 console/CLI writes or retries",
+    "statusBeforeSuccessfulHealth": {
+      "productOperationMode": true,
+      "limits": {
+        "rowsRead": null,
+        "rowsWritten": null
+      },
+      "historicalCeilings": {
+        "rowsRead": 100000,
+        "rowsWritten": 1000
+      },
+      "reserved": {
+        "rowsRead": 171622,
+        "rowsWritten": 3540
+      },
+      "observed": {
+        "rowsRead": 64472,
+        "rowsWritten": 1796
+      },
+      "schemaReady": true,
+      "schemaVersion": 7,
+      "stateStorageVersion": 1,
+      "stopped": null
+    }
+  },
+  "staticPublication": {
+    "kind": "preview-static-publication-readback",
+    "startedAt": "2026-10-09T04:01:24.240715+00:00",
+    "scope": "Unauthenticated static HTTP readback only; no JavaScript, browser OAuth, business API or D1 acceptance",
+    "origin": "https://preview.pull-wise.com",
+    "requestLimit": 4,
+    "requestCount": 4,
+    "cookies": false,
+    "redirects": false,
+    "retries": false,
+    "inheritedProxy": true,
+    "frozenHomepageSha256": "55f45c669d83195d2fe87a45cc56eec2801239dcfb6a5597c5c279ab59dd41e5",
+    "requests": [
+      {
+        "url": "https://preview.pull-wise.com/",
+        "method": "GET",
+        "attempts": 1,
+        "passed": true,
+        "status": 200,
+        "sameUrl": true,
+        "contentType": "text/html",
+        "bytes": 4673,
+        "sha256": "000b3288ba4e83135f8dd74f997f9134cd6a6b356b83d0ed2673cbd11d74e89b",
+        "xRobotsTag": "noindex, nofollow",
+        "noindex": true,
+        "referencesFrozenAssets": true
+      },
+      {
+        "url": "https://preview.pull-wise.com/assets/index-BIBADjXE.js",
+        "method": "GET",
+        "attempts": 1,
+        "passed": true,
+        "status": 200,
+        "sameUrl": true,
+        "contentType": "text/javascript",
+        "bytes": 42330,
+        "sha256": "d40039abd59a567c4d40244f7ae1d727d2dd486a664e5b99ad30825c8cfaa048",
+        "expectedBytes": 42330,
+        "expectedSha256": "d40039abd59a567c4d40244f7ae1d727d2dd486a664e5b99ad30825c8cfaa048",
+        "matchesFrozenBytes": true
+      },
+      {
+        "url": "https://preview.pull-wise.com/assets/members-CyufGyzq.js",
+        "method": "GET",
+        "attempts": 1,
+        "passed": true,
+        "status": 200,
+        "sameUrl": true,
+        "contentType": "text/javascript",
+        "bytes": 24437,
+        "sha256": "69c9b3b8f7d2ad8d8ee4d20e2974b5a95efb86bed625ef8330d36ed3d7629f53",
+        "expectedBytes": 24437,
+        "expectedSha256": "69c9b3b8f7d2ad8d8ee4d20e2974b5a95efb86bed625ef8330d36ed3d7629f53",
+        "matchesFrozenBytes": true
+      },
+      {
+        "url": "https://preview.pull-wise.com/assets/index-B_-mJpaF.css",
+        "method": "GET",
+        "attempts": 1,
+        "passed": true,
+        "status": 200,
+        "sameUrl": true,
+        "contentType": "text/css",
+        "bytes": 82247,
+        "sha256": "f4b8b3512074c2b835504df62ac08f0c9975ca91b9e8fdd9af058f80c19cb15b",
+        "expectedBytes": 82247,
+        "expectedSha256": "f4b8b3512074c2b835504df62ac08f0c9975ca91b9e8fdd9af058f80c19cb15b",
+        "matchesFrozenBytes": true
+      }
+    ],
+    "completedAt": "2026-10-09T04:01:25.318232+00:00",
+    "passed": true
+  },
+  "finiteRemoteScope": {
+    "totalUnauthenticatedGetAttempts": 9,
+    "doOnlyStatusReads": 3,
+    "successfulEligibleHealthGet": 1,
+    "failedHealthGet": 1,
+    "staticGets": 4,
+    "failedHealthDetail": "Python urllib health GET returned HTTP 403 and is excluded from acceptance. Subsequent DO-only read proved schema7/no stop. Separately reviewed curl health GET returned200.",
+    "automaticRetries": 0,
+    "redirects": 0,
+    "browserJavascriptExecutions": 0,
+    "syntheticRemoteUsers": 0,
+    "authenticatedBusinessTests": 0,
+    "providerCallsByAcceptanceClient": 0,
+    "forcedRemoteTicks": 0,
+    "realPayments": 0
+  },
+  "scopeLimit": "Local synthetic native/browser acceptance plus bounded preview publication; real A/B OAuth sessions were not tested in this release",
+  "followup": "Receipt-only commits need no runtime redeployment"
+}

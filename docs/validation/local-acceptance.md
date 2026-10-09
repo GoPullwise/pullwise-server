@@ -1,6 +1,50 @@
 # Current local acceptance
 
-Updated 2026-10-08. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
+Updated 2026-10-09. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
+
+## Invitation links and inviter approval (2026-10-09)
+
+The Members flow creates an invitation link without a GitHub username. A real
+signed-in applicant submits a join request; the original inviter's durable
+inbox identifies that account and provides Approve/Reject actions. Pending or
+rejected requests grant no ledger access. One approval consumes the link and
+grants its selected role; repeat requests and status recovery perform no extra
+membership writes. Removed membership cannot recover through an old link.
+The complete Python 3.10.12 suite passes **1,330 tests and 56 subtests**.
+
+[Native schema proof](invite-approval-schema-native-local-2026-10-09.json)
+passes four finite local requests and one actual process restart. The atomic
+v7-to-v8 upgrade preserves full-column hashes for all 20 existing tables,
+legacy pending/accepted/revoked targeted invitations, financial and recurring
+history, original journal markers and cumulative evidence. Its four migration
+groups observe **1,042 rows read and 90 written**, matching journal deltas.
+Restart dispatches no migration SQL. An injected failure after the invitation
+table drop rolls back the entire batch and retains the v7 unknown-outcome stop
+and full reservation; reconstructed journal retry dispatches zero SQL.
+Nullable recipient, unique applicant, foreign-key and review constraints pass.
+The [reviewed upgrade plan](invite-approval-schema-upgrade.md) records bounds.
+
+[Native workflow proof](invite-approval-native-runtime-local-2026-10-09.json)
+passes **23 local HTTP requests within a 30-request cap**, using the canonical
+application, native Python/D1, product meter, commercial limits and SQLite DO
+journal. Creation, actual applicant identity in the notification inbox,
+rejection, approval, access denial before approval, read-only duplicates/replay
+and access denial after member removal pass. Native **506 rows read and 210
+written** match journal accounting; five commercial writes and six audit events
+are recorded. Missing native attempts remain null; metadata is not fabricated.
+These isolated fixtures use synthetic local cookie accounts, with no remote
+accounts, provider requests, payments or forced ticks.
+
+[Preview publication](invite-approval-preview-release-2026-10-09.json) records
+Server version `be3c2974-dcf3-4a7c-937f-07c2da956fec`. One successful finite health GET
+returns 200 and admits the reviewed v8 upgrade under the original coordinator.
+Readback confirms **schema8/storage1 with no stop**, the original preview D1
+and DO namespace, and retained nondecreasing cumulative counters. Remote
+publication creates no synthetic account or business fixture and issues no
+provider request or forced tick. No manual production deployment or D1
+activation was performed; management readback retains production access `0`
+and no cron. These publication checks do not claim an authenticated real-user
+A/B invitation journey.
 
 ## Project links and recurring expenses: local acceptance (2026-10-08)
 
