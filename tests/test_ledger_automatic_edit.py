@@ -192,8 +192,9 @@ def test_automatic_edit_retains_credential_and_owner_snapshot_fences_during_prov
     draft = {key: value for key, value in body.items() if key != "categoryId"}
     provider = automatic.Provider(on_call=invalidate)
     status, failure = edit(ledger, saved, draft, provider, headers=headers)
-    assert status == 422 and failure["error"]["code"] == "CATEGORY_REQUIRED"
-    assert failure["assistance"]["reason"] == "AUTHORIZATION_CHANGED"
+    assert status == (403 if changed == "owner_plan" else 401)
+    assert failure["error"]["code"] == ("AUTHORIZATION_CHANGED" if changed == "owner_plan" else "UNAUTHENTICATED")
+    assert "assistance" not in failure
     assert len(provider.calls) == 1 and financial_rows(ledger) == before
 
 

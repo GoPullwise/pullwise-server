@@ -16,6 +16,7 @@ from .cloudflare_ledger_api import (
 from .cloudflare_ledger_auth import ledger_principal, target_allowed
 from .cloudflare_principal import PrincipalAuthError, _header
 from .account_cycle_rules import PAID_PLAN_IDS, effective_user_plan
+from .cloudflare_jev_preferences import ensure_current_jev_authority, jev_enabled
 
 # ISO 4217 active alphabetic units; exponents are fixed here so Worker runtime
 # does not depend on the host locale or a floating point conversion library.
@@ -313,7 +314,9 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
             if category is None:
                 return _error(422, "INVALID_CATEGORY")
         if effective_user_plan(user, timestamp=now) in PAID_PLAN_IDS:
-            assistance = await _automatic_assistance(binding, headers, data, now, suggestion_gateway, item_id)
+            assistance = await _automatic_assistance(binding, headers, data, now, suggestion_gateway, item_id, user)
+            await ensure_current_jev_authority(binding, headers, now, proof, scope="expenses:write",
+                target_kind=data["target_kind"], project_id=data["project_id"])
             if not data["category_id"]:
                 data = {**data, "category_id": assistance["suggestions"].get("categoryId")}
                 if not data["category_id"]:
@@ -424,9 +427,9 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
     return (200, after) if method == "PATCH" else (204, None)
 
 
-async def _automatic_assistance(binding, headers, data, now, gateway, item_id):
+async def _automatic_assistance(binding, headers, data, now, gateway, item_id, user):
     """Use the ordinary expense-write authorization; inference never writes money."""
-    if gateway is None or not gateway.enabled:
+    if gateway is None or not gateway.enabled or not jev_enabled(user):
         return {"status": "unavailable", "reason": "disabled", "suggestions": {},
             "categorySource": "user" if data["category_id"] else None}
     from .cloudflare_ledger_suggestions import handle_suggestion_request

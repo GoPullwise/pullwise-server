@@ -55,7 +55,7 @@ def test_cookie_and_key_profile_report_current_owner_budget_and_gateway_availabi
         status, payload = asyncio.run(read_ledger_me(binding=binding, headers=headers, now=fixture.now))
         assert status == 200 and payload["id"] == "owner"
         assert payload["entitlements"]["jev"] == {
-            "eligible": plan != "free", "available": plan != "free" and enabled,
+            "eligible": plan != "free", "enabled": True, "available": plan != "free" and enabled,
             "monthlyBudgetUsd": budget, "period": "utc-calendar-month", "rollover": False}
     with fixture.store.connect() as db:
         assert db.execute("SELECT COUNT(*) FROM ledger_plan_usage").fetchone()[0] == 0
@@ -95,7 +95,7 @@ def test_annual_entitlements_remain_monthly_and_expiry_cannot_keep_paid_jev(plan
     assert current["available"] is True and current["period"] == "utc-calendar-month"
     assert current["monthlyBudgetUsd"] == ("3.00" if plan == "pro" else "5.00")
     assert entitlements(user, now=101, jev_available=True)["jev"] == {
-        "eligible": False, "available": False, "monthlyBudgetUsd": "0.00",
+        "eligible": False, "enabled": True, "available": False, "monthlyBudgetUsd": "0.00",
         "period": "utc-calendar-month", "rollover": False}
 
 
