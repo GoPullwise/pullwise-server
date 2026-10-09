@@ -745,8 +745,10 @@ paths:
         active expense share one transaction and one commercial write. The
         actual oldest target must be writable under the caller's current grant;
         otherwise RETENTION_TARGET_FORBIDDEN is returned without creating or
-        deleting anything. Above-capacity ledgers return RETENTION_CLEANUP_REQUIRED
-        and require manual cleanup. Invalid writes and replay never remove expenses.
+        deleting anything. With automatic removal enabled, above-capacity ledgers
+        return RETENTION_CLEANUP_REQUIRED and require manual cleanup. With it
+        disabled, full or above-capacity creates return RECORD_LIMIT. Invalid
+        writes and replay never remove expenses.
       parameters: [{$ref: '#/components/parameters/IdempotencyKey'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ExpenseInput'}}}}
       responses:
