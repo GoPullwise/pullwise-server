@@ -235,7 +235,7 @@ def test_explicit_email_link_keeps_github_id_billing_providers_and_current_sessi
 def test_link_requires_the_original_authenticated_cookie_session(runtime):
     _, cookie = seed_user(runtime)
     status, _, _ = call(runtime, REQUEST, {"email": EMAIL, "purpose": "link"})
-    assert status == 401 and not runtime.gateway.sent
+    assert status == 401 and not runtime.gateway.sent and not runtime.admit.calls
     issued = request(runtime, purpose="link", cookie=cookie)
     _, other_cookie = seed_user(runtime, user_id="usr_second", session_id="ses-second")
     assert verify(runtime, issued, session=other_cookie)[0] == 401
@@ -245,24 +245,111 @@ def test_link_requires_the_original_authenticated_cookie_session(runtime):
     assert not records(runtime, "emailIdentities")
 
 
-def test_verified_existing_mailbox_conflict_is_rejected_without_merging_or_new_sessions(runtime):
-    issued = request(runtime)
-    existing = verify(runtime, issued)[1]["user"]["id"]
-    original, cookie = seed_user(runtime)
-    linking = request(runtime, purpose="link", cookie=cookie, now=NOW + 120)
-    before = records(runtime, "users")
-    status, payload, _ = verify(runtime, linking, session=cookie, now=NOW + 121)
+@pytest.mark.parametrize("elapsed", [1, 120])
+def test_link_request_rejects_another_owner_before_send_admission_and_preserves_challenge(runtime, elapsed):
+    seed_user(runtime, email=EMAIL, verified=True, user_id="usr_mailbox_owner", session_id="ses-mailbox-owner")
+    _, cookie = seed_user(runtime)
+    request(runtime)
+    kinds = ("users", "sessions", "emailIdentities", "emailChallenges")
+    before = {kind: records(runtime, kind) for kind in kinds}
+    admitted, sent, groups, reads = list(runtime.admit.calls), list(runtime.gateway.sent), list(runtime.binding.groups), runtime.binding.reads
+    runtime.admit.allowed = False
+    status, payload, headers = call(runtime, REQUEST, {"email": " ALICE@EXAMPLE.TEST ", "purpose": "link"},
+                                    cookie=cookie, now=NOW + elapsed)
     assert status == 409 and payload["error"]["code"] == "EMAIL_ALREADY_LINKED"
-    assert records(runtime, "users") == before
-    assert records(runtime, "emailIdentities")[0]["userId"] == existing != original["id"]
+    assert headers == {"Cache-Control": "no-store", "Vary": "Cookie"}
+    assert {kind: records(runtime, kind) for kind in kinds} == before
+    assert runtime.admit.calls == admitted and runtime.gateway.sent == sent
+    assert runtime.binding.groups == groups and runtime.binding.reads == reads + 3
+
+
+def test_link_can_request_and_verify_an_email_already_owned_by_the_same_account(runtime):
+    original, cookie = seed_user(runtime, email=EMAIL, verified=True)
+    issued = request(runtime, email=" ALICE@EXAMPLE.TEST ", purpose="link", cookie=cookie)
+    assert records(runtime, "users") == [original]
+    assert len(records(runtime, "sessions")) == 1 and len(records(runtime, "emailIdentities")) == 1
+    assert runtime.admit.calls == [("send", email_key(EMAIL))]
+    assert verify(runtime, issued, session=cookie)[0] == 200
+    assert records(runtime, "users")[0]["billing"] == original["billing"]
+    assert records(runtime, "emailIdentities")[0]["userId"] == original["id"]
+    assert len(records(runtime, "sessions")) == 1
+
+
+@pytest.mark.parametrize("registered", [False, True])
+def test_anonymous_login_send_does_not_query_or_disclose_mailbox_ownership(runtime, registered, monkeypatch):
+    if registered:
+        seed_user(runtime, email=EMAIL, verified=True)
+    original_read = email_auth.read_record_json
+    async def no_identity_lookup(binding, kind, identity):
+        assert kind != "emailIdentities", "public login must not preflight mailbox ownership"
+        return await original_read(binding, kind, identity)
+    monkeypatch.setattr(email_auth, "read_record_json", no_identity_lookup)
+    status, payload, headers = call(runtime, REQUEST, {"email": EMAIL, "purpose": "login"})
+    assert status == 202 and set(payload) == {"challengeId", "expiresIn", "retryAfter"}
+    assert payload["expiresIn"] == 600 and payload["retryAfter"] == 60
+    assert headers["Set-Cookie"].startswith(BROWSER_COOKIE + "=")
+    assert runtime.admit.calls == [("send", email_key(EMAIL))] and len(runtime.gateway.sent) == 1
+
+
+def test_link_verification_rechecks_ownership_claimed_after_code_request(runtime):
+    original, cookie = seed_user(runtime)
+    issued = request(runtime, purpose="link", cookie=cookie)
+    winner, _ = seed_user(runtime, email=EMAIL, verified=True, user_id="usr_mailbox_winner", session_id="ses-winner")
+    before = records(runtime, "users")
+    status, payload, headers = verify(runtime, issued, session=cookie)
+    assert status == 409 and payload["error"]["code"] == "EMAIL_ALREADY_LINKED"
+    assert headers["Set-Cookie"].startswith(BROWSER_COOKIE + "=;")
+    assert records(runtime, "users") == before and original in before and winner in before
+    assert records(runtime, "emailIdentities")[0]["userId"] == winner["id"]
     assert len(records(runtime, "sessions")) == 2 and not records(runtime, "emailChallenges")
+
+
+def test_link_atomic_identity_fence_rolls_back_a_claim_after_verification_reads(runtime):
+    original, cookie = seed_user(runtime)
+    issued = request(runtime, purpose="link", cookie=cookie)
+    challenge = records(runtime, "emailChallenges")
+    def concurrent_claim():
+        seed_user(runtime, email=EMAIL, verified=True, user_id="usr_mailbox_winner", session_id="ses-winner")
+    runtime.binding.before_group = concurrent_claim
+    with pytest.raises(sqlite3.IntegrityError):
+        verify(runtime, issued, session=cookie)
+    assert original in records(runtime, "users")
+    assert records(runtime, "emailIdentities")[0]["userId"] == "usr_mailbox_winner"
+    assert records(runtime, "emailChallenges") == challenge and len(records(runtime, "sessions")) == 2
+    with runtime.binding.store.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM d1_command_guard").fetchone()[0] == 0
 
 
 def test_a_verified_login_email_cannot_be_changed_through_the_link_flow(runtime):
     _, cookie = seed_user(runtime, email="old@example.test", verified=True)
     status, payload, _ = call(runtime, REQUEST, {"email": EMAIL, "purpose": "link"}, cookie=cookie)
     assert status == 409 and payload["error"]["code"] == "EMAIL_CHANGE_NOT_SUPPORTED"
-    assert not runtime.gateway.sent and not records(runtime, "emailChallenges")
+    assert not runtime.gateway.sent and not runtime.admit.calls and not records(runtime, "emailChallenges")
+
+
+@pytest.mark.parametrize("invalid", ["alice..test@example.test", "alice@example.test\r\nBcc: victim@example.test", "\ud800@example.test"])
+def test_invalid_link_address_does_not_read_or_modify_an_existing_challenge(runtime, invalid):
+    _, cookie = seed_user(runtime)
+    request(runtime)
+    before = records(runtime, "emailChallenges")
+    admitted, sent, groups, reads = list(runtime.admit.calls), list(runtime.gateway.sent), list(runtime.binding.groups), runtime.binding.reads
+    status, payload, _ = call(runtime, REQUEST, {"email": invalid, "purpose": "link"}, cookie=cookie)
+    assert status == 422 and payload["error"]["code"] == "INVALID_INPUT"
+    assert records(runtime, "emailChallenges") == before
+    assert runtime.admit.calls == admitted and runtime.gateway.sent == sent
+    assert runtime.binding.groups == groups and runtime.binding.reads == reads
+
+
+@pytest.mark.parametrize("header,value", [("Authorization", "Bearer synthetic-key"), ("X-Pullwise-Api-Key", "pwk_synthetic")])
+def test_link_send_preflight_requires_cookie_only_even_with_a_current_cookie(runtime, header, value):
+    _, cookie = seed_user(runtime)
+    result = asyncio.run(handle_email_request(binding=runtime.binding, gateway=runtime.gateway,
+        secret=SECRET, admit=runtime.admit, method="POST", path=REQUEST,
+        body={"email": EMAIL, "purpose": "link"}, headers={"Cookie": cookie, "Origin": ORIGIN, header: value},
+        now=NOW, trusted_origins={ORIGIN}))
+    assert result[0] == 401 and result[1]["error"]["code"] == "UNAUTHENTICATED"
+    assert runtime.binding.reads == 0 and not runtime.binding.groups
+    assert not runtime.admit.calls and not runtime.gateway.sent
 
 
 @pytest.mark.parametrize("browser", ["", BROWSER_COOKIE + "=" + "A" * 43, BROWSER_COOKIE + "=short"])

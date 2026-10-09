@@ -141,6 +141,17 @@ async def handle_email_request(*, binding, gateway, secret, admit, method, path,
             or getattr(gateway, "configured", False) is not True or not callable(admit)):
         return _error(503, "EMAIL_AUTH_NOT_CONFIGURED")
     key = email_key(email)
+    session, user = None, None
+    if request_code and body["purpose"] == "link":
+        session, user = await _session_user(binding, headers, now)
+        if not session:
+            return _error(401, "UNAUTHENTICATED")
+        if _verified_email(user) not in {None, email}:
+            return _error(409, "EMAIL_CHANGE_NOT_SUPPORTED")
+        identity_snapshot = await read_record_json(binding, "emailIdentities", key)
+        identity = json.loads(identity_snapshot) if identity_snapshot is not None else None
+        if identity and identity["userId"] != user["id"]:
+            return _error(409, "EMAIL_ALREADY_LINKED")
     admitted = await admit("send" if request_code else "verify", key)
     if admitted is False:
         return _error(429, "EMAIL_RATE_LIMIT", retry_after=SEND_INTERVAL)
@@ -151,11 +162,6 @@ async def handle_email_request(*, binding, gateway, secret, admit, method, path,
 
     if request_code:
         purpose = body["purpose"]
-        session, user = (await _session_user(binding, headers, now) if purpose == "link" else (None, None))
-        if purpose == "link" and not session:
-            return _error(401, "UNAUTHENTICATED")
-        if purpose == "link" and _verified_email(user) not in {None, email}:
-            return _error(409, "EMAIL_CHANGE_NOT_SUPPORTED")
         if challenge and challenge["createdAt"] + SEND_INTERVAL > now:
             return _error(429, "EMAIL_RATE_LIMIT", retry_after=challenge["createdAt"] + SEND_INTERVAL - now)
         challenge_id, browser_token, code = _random_urlsafe(32), _random_urlsafe(32), _new_code()

@@ -100,6 +100,9 @@ paths:
         purpose link requires the current cookie session, binds the challenge
         to that account and session, and never merges accounts. Changing an
         already verified login email requires a separate flow and is rejected.
+        An email already owned by another account is rejected before sending
+        a code, creating a challenge or starting its send cooldown. Ownership
+        is checked only for authenticated linking and rechecked at verification.
         A trusted Origin header and at most 8 KiB of strict JSON are required.
         A Referer header does not replace a missing Origin.
         Only one challenge is active per email; explicit resend after 60 seconds
@@ -117,7 +120,7 @@ paths:
           content: {application/json: {schema: {$ref: '#/components/schemas/EmailCodeChallenge'}}}
         '401': {description: UNAUTHENTICATED for link without a current cookie session}
         '403': {description: UNTRUSTED_ORIGIN}
-        '409': {description: EMAIL_CHANGE_NOT_SUPPORTED; a different verified login email cannot be replaced}
+        '409': {description: EMAIL_ALREADY_LINKED for authenticated linking to another account's email before code sending or cooldown; EMAIL_CHANGE_NOT_SUPPORTED when replacing a different verified login email}
         '413': {description: REQUEST_TOO_LARGE; JSON exceeds 8 KiB}
         '422': {description: INVALID_INPUT; unknown fields, invalid email or unsupported purpose}
         '429':
@@ -141,7 +144,7 @@ paths:
         ID, and issues Secure HttpOnly pw_session with a seven-day lifetime.
         Link requires the original authenticated session, preserves its cookie,
         user ID, ledger and billing, and clears pw_email_challenge. An email
-        already owned by another account is rejected after proof with 409;
+        already owned by another account is rechecked and rejected with 409;
         no automatic account merge occurs. JSON is strict and bounded to 8 KiB.
         All responses have Cache-Control no-store. Incorrect browser bindings
         never consume one of the five code attempts.

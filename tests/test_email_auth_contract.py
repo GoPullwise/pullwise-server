@@ -122,6 +122,17 @@ def test_auth_operations_do_not_inherit_ledger_api_key_authority(checker):
     assert schemas["EmailCodeChallenge"]["properties"]["retryAfter"]["const"] == 60
 
 
+def test_email_link_preflight_contract_keeps_public_login_non_enumeration():
+    contract = yaml.safe_load((ROOT / "openapi/ledger-v1.yaml").read_text())
+    request = contract["paths"]["/auth/email/request-code"]["post"]
+    assert "does not disclose account existence" in request["description"]
+    assert "checked only for authenticated linking" in request["description"]
+    assert "rechecked at verification" in request["description"]
+    conflict = request["responses"]["409"]["description"]
+    assert "EMAIL_ALREADY_LINKED" in conflict and "EMAIL_CHANGE_NOT_SUPPORTED" in conflict
+    assert "before code sending or cooldown" in conflict
+
+
 def test_session_contract_matches_email_github_and_signed_out_dtos():
     contract = yaml.safe_load((ROOT / "openapi/ledger-v1.yaml").read_text())
     schemas = contract["components"]["schemas"]
