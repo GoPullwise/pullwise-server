@@ -51,7 +51,7 @@ class RaceD1(D1ShapedSQLite):
 def app(tmp_path):
     store = Store(tmp_path / "ledger.sqlite")
     with store.connect() as db:
-        for path in sorted((ROOT / "cloudflare/server/migrations").glob("000*.sql")):
+        for path in sorted((ROOT / "cloudflare/server/migrations").glob("*.sql")):
             db.executescript(path.read_text())
         users = {f"usr_github_{number}": {"id": f"usr_github_{number}",
             "githubId": str(number), "githubLogin": f"user{number}", "name": f"User {number}",

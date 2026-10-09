@@ -12,7 +12,7 @@ import pytest
 from ledger_d1_fixture import D1ShapedSQLite, Prepared, Store
 from pullwise_server.cloudflare_ledger_api import handle_ledger_request
 from pullwise_server.cloudflare_ledger_recurring import (
-    RESOURCE, handle_recurring_request, run_due_recurring,
+    RESOURCE, generate_occurrence, handle_recurring_request, run_due_recurring,
 )
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1
 from pullwise_server.cloudflare_state_records import encode_record, record_name
@@ -47,7 +47,7 @@ class NoGitHub:
 def app(tmp_path):
     store = Store(tmp_path / "recurring.db")
     with closing(store.connect()) as db:
-        for path in sorted((ROOT / "cloudflare/server/migrations").glob("000*.sql")):
+        for path in sorted((ROOT / "cloudflare/server/migrations").glob("*.sql")):
             db.executescript(path.read_text())
         for identifier in ("owner", "editor", "viewer", "other"):
             value = {"id": identifier, "createdAt": NOW - 10000,
@@ -385,3 +385,118 @@ def test_linked_rules_use_grant_actors_live_github_access_and_owner_may_reauthor
     assert app.tick(now=october, gateway=gateway)["created"] == 1
     assert app.rows("expense_events")[0]["actor_id"] == rule["id"] + ":owner"
     assert gateway.tokens[-1] == "owner"
+
+
+def remove_project(app):
+    with app.store._immediate() as db:
+        db.execute("UPDATE ledger_projects SET deleted_at='2026-10-08T12:00:00Z',status='archived',revision=revision+1 WHERE id='prj_1'")
+
+
+def test_removed_project_rules_and_replays_are_hidden_without_erasing_financial_history(app):
+    body = draft(project=True, start="2026-09-01")
+    rule = create(app, project=True, start="2026-09-01")
+    assert app.tick()["created"] == 1
+    status, shared = app.call("POST", body=draft(start="2026-09-01"), key="shared")
+    assert status == 201
+    remove_project(app)
+    before = {table: app.rows(table) for table in (
+        "expense_recurring_rules", "expense_recurring_occurrences", "expenses",
+        "expense_events", "ledger_activity_events", "ledger_plan_usage")}
+    assert app.call("GET", rule["id"])[0] == 404
+    assert app.call("GET")[1]["items"] == [shared]
+    assert app.call("GET", params={"target": "project", "projectId": "prj_1"})[1]["items"] == []
+    assert app.call("POST", body=body)[0] == 404
+    assert app.call("POST", body=draft())[0] == 404  # Same key cannot expose the hidden rule either.
+    assert app.call("POST", body=body, key="fresh-removed-target")[0] == 404
+    for method, payload in (("PATCH", {"status": "paused"}), ("PATCH", {"status": "active"}),
+                            ("PATCH", body), ("DELETE", None)):
+        assert app.call(method, rule["id"], payload, revision=2)[0] == 404
+    assert {table: app.rows(table) for table in before} == before
+    # Its due row remains as history, while unrelated shared schedules keep working.
+    with app.store._immediate() as db:
+        db.execute("UPDATE expense_recurring_rules SET next_run_at=0 WHERE id=?", (rule["id"],))
+    assert app.tick() == {"scanned": 1, "created": 1, "blocked": 0, "replayed": 0}
+    assert len(app.rows("expenses")) == 2
+    assert len(app.rows("expense_recurring_occurrences")) == 2
+    assert app.tick() == {"scanned": 0, "created": 0, "blocked": 0, "replayed": 0}
+
+
+@pytest.mark.parametrize("status", ["active", "paused", "blocked", "completed", "canceled"])
+def test_removed_project_hides_every_preserved_rule_state(app, status):
+    rule = create(app, project=True)
+    with app.store._immediate() as db:
+        db.execute("UPDATE expense_recurring_rules SET status=? WHERE id=?", (status, rule["id"]))
+    remove_project(app)
+    assert app.call("GET", rule["id"])[0] == 404
+    assert app.call("GET")[1]["items"] == []
+    assert app.call("POST", body=draft(project=True))[0] == 404
+    assert app.tick() == {"scanned": 0, "created": 0, "blocked": 0, "replayed": 0}
+    assert app.rows("expense_recurring_rules")[0]["status"] == status
+
+
+@pytest.mark.parametrize("existing_occurrence", [False, True])
+def test_stale_selected_rule_for_removed_project_skips_generation_and_replay_maintenance(app, existing_occurrence):
+    rule = create(app, project=True, start="2026-09-01")
+    if existing_occurrence:
+        assert app.tick()["created"] == 1
+        first = app.rows("expense_recurring_occurrences")[0]
+        with app.store._immediate() as db:
+            db.execute("""UPDATE expense_recurring_rules SET next_occurrence_on=?,next_period_key=?,next_run_at=0
+                WHERE id=?""", (first["scheduled_on"], first["period_key"], rule["id"]))
+    stale_row = app.rows("expense_recurring_rules")[0]
+    remove_project(app)
+    before = {table: app.rows(table) for table in (
+        "expense_recurring_rules", "expense_recurring_occurrences", "expenses",
+        "expense_events", "ledger_activity_events", "ledger_plan_usage")}
+    updated, result = asyncio.run(generate_occurrence(
+        binding=PlanLimitedD1(app.raw, policy=app.policy, now=NOW), maintenance_binding=app.raw,
+        gateway=NoGitHub(), row=stale_row, now=NOW))
+    assert updated == stale_row and result is None
+    assert {table: app.rows(table) for table in before} == before
+
+
+def test_project_removal_during_atomic_generation_rolls_back_even_without_revision_change(app):
+    create(app, project=True)
+    before = {table: app.rows(table) for table in (
+        "expense_recurring_rules", "expense_recurring_occurrences", "expenses",
+        "expense_events", "ledger_activity_events", "ledger_plan_usage")}
+    original_batch = app.raw.batch
+    async def raced_batch(statements):
+        if any("INSERT INTO expenses(" in statement.sql for statement in statements):
+            app.raw.batch = original_batch
+            with app.store._immediate() as db:
+                db.execute("UPDATE ledger_projects SET deleted_at='2026-10-08T12:00:00Z',status='archived' WHERE id='prj_1'")
+        return await original_batch(statements)
+    app.raw.batch = raced_batch
+    with pytest.raises(Exception, match="CHECK constraint failed"):
+        app.tick()
+    assert app.rows("ledger_projects")[0]["deleted_at"] == "2026-10-08T12:00:00Z"
+    assert app.rows("ledger_projects")[0]["revision"] == 1
+    assert {table: app.rows(table) for table in before} == before
+
+
+@pytest.mark.parametrize("method,body", [("PATCH", {"status": "paused"}), ("DELETE", None)])
+def test_project_removal_between_rule_read_and_pause_cancel_rolls_back(app, method, body):
+    rule = create(app, project=True)
+    before = {table: app.rows(table) for table in (
+        "expense_recurring_rules", "ledger_activity_events", "ledger_plan_usage")}
+    original_batch = app.raw.batch
+    async def raced_batch(statements):
+        if any("UPDATE expense_recurring_rules SET status='" in statement.sql for statement in statements):
+            app.raw.batch = original_batch
+            remove_project(app)
+        return await original_batch(statements)
+    app.raw.batch = raced_batch
+    with pytest.raises(Exception, match="CHECK constraint failed"):
+        app.call(method, rule["id"], body, revision=1)
+    assert app.rows("ledger_projects")[0]["deleted_at"] == "2026-10-08T12:00:00Z"
+    assert {table: app.rows(table) for table in before} == before
+
+
+def test_archiving_preserves_exact_rule_replay_and_visibility(app):
+    original = create(app, project=True)
+    with app.store._immediate() as db:
+        db.execute("UPDATE ledger_projects SET status='archived',revision=revision+1 WHERE id='prj_1'")
+    assert app.call("POST", body=draft(project=True)) == (201, original)
+    assert app.call("GET", original["id"]) == (200, original)
+    assert app.call("GET")[1]["items"] == [original]

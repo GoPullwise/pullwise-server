@@ -85,7 +85,7 @@ def rest_db(tmp_path):
     root = Path(__file__).resolve().parents[1] / "cloudflare/server/migrations"
     actors = {role: OWNER if role == "owner" else "rest_" + role for role in ROLE_SCOPES}
     with store.connect() as db:
-        for migration in sorted(root.glob("000*.sql")):
+        for migration in sorted(root.glob("*.sql")):
             db.executescript(migration.read_text())
         for role, actor in actors.items():
             account = {"id": actor, "createdAt": NOW - 1000, "name": role,

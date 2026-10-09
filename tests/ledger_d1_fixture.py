@@ -79,8 +79,8 @@ def seed(path, *, now=1_800_000_000):
     root = Path(__file__).resolve().parents[1]
     store = Store(path)
     with store.connect() as db:
-        for migration in ("0001_ledger.sql", "0002_identity_billing_keys.sql"):
-            db.executescript((root / "cloudflare/server/migrations" / migration).read_text())
+        for migration in sorted((root / "cloudflare/server/migrations").glob("*.sql")):
+            db.executescript(migration.read_text())
         account = {"id": "owner", "createdAt": now - 864000,
             "billing": {"plan": "pro", "status": "active", "subscriptionId": "sub_fixture",
                 "currentPeriodStart": now - 864000, "currentPeriodEnd": now + 864000},

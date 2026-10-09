@@ -21,7 +21,7 @@ def ledger():
     fixture.setUp()
     with fixture.store.connect() as db:
         migrations = Path(__file__).resolve().parents[1] / "cloudflare/server/migrations"
-        for name in ("0004_ledger_plan_usage.sql", "0009_activity_log.sql"):
+        for name in ("0004_ledger_plan_usage.sql",):
             db.executescript((migrations / name).read_text())
     fixture.binding = PlanLimitedD1(fixture.binding, now=fixture.now + 3)
     yield fixture

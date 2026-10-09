@@ -1,10 +1,10 @@
-"""Five-request local native proof for the populated v8-to-v9 rolling activity extension.
+"""Five-request local native proof for the populated v9-to-v10 project removal migration.
 
 The generated fixture packages canonical modules without changing them. It has
-two separate local D1 bindings and one local SQLite Durable Object namespace;
+three separate local D1 bindings and one local SQLite Durable Object namespace;
 neither provider transports nor remote bindings exist. The second D1 tests a
-deliberately failed atomic batch. Raw native attempts, including missing fields,
-are preserved. This is migration evidence, not authenticated API acceptance.
+deliberately failed atomic batch; the third verifies fresh v10. Raw native attempts,
+including missing fields, are preserved. This is migration evidence, not authenticated API acceptance.
 """
 from __future__ import annotations
 
@@ -34,11 +34,14 @@ import time
 from workers import WorkerEntrypoint, DurableObject, Response
 from pullwise_server.cloudflare_native_d1 import NativeD1
 from pullwise_server.cloudflare_validation_budget import BudgetJournal, BudgetError, _field
-from pullwise_server.cloudflare_preview_budget import upgrade_product_schema_v9
+from pullwise_server.cloudflare_preview_budget import (
+    upgrade_product_schema, upgrade_product_schema_v6, upgrade_product_schema_v7,
+    upgrade_product_schema_v8, upgrade_product_schema_v9, upgrade_product_schema_v10,
+    migrate_product_state_records,
+)
 from pullwise_server.cloudflare_preview_schema import (
-    V8_SCHEMA_SQL, V8_SCHEMA_OBJECTS, V8_SCHEMA_FINGERPRINT, V8_INDEX_COUNTS,
-    V9_SCHEMA_OBJECTS as SCHEMA_OBJECTS, V9_SCHEMA_FINGERPRINT as SCHEMA_FINGERPRINT,
-    V9_SCHEMA_VERSION as SCHEMA_VERSION, UPGRADE_V9_SQL,
+    V9_SCHEMA_SQL, V9_SCHEMA_OBJECTS, V9_SCHEMA_FINGERPRINT, V9_INDEX_COUNTS,
+    SCHEMA_SQL, SCHEMA_OBJECTS, SCHEMA_FINGERPRINT, SCHEMA_VERSION, UPGRADE_V10_SQL,
 )
 from pullwise_server.cloudflare_state_records import STATE_KINDS, record_name, encode_record
 
@@ -54,6 +57,9 @@ OLD_V7_UPGRADE = {"from":6,"to":7,"request":90,"complete":True,
         "provenance":"d1-nonretryable-write-contract-v1"}}
 OLD_V8_UPGRADE = {"from":7,"to":8,"request":91,"complete":True,
     "write_execution":{"native_attempts":[None]*17,
+        "provenance":"d1-nonretryable-write-contract-v1"}}
+OLD_V9_UPGRADE = {"from":8,"to":9,"request":92,"complete":True,
+    "write_execution":{"native_attempts":[None]*3,
         "provenance":"d1-nonretryable-write-contract-v1"}}
 OLD_CUTOVER = {"version":1,"request":41,"complete":True,"copied_records":7,
     "write_execution":{"provenance":"local-synthetic-historical-record-cutover"}}
@@ -94,10 +100,10 @@ class ObservedD1(NativeD1):
         assert statements and len(statements)<=64
         assert all(item.owner is self for item in statements)
         native = [item.native for item in statements]
-        injected = self.inject and tuple(item.sql for item in statements)==UPGRADE_V9_SQL
+        injected = self.inject and tuple(item.sql for item in statements)==UPGRADE_V10_SQL
         if injected:
             position = next(index for index,item in enumerate(statements)
-                if item.sql.strip().upper().startswith("CREATE INDEX LEDGER_ACTIVITY_EVENTS_OWNER_TARGET_TIME"))
+                if "CREATE INDEX LEDGER_PROJECTS_OWNER_STATUS ON " in item.sql.upper())
             # Only this isolated rollback fixture inserts the failure. The
             # canonical migration and every copied module remain unchanged.
             native.insert(position+1,super().prepare("INSERT INTO d1_command_guard(ok) VALUES(0)"))
@@ -106,9 +112,9 @@ class ObservedD1(NativeD1):
             results = await super().batch(native)
         except BaseException:
             failure = {"binding":self.label,"statements":len(native),
-                "injectedAfterActivityIndex":injected,"nativeResultsUnavailable":True}
+                "injectedAfterProjectIndex":injected,"nativeResultsUnavailable":True}
             self.failed.append(failure)
-            print(json.dumps({"nativeActivitySchemaFailure":failure}))
+            print(json.dumps({"nativeProjectRemovalSchemaFailure":failure}))
             raise
         values = [{"rowsRead":_field(_field(item,"meta"),"rows_read"),
             "rowsWritten":_field(_field(item,"meta"),"rows_written"),
@@ -120,7 +126,7 @@ class ObservedD1(NativeD1):
             "rowsWritten":sum(item["rowsWritten"] for item in values),
             "nativeAttempts":[item["attempts"] for item in values]}
         self.groups.append(group)
-        print(json.dumps({"nativeActivitySchemaMeta":group}))
+        print(json.dumps({"nativeProjectRemovalSchemaMeta":group}))
         return results
 
 
@@ -270,12 +276,26 @@ def seed_commands():
         ("githubIdentities","740002",{"githubId":"740002","userId":MEMBER,"createdAt":2}))
     for kind,identity,value in records:
         add("INSERT INTO app_state(name,payload,updated_at) VALUES(?,?,?)",record_name(kind,identity),encode_record(kind,identity,value),17)
+    actor = json.dumps({"kind":"session","userId":MEMBER,"name":"成员🙂"},
+        ensure_ascii=False,separators=(",",":"))
+    for identity,project,resource,resource_id in (
+            ("activity_live","prj_live","expense","exp_live"),
+            ("activity_archived","prj_archived","project","prj_archived"),
+            ("activity_legacy","prj_other","project","prj_other"),
+            ("activity_rule","prj_live","recurring_rule","rule_active")):
+        add("INSERT INTO ledger_activity_events VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            identity,"operation-"+identity,OWNER,"project",project,actor,resource,
+            resource_id,"update",'{"revision":6,"retained":"before 历史🙂"}',
+            '{"revision":7,"retained":"after 历史🙂"}',"2026-10-09T12:00:00Z")
+    add("INSERT INTO ledger_activity_events VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        "activity_shared","operation-shared",OWNER,"shared",None,actor,"expense",
+        "exp_shared","create",None,'{"revision":1,"retained":"shared"}',"2026-10-09T12:00:00Z")
     return commands
 
 
 async def snapshot(native):
-    tables = sorted(V8_INDEX_COUNTS)
-    # Every v8 stored field is retained, including links, recurring and invitation facts.
+    tables = sorted(V9_INDEX_COUNTS)
+    # Every v9 stored field is retained, including links, recurring and invitation facts.
     commands = [("PRAGMA table_info("+table+")",()) for table in tables]
     commands += [("SELECT * FROM "+table,()) for table in tables]
     commands += [("PRAGMA foreign_keys",()),("PRAGMA foreign_key_check",()),
@@ -285,6 +305,8 @@ async def snapshot(native):
     data = {}
     for index,table in enumerate(tables):
         columns = [_field(row,"name") for row in _field(results[index],"results")]
+        if table=="ledger_projects":
+            columns=[column for column in columns if column!="deleted_at"]
         rows = [[_field(row,column) for column in columns]
             for row in _field(results[index+len(tables)],"results")]
         rows.sort(key=lambda row:json.dumps(row,ensure_ascii=False,separators=(",",":")))
@@ -304,15 +326,15 @@ def historical_journal(sql, baseline):
     state = journal.snapshot()
     assert state["requests"]==0
     rows = {table:item["rows"] for table,item in baseline["tables"].items()}
-    state.update(schema_ready=True,schema_version=8,schema_fingerprint=V8_SCHEMA_FINGERPRINT,
-        requests=91,cases={"product-schema":1,"product":90,"product-schema-v4-to-v5":1,
-            "product-state-record-v1":1,"product-schema-v5-to-v6":1,"product-schema-v6-to-v7":1,"product-schema-v7-to-v8":1},
-        reserved_read=61832,reserved_written=1482,actual_read=2572,actual_written=336,
+    state.update(schema_ready=True,schema_version=9,schema_fingerprint=V9_SCHEMA_FINGERPRINT,
+        requests=92,cases={"product-schema":1,"product":91,"product-schema-v4-to-v5":1,
+            "product-state-record-v1":1,"product-schema-v5-to-v6":1,"product-schema-v6-to-v7":1,"product-schema-v7-to-v8":1,"product-schema-v8-to-v9":1},
+        reserved_read=89528,reserved_written=1610,actual_read=3294,actual_written=381,
         evidence=[{"request":1,"operation":1,"rows_read":800,"rows_written":200},
             {"request":90,"operation":2,"rows_read":730,"rows_written":46},
             {"request":91,"operation":3,"rows_read":1042,"rows_written":90}],
         schema_upgrade=OLD_UPGRADE,schema_upgrade_v6=OLD_V6_UPGRADE,schema_upgrade_v7=OLD_V7_UPGRADE,
-        schema_upgrade_v8=OLD_V8_UPGRADE,
+        schema_upgrade_v8=OLD_V8_UPGRADE,schema_upgrade_v9=OLD_V9_UPGRADE,
         state_record_migration=OLD_CUTOVER,state_storage_version=1,
         state_record_integrity_version=2,state_record_integrity_request=91,
         product_data={"rows":rows,"json":{},"arrays":262144,
@@ -326,16 +348,25 @@ def historical_journal(sql, baseline):
 def preserved(before, after):
     mutable = {"requests","reserved_read","reserved_written","actual_read","actual_written",
         "active","deadline","stopped","cases","evidence","product_evidence_rows",
-        "schema_version","schema_fingerprint","product_data","product_data_verified","schema_upgrade_v9"}
+        "schema_version","schema_fingerprint","product_data","product_data_verified","schema_upgrade_v10"}
     for key in set(before)-mutable:
         assert after[key]==before[key],key
     assert after["evidence"][:len(before["evidence"])]==before["evidence"]
     assert all(after[key]>=before[key] for key in COUNTERS)
     assert after["requests"]==before["requests"]+1
     assert after["cases"]=={**before["cases"],"product":before["cases"]["product"]+1,
-        "product-schema-v8-to-v9":1}
-    assert {table:n for table,n in after["product_data"]["rows"].items()
-        if table!="ledger_activity_events"}==before["product_data"]["rows"]
+        "product-schema-v9-to-v10":1}
+    assert after["product_data"]["rows"]==before["product_data"]["rows"]
+
+
+async def completed_paths(native, journal, *, include_current=False):
+    paths=(upgrade_product_schema,upgrade_product_schema_v6,upgrade_product_schema_v7,
+        upgrade_product_schema_v8,upgrade_product_schema_v9,migrate_product_state_records)
+    if include_current:
+        paths+=(upgrade_product_schema_v10,)
+    for migration in paths:
+        await migration(native,journal)
+
 
 
 class Default(WorkerEntrypoint):
@@ -345,7 +376,7 @@ class Default(WorkerEntrypoint):
         path = str(request.url).rsplit("/",1)[-1]
         if path not in {"setup","upgrade","restart","rollback","rollback-restart"} or request.method!="POST":
             return Response.json({"error":"NOT_FOUND"},status=404)
-        name = "local-activity-rollback-fixture" if path in {"rollback","rollback-restart"} else "local-activity-main-fixture"
+        name = "local-project-removal-rollback-fixture" if path in {"rollback","rollback-restart"} else "local-project-removal-main-fixture"
         return await self.env.FIXTURE_JOURNAL.get(self.env.FIXTURE_JOURNAL.idFromName(name)).fetch(request)
 
 
@@ -359,230 +390,183 @@ class FixtureJournal(DurableObject):
         if path=="setup":
             baselines = []
             for item in (native,ObservedD1(self.env.ROLLBACK_DB,"rollback")):
-                await execute(item,[(sql,()) for sql in V8_SCHEMA_SQL])
+                await execute(item,[(sql,()) for sql in V9_SCHEMA_SQL])
                 await execute(item,seed_commands())
                 value = await snapshot(item)
-                assert value["schemaObjects"]==V8_SCHEMA_OBJECTS
+                assert value["schemaObjects"]==V9_SCHEMA_OBJECTS
                 baselines.append(value)
             assert baselines[0]["tables"]==baselines[1]["tables"]
+            fresh = ObservedD1(self.env.FRESH_DB,"fresh")
+            await execute(fresh,[(sql,()) for sql in SCHEMA_SQL])
+            fresh_schema = await snapshot(fresh)
+            assert SCHEMA_VERSION==10 and fresh_schema["schemaObjects"]==SCHEMA_OBJECTS
+            deleted = await execute(fresh,[("PRAGMA table_info(ledger_projects)",())])
+            assert any(_field(row,"name")=="deleted_at" for row in _field(deleted[0],"results"))
             historical_journal(self.ctx.storage.sql,baselines[0])
             await save_fixture(self.ctx.storage,"fixtureBaseline",baselines[0])
-            return Response.json({"passed":True,"v8Fingerprint":V8_SCHEMA_FINGERPRINT,
-                "twoFreshLocalBindings":True,"syntheticPriorJournal":True,
-                "foreignKeysEnabled":True,"tables":baselines[0]["tables"],
-                "schemaObjects":len(V8_SCHEMA_OBJECTS),"fixtureSeedStatementsPerBinding":len(seed_commands()),
+            return Response.json({"passed":True,"v9Fingerprint":V9_SCHEMA_FINGERPRINT,
+                "twoPopulatedLocalBindings":True,"canonicalFreshV10LocalBinding":True,
+                "syntheticPriorJournal":True,"foreignKeysEnabled":True,"tables":baselines[0]["tables"],
+                "schemaObjects":len(V9_SCHEMA_OBJECTS),"fixtureSeedStatementsPerBinding":len(seed_commands()),
                 "fixtureSeedOutsideMigrationJournal":True})
         if path=="upgrade":
             journal = BudgetJournal(self.ctx.storage.sql,preview_product=True,product_operations=True)
             baseline = await load_fixture(self.ctx.storage,"fixtureBaseline")
             before = journal.snapshot()
+            await completed_paths(native,journal)
+            assert native.dispatches==0 and journal.snapshot()==before
             start = len(native.groups)
-            await upgrade_product_schema_v9(native,journal)
+            await upgrade_product_schema_v10(native,journal)
             after = journal.snapshot()
             migration_groups = native.groups[start:]
             preserved(before,after)
-            assert SCHEMA_VERSION==9 and after["schema_version"]==9
+            assert SCHEMA_VERSION==10 and after["schema_version"]==10
             assert after["schema_fingerprint"]==SCHEMA_FINGERPRINT
-            assert after["schema_upgrade_v9"]["complete"] is True
-            assert after["cases"]["product-schema-v8-to-v9"]==1
+            assert after["schema_upgrade_v10"]["complete"] is True
+            assert after["cases"]["product-schema-v9-to-v10"]==1
             assert after["active"] is None and after["stopped"] is None
             assert after["actual_read"]-before["actual_read"]==sum(item["rowsRead"] for item in migration_groups)
             assert after["actual_written"]-before["actual_written"]==sum(item["rowsWritten"] for item in migration_groups)
             verified = await snapshot(native)
-            assert verified["tables"]==baseline["tables"]
-            assert verified["schemaObjects"]==SCHEMA_OBJECTS
-            assert after["product_data"]["rows"]["ledger_activity_events"]==0
-            final = after
-            await save_fixture(self.ctx.storage,"postUpgradeJournal",final)
-            await save_fixture(self.ctx.storage,"postUpgradeTables",(await snapshot(native))["tables"])
-            return Response.json({"passed":True,"schemaVersion":9,"schemaFingerprint":SCHEMA_FINGERPRINT,
-                "all21HistoricalTablesPreserved":True,"activityInitiallyEmpty":True,"foreignKeyViolations":0,
-                "stableIDsAndEveryStoredField":True,"legacyInvitesAndJoinRequestsPreserved":True,"typedEmailAndGithubIdentityRecordsPreserved":True,"legacyMarkersAndEvidencePreserved":True,
-                "oneShotCaseCount":1,"migrationNativeBatches":migration_groups,
-                "migrationJournalActualDeltasMatchRawMeta":True,
-                "migrationWriteExecution":after["schema_upgrade_v9"].get("write_execution"),
+            assert verified["tables"]==baseline["tables"] and verified["schemaObjects"]==SCHEMA_OBJECTS
+            undeleted = await execute(native,[("SELECT COUNT(*) AS n FROM ledger_projects WHERE deleted_at IS NOT NULL",())])
+            assert _field(list(_field(undeleted[0],"results"))[0],"n")==0
+            await save_fixture(self.ctx.storage,"postUpgradeJournal",after)
+            await save_fixture(self.ctx.storage,"postUpgradeTables",verified["tables"])
+            return Response.json({"passed":True,"schemaVersion":10,"schemaFingerprint":SCHEMA_FINGERPRINT,
+                "all22HistoricalTablesPreserved":True,"deletedAtInitiallyNull":True,"foreignKeyViolations":0,
+                "stableIDsAndEveryStoredField":True,"legacyLinkedEmptyProjectNamePreserved":True,
+                "expenseRecurringRepositoryAndActivitySnapshotsPreserved":True,
+                "legacyInvitesAndJoinRequestsPreserved":True,"typedEmailAndGithubIdentityRecordsPreserved":True,
+                "legacyMarkersAndEvidencePreserved":True,"oneShotCaseCount":1,
+                "allPriorUpgradePathsNoReplayNativeDispatches":0,
+                "migrationNativeBatches":migration_groups,"migrationJournalActualDeltasMatchRawMeta":True,
+                "migrationWriteExecution":after["schema_upgrade_v10"].get("write_execution"),
                 "counterBefore":{key:before[key] for key in COUNTERS},
-                "counterAfter":{key:after[key] for key in COUNTERS},
-                "postUpgradeCounters":{key:final[key] for key in COUNTERS}})
+                "counterAfter":{key:after[key] for key in COUNTERS}})
         if path=="restart":
             journal = BudgetJournal(self.ctx.storage.sql,preview_product=True,product_operations=True)
             before = journal.snapshot()
             assert before==await load_fixture(self.ctx.storage,"postUpgradeJournal")
-            await upgrade_product_schema_v9(native,journal)
+            await completed_paths(native,journal,include_current=True)
             assert native.dispatches==0 and journal.snapshot()==before
             value = await snapshot(native)
             assert value["tables"]==await load_fixture(self.ctx.storage,"postUpgradeTables")
             assert value["schemaObjects"]==SCHEMA_OBJECTS
-            # Bounded native constraint/query probes remain deliberately outside
-            # the migration journal and never invoke application/provider routes.
-            insert = """INSERT INTO ledger_activity_events(id,operation_id,owner_id,
-                target_kind,project_id,actor_json,resource_kind,resource_id,action,
-                before_json,after_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)"""
-            actor = json.dumps({"kind":"session","userId":MEMBER,"name":"成员🙂",
-                "githubLogin":"local-member"},ensure_ascii=False,separators=(",",":"))
-            now,cutoff,old = "2026-10-09T12:00:00Z","2026-10-08T12:00:00Z","2026-10-08T11:59:59Z"
-            valid = ("activity_valid","local-operation",OWNER,"project","prj_live",actor,
-                "expense","exp_live","update",'{"purpose":"before"}',
-                '{"purpose":"after"}',now)
-            def entry(identity,*,target="project",project="prj_live",created=now,
-                    owner=OWNER,resource="expense",action="update",before=None,after=None):
-                return (identity,"operation-"+identity,owner,target,project,actor,resource,
-                    "retained-tombstone-"+identity,action,before,after,created)
-            seeded = [valid,
-                entry("activity_zz",created=now),entry("activity_boundary",created=cutoff),
-                entry("activity_old",created=old),
-                entry("activity_shared",target="shared",project=None),
-                entry("activity_shared_old",target="shared",project=None,created=old),
-                entry("activity_other_project",project="prj_other"),
-                entry("activity_other_owner",owner="usr_github_740099")]
-            for action in ("create","delete","archive","restore","pause","resume","cancel","move","generate"):
-                seeded.append(entry("activity_action_"+action,resource="recurring_rule",action=action))
-            seeded.append(entry("activity_project",resource="project",action="update"))
-            # Exercise the exact UTF-8 byte boundaries, including non-ASCII data.
-            actor_limit = '{"memo":"'+("a"*2037)+'"}'
-            payload_limit = '{"memo":"'+("a"*16373)+'"}'
-            assert len(actor_limit.encode())==2048 and len(payload_limit.encode())==16384
-            bounded = list(entry("activity_json_limit"))
-            bounded[5],bounded[9],bounded[10] = actor_limit,payload_limit,payload_limit
-            seeded.append(tuple(bounded))
-            await execute(native,[(insert,row) for row in seeded])
-            def invalid(identity,position,value):
-                row=list(entry(identity)); row[position]=value; return (insert,tuple(row))
-            probes = [
-                invalid("invalid_actor_array",5,"[]"),invalid("invalid_actor_json",5,"bad-json"),
-                invalid("invalid_actor_bytes",5,json.dumps({"memo":"🙂"*600},ensure_ascii=False)),
-                invalid("invalid_before_array",9,"[]"),invalid("invalid_after_array",10,"[]"),
-                invalid("invalid_before_json",9,"bad-json"),invalid("invalid_after_json",10,"bad-json"),
-                invalid("invalid_before_bytes",9,json.dumps({"memo":"🙂"*4096},ensure_ascii=False)),
-                invalid("invalid_after_bytes",10,json.dumps({"memo":"🙂"*4096},ensure_ascii=False)),
-                invalid("invalid_target_pair",4,None),invalid("invalid_shared_pair",3,"shared"),
-                invalid("invalid_target",3,"public"),invalid("invalid_resource",6,"account"),
-                invalid("invalid_action",8,"subscribe"),invalid("invalid_operation_empty",1,""),
-                invalid("invalid_operation_bytes",1,"a"*161),invalid("invalid_resource_empty",7,""),
-                invalid("invalid_resource_bytes",7,"a"*161),(insert,valid),
-                ("""INSERT INTO ledger_project_repositories(owner_id,project_id,
-                    github_repo_id,github_full_name,created_at) VALUES(?,?,?,?,?)""",
-                    (OWNER,"prj_missing",9090,"local/invalid","local")),
+            undeleted = await execute(native,[("SELECT COUNT(*) AS n FROM ledger_projects WHERE deleted_at IS NOT NULL",())])
+            assert _field(list(_field(undeleted[0],"results"))[0],"n")==0
+            # These finite local SQL probes are deliberately outside the migration journal.
+            # No application endpoints, providers or real account data participate.
+            timestamp="2026-10-09T12:00:00Z"
+            tombstone="""UPDATE ledger_projects SET deleted_at=?,status='archived',
+                github_repo_id=NULL,github_full_name=NULL,github_organization_id=NULL WHERE id='prj_other'"""
+            probes=[
+                ("UPDATE ledger_projects SET deleted_at=? WHERE id='prj_other'",(timestamp,)),
+                ("UPDATE ledger_projects SET deleted_at=?,status='active',github_repo_id=NULL,github_full_name=NULL,github_organization_id=NULL WHERE id='prj_other'",(timestamp,)),
+                ("UPDATE ledger_projects SET github_repo_id=NULL,github_full_name=NULL,github_organization_id=NULL WHERE id='prj_other'",()),
+                ("DELETE FROM ledger_projects WHERE id='prj_live'",()),
             ]
+            for malformed in ("","2026-10-09","2026-10-09T12:00:00","2026-10-09T12:00:00+00:00",
+                    "2026-10-09T12:00:00.0Z","2026-10-09t12:00:00Z","2026-10-09T12:00:00z",
+                    "２０２６-10-09T12:00:00Z","2026-1a-09T12:00:00Z","x"*20):
+                probes.append((tombstone,(malformed,)))
             for sql,values in probes:
                 await rejected_probe(native,sql,values)
-            query_project = """SELECT id FROM ledger_activity_events WHERE owner_id=?
-                AND target_kind=? AND project_id=? AND created_at>=?
-                ORDER BY created_at DESC,id DESC LIMIT ?"""
-            query_shared = """SELECT id FROM ledger_activity_events WHERE owner_id=?
-                AND target_kind=? AND project_id IS NULL AND created_at>=?
-                ORDER BY created_at DESC,id DESC LIMIT ?"""
-            query_keyset = """SELECT id FROM ledger_activity_events WHERE owner_id=?
-                AND target_kind=? AND project_id=? AND created_at>=?
-                AND (created_at,id)<(?,?) ORDER BY created_at DESC,id DESC LIMIT ?"""
-            query_expiry = """SELECT id FROM ledger_activity_events WHERE created_at<?
-                ORDER BY created_at,id LIMIT ?"""
-            commands = [(query_project,(OWNER,"project","prj_live",cutoff,100)),
-                (query_shared,(OWNER,"shared",cutoff,100)),
-                (query_keyset,(OWNER,"project","prj_live",cutoff,now,"activity_valid",100)),
-                (query_expiry,(cutoff,100))]
-            results = await execute(native,commands)
-            ids = [[_field(row,"id") for row in _field(result,"results")] for result in results]
-            assert "activity_boundary" in ids[0] and "activity_old" not in ids[0]
-            assert all(identity not in ids[0] for identity in
-                ("activity_shared","activity_other_project","activity_other_owner"))
-            assert ids[1]==["activity_shared"]
-            assert "activity_zz" not in ids[2] and "activity_valid" not in ids[2]
-            assert set(ids[2])==set(ids[0])-{ "activity_zz","activity_valid" }
-            assert set(ids[3])=={"activity_old","activity_shared_old"}
-            plans = await execute(native,[("EXPLAIN QUERY PLAN "+sql,values) for sql,values in commands])
-            details = [[_field(row,"detail") for row in _field(result,"results")] for result in plans]
-            for index,rows in enumerate(details):
-                expected = "ledger_activity_events_time" if index==3 else "ledger_activity_events_owner_target_time"
-                assert any("SEARCH" in row and expected in row for row in rows),(index,rows)
-                assert not any("TEMP B-TREE" in row or "SCAN ledger_activity_events" in row for row in rows)
-            # Expiry removes only the finite indexed old rows; financial/audit
-            # history and the boundary row remain untouched.
-            await execute(native,[("""DELETE FROM ledger_activity_events WHERE id IN
-                (SELECT id FROM ledger_activity_events WHERE created_at<? ORDER BY created_at,id LIMIT ?)""",
-                (cutoff,1))])
-            remaining = await execute(native,[(query_expiry,(cutoff,100))])
-            assert len(list(_field(remaining[0],"results")))==1
             assert (await snapshot(native))["tables"]==value["tables"]
-            await execute(native,[("DELETE FROM ledger_activity_events WHERE id=?",(row[0],)) for row in seeded])
-            empty = await execute(native,[("SELECT COUNT(*) AS n FROM ledger_activity_events",())])
-            assert _field(list(_field(empty[0],"results"))[0],"n")==0
-            assert (await snapshot(native))["tables"]==value["tables"]
-            assert journal.snapshot()==before
+            await execute(native,[(tombstone,(timestamp,))])
+            removed = await execute(native,[("SELECT name,status,deleted_at,github_repo_id,github_full_name,github_organization_id FROM ledger_projects WHERE id='prj_other'",())])
+            row=list(_field(removed[0],"results"))[0]
+            assert _field(row,"name")=="" and _field(row,"status")=="archived" and _field(row,"deleted_at")==timestamp
+            assert all(_field(row,column) is None for column in ("github_repo_id","github_full_name","github_organization_id"))
+            removed_snapshot=await snapshot(native)
+            assert {table:fact for table,fact in removed_snapshot["tables"].items() if table!="ledger_projects"}=={
+                table:fact for table,fact in value["tables"].items() if table!="ledger_projects"}
+            post_probes=[("DELETE FROM ledger_projects WHERE id='prj_other'",()),
+                ("UPDATE ledger_projects SET deleted_at=NULL WHERE id='prj_other'",()),
+                ("UPDATE ledger_projects SET status='active' WHERE id='prj_other'",()),
+                ("UPDATE ledger_projects SET github_repo_id=909 WHERE id='prj_other'",()),
+                ("UPDATE ledger_projects SET github_full_name='org/repo' WHERE id='prj_other'",()),
+                ("UPDATE ledger_projects SET github_organization_id=77 WHERE id='prj_other'",())]
+            for sql,values in post_probes:
+                await rejected_probe(native,sql,values)
+            columns = await execute(native,[("PRAGMA index_info(ledger_projects_owner_status)",())])
+            assert [_field(row,"name") for row in _field(columns[0],"results")]==["owner_id","deleted_at","status"]
+            query="SELECT id FROM ledger_projects WHERE owner_id=? AND deleted_at IS NULL AND status=?"
+            result = await execute(native,[(query,(OWNER,"active")),("EXPLAIN QUERY PLAN "+query,(OWNER,"active"))])
+            assert [_field(row,"id") for row in _field(result[0],"results")]==["prj_live"]
+            details=[_field(row,"detail") for row in _field(result[1],"results")]
+            assert any("SEARCH" in detail and "ledger_projects_owner_status" in detail for detail in details)
+            assert not any("SCAN ledger_projects" in detail or "TEMP B-TREE" in detail for detail in details)
+            # Restore only fixture probe state, never replay application removal or migration SQL.
+            await execute(native,[("UPDATE ledger_projects SET deleted_at=NULL,status='active',github_repo_id=303,github_full_name='user/other',github_organization_id=NULL WHERE id='prj_other'",())])
+            assert (await snapshot(native))["tables"]==value["tables"] and journal.snapshot()==before
             return Response.json({"passed":True,"actualProcessRestart":True,
-                "canonicalNoReplayNativeDispatches":0,"journalUnchanged":True,
-                "foreignKeysStillEnforced":True,"failedIntegrityProbesNativeMetaUnavailable":True,
-                "integrityProbesOutsideMigrationJournal":True,"schemaObjectsMatch":True,
-                "projectAndSharedTargetsAccepted":True,"targetNullPairEnforced":True,
-                "allResourceKindsAndActionsAccepted":True,"utf8JsonByteBoundsAccepted":True,
-                "malformedArrayAndOversizedJsonRejected":True,"duplicatePrimaryIdRejected":True,
-                "tombstoneResourceIDsRetainedWithoutFinancialForeignKeys":True,
-                "last24HoursBoundaryEnforced":True,"projectSharedAndOwnerScopeSeparated":True,
-                "descendingKeysetNoDuplicateTieRows":True,"indexedExpiryDeleteBoundedToOne":True,
-                "queryPlanDetails":{name:rows for name,rows in zip(("project","shared","keyset","expiry"),details)},
-                "validProbeRows":len(seeded),"invalidProbeCount":len(probes),
-                "allProbeRowsRemoved":True,"allHistoricalTableDigestsPreserved":True})
+                "canonicalNoReplayNativeDispatches":0,"journalUnchanged":True,"foreignKeysStillEnforced":True,
+                "failedIntegrityProbesNativeMetaUnavailable":True,"integrityProbesOutsideMigrationJournal":True,
+                "schemaObjectsMatch":True,"legacyEmptyNameTombstoneAccepted":True,
+                "deletedTimestampExactAsciiUtcShapeEnforced":True,"tombstoneRequiresArchivedAndNullAnchors":True,
+                "nonDeletedLegacyNameAnchorConstraintsRetained":True,"financialForeignKeysRetained":True,
+                "expenseRecurringRepositoryAndActivitySnapshotsRetainedAfterTombstone":True,
+                "normalProjectQueryExcludesRemoved":True,"queryPlanDetails":details,
+                "invalidProbeCount":len(probes)+len(post_probes),"allProbeStateRestored":True,
+                "allHistoricalTableDigestsPreserved":True})
         if path=="rollback":
-            baseline = await snapshot(native)
-            assert baseline["schemaObjects"]==V8_SCHEMA_OBJECTS
-            journal = historical_journal(self.ctx.storage.sql,baseline)
-            before = journal.snapshot()
+            baseline=await snapshot(native)
+            assert baseline["schemaObjects"]==V9_SCHEMA_OBJECTS
+            journal=historical_journal(self.ctx.storage.sql,baseline)
+            before=journal.snapshot()
             try:
-                await upgrade_product_schema_v9(native,journal)
+                await upgrade_product_schema_v10(native,journal)
             except BudgetError as error:
                 assert str(error)=="D1_OUTCOME_UNKNOWN"
             else:
                 raise AssertionError("Injected native failure unexpectedly completed")
-            after = journal.snapshot()
-            assert after["stopped"]=="D1_OUTCOME_UNKNOWN" and after["schema_version"]==8
-            assert after["schema_upgrade_v9"]["complete"] is False
-            assert after["reserved_read"]>before["reserved_read"]
-            assert after["reserved_written"]>before["reserved_written"]
+            after=journal.snapshot()
+            assert after["stopped"]=="D1_OUTCOME_UNKNOWN" and after["schema_version"]==9
+            assert after["schema_upgrade_v10"]["complete"] is False
+            assert after["reserved_read"]>before["reserved_read"] and after["reserved_written"]>before["reserved_written"]
             preserved(before,after)
-            value = await snapshot(native)
-            assert value["tables"]==baseline["tables"] and value["schemaObjects"]==V8_SCHEMA_OBJECTS
-            assert any(item["injectedAfterActivityIndex"] for item in native.failed)
-            reconstructed = BudgetJournal(self.ctx.storage.sql,preview_product=True,product_operations=True)
-            stopped = reconstructed.snapshot()
-            before_dispatches = native.dispatches
+            value=await snapshot(native)
+            assert value["tables"]==baseline["tables"] and value["schemaObjects"]==V9_SCHEMA_OBJECTS
+            assert any(item["injectedAfterProjectIndex"] for item in native.failed)
+            reconstructed=BudgetJournal(self.ctx.storage.sql,preview_product=True,product_operations=True)
+            stopped=reconstructed.snapshot()
+            before_dispatches=native.dispatches
             try:
-                await upgrade_product_schema_v9(native,reconstructed)
-            except BudgetError:
-                pass
+                await upgrade_product_schema_v10(native,reconstructed)
+            except BudgetError as error:
+                assert str(error)=="D1_OUTCOME_UNKNOWN"
             else:
                 raise AssertionError("Unknown native outcome was admitted for retry")
             assert native.dispatches==before_dispatches and reconstructed.snapshot()==stopped
-            assert stopped["stopped"]=="D1_OUTCOME_UNKNOWN"
             await save_fixture(self.ctx.storage,"failedUpgradeJournal",stopped)
             await save_fixture(self.ctx.storage,"failedUpgradeTables",baseline["tables"])
-            return Response.json({"passed":True,"injectedAfterActivityIndex":True,
-                "entireAtomicBatchRolledBack":True,"all21TableDigestsAndIndexesPreserved":True,
-                "foreignKeysEnabled":True,"foreignKeyViolations":0,"schemaVersionRetained":8,
+            return Response.json({"passed":True,"injectedAfterProjectIndex":True,
+                "entireAtomicBatchRolledBack":True,"all22TableDigestsAndIndexesPreserved":True,
+                "foreignKeysEnabled":True,"foreignKeyViolations":0,"schemaVersionRetained":9,
                 "unknownOutcomeStopRetained":True,"reconstructedJournalNoRetryDispatches":0,
                 "fullReadWriteReservationRetained":True,"failedBatchNativeResultsUnavailable":True,
                 "counterBefore":{key:before[key] for key in COUNTERS},
                 "counterAfter":{key:after[key] for key in COUNTERS}})
         if path=="rollback-restart":
-            journal = BudgetJournal(self.ctx.storage.sql,preview_product=True,product_operations=True)
-            before = journal.snapshot()
+            journal=BudgetJournal(self.ctx.storage.sql,preview_product=True,product_operations=True)
+            before=journal.snapshot()
             assert before==await load_fixture(self.ctx.storage,"failedUpgradeJournal")
             try:
-                await upgrade_product_schema_v9(native,journal)
+                await upgrade_product_schema_v10(native,journal)
             except BudgetError as error:
                 assert str(error)=="D1_OUTCOME_UNKNOWN"
             else:
                 raise AssertionError("Unknown native outcome retried after actual restart")
-            assert native.dispatches==0 and journal.snapshot()==before
-            assert before["stopped"]=="D1_OUTCOME_UNKNOWN"
+            assert native.dispatches==0 and journal.snapshot()==before and before["stopped"]=="D1_OUTCOME_UNKNOWN"
             value=await snapshot(native)
             assert value["tables"]==await load_fixture(self.ctx.storage,"failedUpgradeTables")
-            assert value["schemaObjects"]==V8_SCHEMA_OBJECTS
-            assert journal.snapshot()==before
+            assert value["schemaObjects"]==V9_SCHEMA_OBJECTS and journal.snapshot()==before
             return Response.json({"passed":True,"actualProcessRestart":True,
                 "unknownOutcomeNoRetryNativeDispatches":0,"journalUnchanged":True,
-                "all21HistoricalTableDigestsAndIndexesPreserved":True,
-                "schemaVersionRetained":8,"unknownOutcomeStopRetained":True,
-                "fullReadWriteReservationRetained":True})
+                "all22HistoricalTableDigestsAndIndexesPreserved":True,"schemaVersionRetained":9,
+                "unknownOutcomeStopRetained":True,"fullReadWriteReservationRetained":True})
+
 '''
 
 
@@ -599,7 +583,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--port", type=int, default=8909)
+    parser.add_argument("--port", type=int, default=8910)
     args = parser.parse_args()
     directory = args.run_dir.resolve()
     if not directory.is_relative_to(Path("/workspace")) or not 1024 <= args.port <= 64535:
@@ -619,14 +603,15 @@ def main():
     # Resolve npx to the same already-installed Wrangler and Workerd release;
     # do not install a different tooling version inside this generated fixture.
     (directory / "node_modules").symlink_to(WORKER / "node_modules", target_is_directory=True)
-    config = {"name": "pullwise-activity-schema-native-local-only", "main": "src/entry.py",
+    config = {"name": "pullwise-project-removal-schema-native-local-only", "main": "src/entry.py",
         "compatibility_date": "2026-09-23", "compatibility_flags": ["python_workers"],
         "workers_dev": False, "preview_urls": False, "routes": [],
         "vars": {"PULLWISE_MODE": "local", "PULLWISE_D1_ACCESS_ENABLED": "1"},
         "d1_databases": [{"binding": binding, "database_name": name,
             "database_id": identity, "remote": False} for binding, name, identity in (
-                ("DB", "activity-schema-main-local-only", "00000000-0000-0000-0000-000000000038"),
-                ("ROLLBACK_DB", "activity-schema-rollback-local-only", "00000000-0000-0000-0000-000000000039"))],
+                ("DB", "project-removal-schema-main-local-only", "00000000-0000-0000-0000-000000000040"),
+                ("ROLLBACK_DB", "project-removal-schema-rollback-local-only", "00000000-0000-0000-0000-000000000041"),
+                ("FRESH_DB", "project-removal-schema-fresh-local-only", "00000000-0000-0000-0000-000000000042"))],
         "durable_objects": {"bindings": [{"name": "FIXTURE_JOURNAL", "class_name": "FixtureJournal"}]},
         "migrations": [{"tag": "local-fixture-v1", "new_sqlite_classes": ["FixtureJournal"]}]}
     config_path = directory / "wrangler.jsonc"
@@ -651,7 +636,7 @@ def main():
         "nativePythonFFI": True, "nativeDurableObjectSQLite": True, "syntheticPriorJournal": True,
         "remoteRequests": 0, "remoteD1Operations": 0, "realProviderRequests": 0,
         "realAccounts": 0, "realPayments": 0, "clientRetries": 0, "localHttpCap": len(HTTP_PATHS),
-        "nativeAttemptsFabricated": False, "fixtureBindingCount": 2,
+        "nativeAttemptsFabricated": False, "fixtureBindingCount": 3,
         "canonicalSourceTreeSha256": hashlib.sha256(json.dumps(manifest, separators=(",", ":")).encode()).hexdigest(),
         "canonicalSourceFileCount": len(files), "fixtureEntrySha256": sha256(source / "entry.py"),
         "dependencySha256": {name: sha256(directory / name) for name in
@@ -734,10 +719,10 @@ def main():
                 process.wait(timeout=5)
         groups, failures = [], []
         for line in log_path.read_text(errors="replace").splitlines() if log_path.exists() else []:
-            if line.startswith('{"nativeActivitySchemaMeta":'):
-                groups.append(json.loads(line)["nativeActivitySchemaMeta"])
-            elif line.startswith('{"nativeActivitySchemaFailure":'):
-                failures.append(json.loads(line)["nativeActivitySchemaFailure"])
+            if line.startswith('{"nativeProjectRemovalSchemaMeta":'):
+                groups.append(json.loads(line)["nativeProjectRemovalSchemaMeta"])
+            elif line.startswith('{"nativeProjectRemovalSchemaFailure":'):
+                failures.append(json.loads(line)["nativeProjectRemovalSchemaFailure"])
         evidence.update(localHttpRequestsAttempted=attempted, localHttpRequestsCompleted=len(results),
             runtimeProcessesStarted=processes_started, actualProcessRestarts=max(0, processes_started - 1),
             nativeResultStatements=sum(group["statements"] for group in groups),

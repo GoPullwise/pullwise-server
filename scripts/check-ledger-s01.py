@@ -2,6 +2,7 @@
 """Static S01 checks. Never opens D1 or invokes Wrangler."""
 
 import argparse
+import hashlib
 import json
 import re
 import sqlite3
@@ -57,6 +58,11 @@ def validate_config(environment: str, allow_placeholders: bool,
                 or bindings[0].get("class_name") != "ValidationBudget"
                 or vars_.get("PULLWISE_CREEM_API_BASE_URL") != "https://test-api.creem.io"):
             raise ValueError("product preview requires the existing budget coordinator and test provider")
+    removal_upgrade = vars_.get("PULLWISE_PREVIEW_SCHEMA_V10_UPGRADE_ENABLED", "0")
+    if removal_upgrade not in {"0", "1"}:
+        raise ValueError("project removal schema upgrade must be explicitly enabled or disabled")
+    if removal_upgrade == "1" and not (product_preview and access == "1"):
+        raise ValueError("project removal schema upgrade requires the existing coordinated preview")
     email_auth = vars_.get("PULLWISE_EMAIL_AUTH_ENABLED", "0")
     if email_auth not in {"0", "1"}:
         raise ValueError("email authentication must be explicitly enabled or disabled")
@@ -148,15 +154,43 @@ def validate_contract() -> None:
     if not migrations or any(not sqlite3.complete_statement(path.read_text(encoding="utf-8"))
                              for path in migrations):
         raise ValueError("ledger migration is absent or incomplete")
+    for path in migrations:
+        for pattern in re.findall(r"\bGLOB\s+'((?:''|[^'])*)'", path.read_text(encoding="utf-8"), re.I):
+            if len(pattern.replace("''", "'").encode("utf-8")) > 50:
+                raise ValueError("native D1 GLOB pattern exceeds 50 bytes: " + path.name)
     with sqlite3.connect(":memory:") as database:
         for path in sorted(migrations):
             database.executescript(path.read_text(encoding="utf-8"))
         required = {"ledger_projects", "expenses", "expense_events", "app_state",
                     "api_keys", "billing_webhook_receipts", "billing_public_catalog", "ledger_plan_usage",
-                    "expense_recurring_rules", "expense_recurring_occurrences"}
+                    "expense_recurring_rules", "expense_recurring_occurrences", "ledger_activity_events"}
         actual = {row[0] for row in database.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if not required <= actual:
             raise ValueError("ledger runtime migration tables are missing")
+        # Canonical migrations and packaged authority must describe the same
+        # final schema. Frozen old authorities remain separate upgrade proofs.
+        sys.path.insert(0, str(ROOT))
+        from pullwise_server.cloudflare_preview_schema import (
+            SCHEMA_VERSION, SCHEMA_SQL, SCHEMA_OBJECTS, SCHEMA_FINGERPRINT, MIGRATIONS,
+        )
+        if SCHEMA_VERSION != 10 or len(SCHEMA_SQL) > 64:
+            raise ValueError("project removal schema authority or fresh batch bound is invalid")
+        def objects(connection):
+            return tuple((kind, name, table, " ".join(sql.split()) if sql else None)
+                         for kind, name, table, sql in connection.execute(
+                             "SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name"))
+        canonical = objects(database)
+        if canonical != SCHEMA_OBJECTS or hashlib.sha256(json.dumps(
+                canonical, separators=(",", ":")).encode()).hexdigest() != SCHEMA_FINGERPRINT:
+            raise ValueError("canonical migrations and project removal schema authority disagree")
+        declared = {item["name"]: item["sha256"] for item in MIGRATIONS}
+        if declared != {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in migrations}:
+            raise ValueError("canonical migration hashes disagree with packaged authority")
+        with sqlite3.connect(":memory:") as compiled:
+            for sql in SCHEMA_SQL:
+                compiled.execute(sql)
+            if objects(compiled) != canonical:
+                raise ValueError("fresh project removal schema differs from canonical migrations")
 
 
 def main() -> int:

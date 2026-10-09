@@ -34,6 +34,12 @@ MAX_RULES_PER_OWNER = 100
 MAX_TICK_RULES = 10
 MAX_TICK_OCCURRENCES = 10
 
+# A removal preserves immutable rules and occurrences, but withdraws every live
+# rule surface. Correlate with the stored owner as well as the project ID.
+_VISIBLE_TARGET = """(target_kind='shared' OR EXISTS(SELECT 1 FROM ledger_projects p
+    WHERE p.owner_id=expense_recurring_rules.owner_id
+        AND p.id=expense_recurring_rules.project_id AND p.deleted_at IS NULL))"""
+
 
 def _json(value, maximum=8192):
     encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
@@ -73,7 +79,7 @@ def rule_dto(row):
 def _rule_guard(binding, row, *, active=False):
     return binding.prepare("""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN
         EXISTS(SELECT 1 FROM expense_recurring_rules WHERE id=? AND owner_id=? AND revision=?
-            AND (?=0 OR status='active')) THEN 1 ELSE 0 END)""").bind(
+            AND (?=0 OR status='active') AND """ + _VISIBLE_TARGET + ") THEN 1 ELSE 0 END)").bind(
                 row["id"], row["owner_id"], row["revision"], 1 if active else 0)
 
 
@@ -130,7 +136,7 @@ async def _http(binding, gateway, method, identifier, headers, params, body, now
         target, project = _param(params, "target") or "all", _param(params, "projectId")
         if target not in {"all", "project", "shared"} or target == "shared" and project or project and not _valid_resource_id(project):
             return _error(422, "INVALID_INPUT")
-        clauses, values = ["owner_id=?", "status!='canceled'", "id> ?"], [cursor]
+        clauses, values = ["owner_id=?", "status!='canceled'", "id> ?", _VISIBLE_TARGET], [cursor]
         if target != "all":
             clauses.append("target_kind=?")
             values.append(target)
@@ -147,9 +153,10 @@ async def _http(binding, gateway, method, identifier, headers, params, body, now
                      "nextCursor": items[-1]["id"] if len(found[0]) > limit else None}
     user, restrictions, proof, found = await _snapshot(binding, headers, now,
         "expenses:read" if method == "GET" else "expenses:write",
-        lambda owner, actor: [binding.prepare("SELECT * FROM expense_recurring_rules WHERE owner_id=? AND id=?").bind(owner, identifier or ""),
-            binding.prepare("""SELECT create_sha256,create_response_json FROM expense_recurring_rules
-                WHERE owner_id=? AND create_key=?""").bind(owner, _creation_key(owner, actor, key))
+        lambda owner, actor: [binding.prepare("SELECT * FROM expense_recurring_rules WHERE owner_id=? AND id=? AND " +
+                _VISIBLE_TARGET).bind(owner, identifier or ""),
+            binding.prepare("SELECT create_sha256,create_response_json," + _VISIBLE_TARGET + """ AS target_visible
+                FROM expense_recurring_rules WHERE owner_id=? AND create_key=?""").bind(owner, _creation_key(owner, actor, key))
             if key else binding.prepare("SELECT id FROM expense_recurring_rules WHERE 0")], actor_queries=True)
     if proof.get("key") is not None or not _header(headers, "Cookie"):
         return _error(403, "RECURRING_SESSION_REQUIRED")
@@ -192,12 +199,15 @@ async def _http(binding, gateway, method, identifier, headers, params, body, now
     digest = hashlib.sha256(_json({"template": template, "schedule": schedule}, 16384).encode("utf-8")).hexdigest()
     if method == "POST" and found[1]:
         saved = found[1][0]
+        if not saved["target_visible"]:
+            return _error(404, "NOT_FOUND")
         return (201, json.loads(saved["create_response_json"])) if digest == saved["create_sha256"] else _error(409, "IDEMPOTENCY_CONFLICT")
     denied, evidence = await _validate_template(binding, gateway, user, restrictions, template)
     if denied:
         return denied
     if method == "POST":
-        count = await binding.prepare("SELECT COUNT(*) AS total FROM expense_recurring_rules WHERE owner_id=? AND status!='canceled'").bind(user["id"]).first()
+        count = await binding.prepare("SELECT COUNT(*) AS total FROM expense_recurring_rules WHERE owner_id=? AND status!='canceled' AND " +
+            _VISIBLE_TARGET).bind(user["id"]).first()
         if count["total"] >= MAX_RULES_PER_OWNER:
             return _error(403, "RECURRING_RULE_LIMIT")
     future = local_today(schedule, now) + timedelta(days=1) if current else None
@@ -267,7 +277,8 @@ async def scheduled_authority(binding, row):
 
 def _schedule_guard(binding, row, authority):
     checks = ["EXISTS(SELECT 1 FROM app_state u WHERE u.name=? AND u.payload=?)",
-              "EXISTS(SELECT 1 FROM expense_recurring_rules WHERE id=? AND owner_id=? AND actor_user_id=? AND revision=? AND status='active')"]
+              "EXISTS(SELECT 1 FROM expense_recurring_rules WHERE id=? AND owner_id=? AND actor_user_id=? AND revision=? AND status='active' AND " +
+                  _VISIBLE_TARGET + ")"]
     values = [record_name("users", row["owner_id"]), authority["owner_snapshot"],
               row["id"], row["owner_id"], row["actor_user_id"], row["revision"]]
     if row["actor_user_id"] != row["owner_id"]:
@@ -297,6 +308,14 @@ async def _maintenance(binding, row, *, now, code=None, following=None):
 
 
 async def generate_occurrence(*, binding, maintenance_binding, gateway, row, now):
+    if row["target_kind"] == "project":
+        # A row selected before a concurrent removal must not publish anything,
+        # including replay-pointer maintenance, or contact a provider.
+        project = await binding.prepare("""SELECT id FROM ledger_projects
+            WHERE owner_id=? AND id=? AND deleted_at IS NULL""").bind(
+                row["owner_id"], row["project_id"]).first()
+        if project is None:
+            return row, None
     schedule = json.loads(row["schedule_json"])
     occurred = iso_date(row["next_occurrence_on"])
     following = following_occurrence(schedule, occurred)
@@ -356,7 +375,7 @@ async def run_due_recurring(*, binding, gateway, now, rule_limit=MAX_TICK_RULES,
     if expired:
         await maintenance_binding.batch(expired)
     found = await binding.prepare("""SELECT * FROM expense_recurring_rules WHERE status='active'
-        AND next_run_at<=? ORDER BY next_run_at,id LIMIT ?""").bind(now, rule_limit).all()
+        AND next_run_at<=? AND """ + _VISIBLE_TARGET + " ORDER BY next_run_at,id LIMIT ?").bind(now, rule_limit).all()
     counts = {"scanned": len(found.results), "created": 0, "blocked": 0, "replayed": 0}
     handled = 0
     for row in found.results:
@@ -378,6 +397,8 @@ async def run_due_recurring(*, binding, gateway, now, rule_limit=MAX_TICK_RULES,
                and row["next_run_at"] <= now and handled < occurrence_limit and per_rule < 3):
             row, result = await generate_occurrence(binding=binding, maintenance_binding=maintenance_binding,
                 gateway=gateway, row=row, now=now)
+            if result is None:
+                break
             counts[result] += 1
             handled += 1
             per_rule += 1

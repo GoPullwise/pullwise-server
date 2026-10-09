@@ -157,7 +157,7 @@ async def project_repository_eligibility(binding: Any, user: dict, project_id: s
     """
     parts = await binding.batch([
         binding.prepare("""SELECT revision,status,github_repo_id FROM ledger_projects
-            WHERE owner_id=? AND id=?""").bind(user["id"], project_id),
+            WHERE owner_id=? AND id=? AND deleted_at IS NULL""").bind(user["id"], project_id),
         binding.prepare("""SELECT github_repo_id FROM ledger_project_repositories
             WHERE owner_id=? AND project_id=? ORDER BY github_repo_id LIMIT 30""").bind(
                 user["id"], project_id)])

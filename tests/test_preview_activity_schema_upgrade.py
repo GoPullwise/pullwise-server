@@ -11,13 +11,14 @@ from test_preview_recurring_schema_upgrade import v6, schema
 from test_preview_blank_schema_upgrade import v5
 from test_preview_schema_upgrade import SQLiteD1
 from pullwise_server.cloudflare_preview_schema import (
-    SCHEMA_VERSION, SCHEMA_FINGERPRINT, SCHEMA_OBJECTS, SCHEMA_SQL, INDEX_COUNTS,
+    V9_SCHEMA_VERSION as SCHEMA_VERSION, V9_SCHEMA_FINGERPRINT as SCHEMA_FINGERPRINT,
+    V9_SCHEMA_OBJECTS as SCHEMA_OBJECTS, V9_SCHEMA_SQL as SCHEMA_SQL, V9_INDEX_COUNTS as INDEX_COUNTS,
     V8_INDEX_COUNTS, UPGRADE_V9_SQL,
 )
 from pullwise_server.cloudflare_preview_budget import (
     upgrade_product_schema_v8, upgrade_product_schema_v9, _upgrade_v9_plan,
     begin_product_schema_upgrade_v9, _V8_COUNT_SQL, _input_bound, sql_write_bound,
-    ProductMeteredD1,
+    ProductMeteredD1, upgrade_product_schema_v10,
 )
 from pullwise_server.cloudflare_validation_budget import BudgetJournal, BudgetError
 
@@ -74,10 +75,14 @@ def test_activity_extension_preserves_identity_finance_membership_and_journal(v8
     restarted = BudgetJournal(LocalSql(storage), preview_product=True, product_operations=True)
     run(raw, restarted)
     assert raw.calls == 4 and restarted.snapshot() == after
+    # Current product reads use v10. Both extensions prove strict auth records
+    # within their bounded upgrade, so a healthy first read needs no scan.
+    asyncio.run(upgrade_product_schema_v10(raw, restarted, clock=lambda: 12))
+    calls = raw.calls
     ticket = restarted.begin_product(now=12)
     meter = ProductMeteredD1(raw, restarted, ticket, clock=lambda: 13)
     asyncio.run(meter.ensure_cardinality())
-    assert raw.calls == 4 and meter.records_integrity_verified is True
+    assert raw.calls == calls and meter.records_integrity_verified is True
     restarted.finish(ticket, now=14)
 
 
@@ -170,6 +175,7 @@ def test_activity_snapshots_keep_exact_json_envelopes_and_index_costs():
 
 def test_fresh_schema_matches_canonical_migrations_within_original_batch_cap():
     from pathlib import Path
+    from pullwise_server.cloudflare_preview_schema import SCHEMA_SQL, SCHEMA_OBJECTS, INDEX_COUNTS
     with sqlite3.connect(':memory:') as canonical, sqlite3.connect(':memory:') as compiled:
         for migration in sorted((Path(__file__).resolve().parents[1] / 'cloudflare/server/migrations').glob('*.sql')):
             canonical.executescript(migration.read_text())

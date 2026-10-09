@@ -217,7 +217,7 @@ async def handle_activity_request(*, binding, gateway, method, path, headers, pa
             " ORDER BY created_at DESC,id DESC LIMIT ?").bind(*values, limit + 1)
         commands = [query]
         if project:
-            commands.append(binding.prepare("SELECT id FROM ledger_projects WHERE owner_id=? AND id=?").bind(user["id"], project))
+            commands.append(binding.prepare("SELECT id FROM ledger_projects WHERE owner_id=? AND id=? AND deleted_at IS NULL").bind(user["id"], project))
         parts = await binding.batch([*auth, *commands])
         validate([part.results for part in parts[:len(auth)]])
         found = parts[len(auth)].results
