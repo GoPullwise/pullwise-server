@@ -2,6 +2,22 @@
 
 Updated 2026-10-09. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
 
+## Preview operator Max trial (2026-10-09)
+
+Preview administrators can issue a bounded complimentary Max grant through the
+existing singleton coordinator or its trusted configuration binding. Exact user
+ID, GitHub login and email must match. One atomic account/audit/authority batch
+preserves provider facts and all ledger data; replay adds no writes. Expiry
+restores the current billing plan without deleting account or ledger content.
+There is no public grant endpoint and production remains paused.
+
+The merged schema-v9 source passed 1,602 tests and 56 subtests. Seven isolated
+native Worker requests verified grant application, zero-write replay/profile/
+Billing reads and the exact expiry boundary. The original singleton journal,
+15 business-table hashes and payment/account fields were preserved. Native
+Miniflare omitted attempt metadata, so read reservations were retained; no
+attempt value was fabricated. No payment or model provider was called.
+
 ## Recent operation history (2026-10-09)
 
 Project and Shared pool history identifies the actual actor, full timestamp,

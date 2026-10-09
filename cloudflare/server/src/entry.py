@@ -34,6 +34,10 @@ from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initiali
 from pullwise_server.cloudflare_preview_rate import PreviewRateLimiter, PreviewRateLimit, EmailRateLimiter, EmailRateLimit, request_channel
 from pullwise_server.cloudflare_native_d1 import NativeD1
 from pullwise_server.json_input import validate_json_unicode
+from pullwise_server.preview_plan_grants import (
+    PreviewPlanGrantError, apply_preview_plan_grant, parse_preview_plan_grant_request,
+    preview_grants_enabled,
+)
 
 
 def _request_target(request):
@@ -467,6 +471,62 @@ class ValidationBudget(DurableObject):
     async def evidence(self):
         return self._journal().evidence_snapshot()
 
+    async def grantPreviewPlan(self, request_json):
+        """Operator binding-only RPC; no public route, caller SQL or clock."""
+        if not preview_grants_enabled(self.env):
+            return {"ok": False, "error": "PREVIEW_PLAN_GRANT_DISABLED"}
+        try:
+            parse_preview_plan_grant_request(request_json, now=int(time.time()))
+        except PreviewPlanGrantError as error:
+            return {"ok": False, "error": error.code}
+        if self._waiting >= 16:
+            return {"ok": False, "error": "VALIDATION_BUSY"}
+        self._waiting += 1
+        try:
+            async with self._product_lock:
+                journal = self._journal()
+                state = journal.snapshot()
+                if (not state.get("schema_ready") or state.get("schema_version") not in (8, 9)
+                        or state.get("state_storage_version") != 1):
+                    return {"ok": False, "error": "SCHEMA_UPGRADE_REQUIRED"}
+                ticket = binding = None
+                try:
+                    async def execute():
+                        nonlocal ticket, binding
+                        now = int(time.time())
+                        ticket = journal.begin_product(now=time.time())
+                        binding = ProductMeteredD1(NativeD1(self.env.DB), journal, ticket)
+                        await binding.ensure_cardinality()
+                        result = await apply_preview_plan_grant(binding=binding,
+                            request_json=request_json, now=now)
+                        journal.finish(ticket, now=time.time())
+                        return {"ok": True, **result}
+                    return await asyncio.wait_for(execute(), timeout=REQUEST_SECONDS)
+                except PreviewPlanGrantError as error:
+                    if ticket is not None and binding is not None and binding.accounted_outcome():
+                        journal.finish(ticket, now=time.time())
+                        return {"ok": False, "error": error.code}
+                    journal.stop("REQUEST_OUTCOME_UNKNOWN")
+                    return {"ok": False, "error": journal.snapshot()["stopped"]}
+                except BudgetError as error:
+                    if journal.snapshot()["active"] is not None:
+                        journal.stop(str(error))
+                    return {"ok": False, "error": str(error)}
+                except BaseException as error:
+                    if (not isinstance(error, asyncio.CancelledError)
+                            and ticket is not None and binding is not None
+                            and binding.accounted_outcome()):
+                        journal.finish_accounted_product_failure(ticket, now=time.time(),
+                            timeout=isinstance(error, asyncio.TimeoutError))
+                        return {"ok": False, "error": "PREVIEW_PLAN_GRANT_UNAVAILABLE"}
+                    journal.stop("TIMEOUT" if isinstance(error, asyncio.TimeoutError)
+                                 else "REQUEST_OUTCOME_UNKNOWN")
+                    if isinstance(error, asyncio.CancelledError):
+                        raise
+                    return {"ok": False, "error": journal.snapshot()["stopped"]}
+        finally:
+            self._waiting -= 1
+
     async def initialize(self):
         # Only a Worker possessing the coordinator binding can invoke RPC.
         # No SQL, params, plan or reset option is supplied by the caller.
@@ -642,6 +702,12 @@ class ValidationBudget(DurableObject):
                         binding = ProductMeteredD1(native, journal, ticket, rate_limiter=self.rate_limiter,
                             rate_channel=request_channel(request.method, path))
                         await binding.ensure_cardinality()
+                        configured_grant = getattr(self.env, "PULLWISE_PREVIEW_PLAN_GRANT_JSON", "")
+                        if configured_grant:
+                            if not preview_grants_enabled(self.env):
+                                raise PreviewPlanGrantError("PREVIEW_PLAN_GRANT_DISABLED")
+                            await apply_preview_plan_grant(binding=binding,
+                                request_json=configured_grant, now=int(time.time()))
                         application = _Application(self.env, binding)
                         ip_subject = _email_ip_subject(request)
 
@@ -664,6 +730,12 @@ class ValidationBudget(DurableObject):
                         journal.finish(ticket, now=time.time())
                         return response
                     return await asyncio.wait_for(execute(), timeout=REQUEST_SECONDS)
+                except PreviewPlanGrantError as error:
+                    if ticket is not None and binding is not None and binding.accounted_outcome():
+                        journal.finish(ticket, now=time.time())
+                        return _unavailable(error.code)
+                    journal.stop("REQUEST_OUTCOME_UNKNOWN")
+                    return _unavailable(journal.snapshot()["stopped"])
                 except PreviewRateLimit as error:
                     if ticket is not None and binding is not None and binding.accounted_outcome():
                         journal.finish_accounted_product_failure(ticket, now=time.time())

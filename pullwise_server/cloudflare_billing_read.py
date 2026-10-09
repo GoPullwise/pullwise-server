@@ -35,4 +35,4 @@ async def read_billing(*, binding: Any, headers: Mapping[str, object],
     return 200, {"page": {"id": "billing",
         "subscriptionAction": {"label": "View pricing", "href": "/pricing"},
         "checkoutAction": None},
-        "account": billing_account_dto(user, effective_user_plan(user, timestamp=now))}
+        "account": billing_account_dto(user, effective_user_plan(user, timestamp=now), timestamp=now)}

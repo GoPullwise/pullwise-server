@@ -98,6 +98,15 @@ def normalize_plan(plan: object, default: str = "free") -> str:
 
 
 def effective_user_plan(user: dict[str, Any] | None, *, timestamp: int | None = None) -> str:
+    from .preview_plan_grants import active_preview_plan_grant
+
+    current_time = current_timestamp(timestamp)
+    if active_preview_plan_grant(user, now=current_time):
+        return "max"
+    return billing_user_plan(user, timestamp=current_time)
+
+
+def billing_user_plan(user: dict[str, Any] | None, *, timestamp: int | None = None) -> str:
     if not user:
         return "free"
     current_time = current_timestamp(timestamp)
@@ -116,7 +125,13 @@ def effective_user_plan(user: dict[str, Any] | None, *, timestamp: int | None = 
 
 
 def quota_cycle_for_user(user: dict[str, Any] | None, plan: str, *, timestamp: int | None = None) -> tuple[str, int]:
+    from .preview_plan_grants import active_preview_plan_grant
+
     current_time = current_timestamp(timestamp)
+    grant = active_preview_plan_grant(user, now=current_time)
+    if grant and billing_user_plan(user, timestamp=current_time) != "max":
+        start, reset_at = monthly_cycle_bounds(grant["startsAt"], current_time)
+        return cycle_period(start), min(reset_at, grant["expiresAt"])
     billing = user.get("billing") if user and isinstance(user.get("billing"), dict) else {}
     anchor: int | None = None
     period_end: int | None = None

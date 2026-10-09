@@ -8,6 +8,7 @@ from pathlib import Path
 
 MODULES = (
     "account_cycle_rules",
+    "preview_plan_grants",
     "api_key_dto_rules",
     "billing_account_rules",
     "billing_catalog_rules",

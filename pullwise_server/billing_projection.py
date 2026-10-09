@@ -57,8 +57,23 @@ def subscription_events_dto(user: dict) -> list[dict]:
     return result[:50]
 
 
-def billing_account_dto(user: dict, plan: str) -> dict:
+def billing_account_dto(user: dict, plan: str, *, timestamp=None) -> dict:
+    from .account_cycle_rules import billing_user_plan, current_timestamp
+    from .preview_plan_grants import active_preview_plan_grant, preview_plan_grant
+
     current = user.get("billing") if isinstance(user.get("billing"), dict) else {}
+    now = current_timestamp(timestamp)
+    grant = preview_plan_grant(user)
+    public_grant = ({key: grant[key] for key in ("grantId", "plan", "startsAt", "expiresAt", "issuedAt")}
+                    if grant else None)
+    if public_grant is not None:
+        public_grant["active"] = active_preview_plan_grant(user, now=now) is not None
+    # A complimentary trial has its own source. Never present a grant as a
+    # Creem subscription or persist synthetic customer/payment identifiers.
+    if active_preview_plan_grant(user, now=now) and billing_user_plan(user, timestamp=now) == "free":
+        current = {"provider": "preview_grant", "status": "trialing", "interval": "month",
+                   "currentPeriodStart": grant["startsAt"], "currentPeriodEnd": grant["expiresAt"],
+                   "cancelAtPeriodEnd": False, "updatedAt": grant["issuedAt"]}
     pending = user.get("billingChange") if isinstance(user.get("billingChange"), dict) else {}
     pending_change = None
     if (pending.get("subscriptionId") == current.get("subscriptionId")
@@ -82,5 +97,6 @@ def billing_account_dto(user: dict, plan: str) -> dict:
         "lastEventCreated": _timestamp(current.get("lastEventCreated")),
         "updatedAt": _timestamp(current.get("updatedAt")),
         "entitlements": None,
+        "previewPlanGrant": public_grant,
         "pendingChange": pending_change,
         "subscriptionEvents": subscription_events_dto(user)}
