@@ -140,7 +140,9 @@ Web 提供账本切换、成员和邀请页面、组织筛选、仓库多选及�
 
 ## 迁移与发布证据
 
-当前 canonical schema 为六个 migrations、18 张表和 33 个 SQLite indexes。
+当前 canonical schema 为九个 migrations、22 张表和 49 个 SQLite indexes。
+`0009_activity_log.sql` 添加独立的最近 24 小时操作记录投影，原财务与审计
+记录不变；接口、过期清理和原生升级边界见 [操作记录](activity-log.md)。
 `0006_blank_projects.sql` 在同一原子 batch 内允许项目 anchor 为 NULL；
 Preview v5→v6 升级已验收，账本身份、关联项目及财务/审计记录保持原样。
 生产仍保持 `PULLWISE_D1_ACCESS_ENABLED=0`。以下是保留的

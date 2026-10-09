@@ -2,6 +2,45 @@
 
 Updated 2026-10-09. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
 
+## Recent operation history (2026-10-09)
+
+Project and Shared pool history identifies the actual actor, full timestamp,
+affected record and changed values for the Server-enforced rolling last 24 hours.
+Successful expense, project-setting and recurring operations log immutable
+snapshots in their existing guarded transaction. Replays, unchanged values,
+failed CAS/authority and failed history inserts create no partial business or
+audit result. Restricted keys see only authorized expense history; actor data
+contains no private email, key hash or authentication token. Original financial
+audits remain intact. Bounded 16-row retirement uses existing mutation and idle
+hourly maintenance paths, without GET writes or a new trigger.
+
+The complete Python 3.10.12 suite passes **1,569 tests**. Static contracts,
+preview configuration, deployment syntax and the full Worker import closure
+pass. The verified preview package contains the exact entry and 53 canonical
+modules, plus the unchanged pinned SDK and tzdata. Older test fixtures were
+upgraded without excluding their assistance, quota or replay regressions.
+
+[Schema evidence](activity-schema-native-local-2026-10-09.json) proves v8-to-v9
+in five local requests and two actual restarts, with all 21 prior table hashes
+unchanged. Migration native accounting is 453 reads / 5 writes. An injected
+failure rolls back the extension and retains its stop/reservation without replay.
+The [reviewed plan](activity-schema-upgrade.md) records all finite bounds.
+
+[Native workflow evidence](activity-log-native-runtime-local-2026-10-09.json)
+passes 55 of at most 60 local calls, 2,442 metered reads / 627 writes and an actual
+restart. Separate read-only integrity probes observe 1,763 reads. It verifies
+cookie and email-only identities, key redaction, before/after money, strict
+24-hour boundaries, recurring generation, unchanged commercial charges and
+idle cleanup preserving finance/rule/usage hashes. Missing native attempts stay
+null. One post-runtime assertion typo and its offline correction are retained;
+they caused no additional runtime request or retry.
+
+These fixtures use synthetic local accounts and providers are never invoked.
+[Preview release evidence](activity-log-preview-release-2026-10-09.json) records
+bounded publication checks separately from real-account acceptance. The new
+projection begins with this release; historical audit facts are not backfilled.
+Production D1 remains paused and publication is preview only.
+
 ## Invitation links and inviter approval (2026-10-09)
 
 The Members flow creates an invitation link without a GitHub username. A real

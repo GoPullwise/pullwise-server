@@ -289,6 +289,7 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
         elif not data["category_id"]:
             return _error(422, "CATEGORY_REQUIRED")
     stamp = _timestamp(now)
+    from .cloudflare_ledger_activity import activity_commands
     actor_kind, actor_id = _actor(proof)
     event_id = "evt_" + uuid.uuid4().hex
     if method == "POST":
@@ -298,6 +299,8 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
         payload = _dto(record)
         if assistance is not None:
             payload["assistance"] = assistance
+        activity = await activity_commands(binding, user, "expense", expense_id, "create", None,
+            payload, now, proof=proof, operation_id=event_id)
         values = [record[name] for name in ("id", "owner_id", "target_kind", "project_id", "category_id",
             "occurred_on", "amount_minor", "currency", "purpose", "note", "quantity_decimal", "unit",
             "revision", "created_at", "updated_at", "deleted_at")]
@@ -320,6 +323,7 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
               request_sha256,expense_id,response_json,created_at) VALUES(?,?,?,?,?,?)""").bind(
                 user["id"], key, digest, expense_id,
                 json.dumps(payload, ensure_ascii=False, separators=(",", ":")), stamp),
+            *activity,
             binding.prepare("DELETE FROM d1_command_guard")]
         try:
             await binding.batch(commands)
@@ -355,6 +359,10 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
         sql = """UPDATE expenses SET deleted_at=?,updated_at=?,revision=revision+1
             WHERE id=? AND owner_id=? AND revision=? AND deleted_at IS NULL"""
         values = [stamp, stamp, item_id, user["id"], expected]
+    action = "move" if after is not None and before["target"] != after["target"] else (
+        "update" if method == "PATCH" else "delete")
+    activity = await activity_commands(binding, user, "expense", item_id, action, before,
+        after, now, proof=proof, operation_id=event_id)
     commands = [_write_guard(binding, proof, user["id"], now)]
     if method == "PATCH" and data["category_id"] != current["category_id"]:
         commands.append(binding.prepare("""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN
@@ -370,6 +378,7 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
             "update" if method == "PATCH" else "delete",
             json.dumps(before, ensure_ascii=False, separators=(",", ":")),
             json.dumps(after, ensure_ascii=False, separators=(",", ":")) if after else None, stamp),
+        *activity,
         binding.prepare("DELETE FROM d1_command_guard")]
     try:
         await binding.batch(commands)

@@ -20,8 +20,9 @@ def ledger():
     fixture = suggestion_fixture.LedgerSuggestionTests()
     fixture.setUp()
     with fixture.store.connect() as db:
-        db.executescript((Path(__file__).resolve().parents[1] /
-            "cloudflare/server/migrations/0004_ledger_plan_usage.sql").read_text())
+        migrations = Path(__file__).resolve().parents[1] / "cloudflare/server/migrations"
+        for name in ("0004_ledger_plan_usage.sql", "0009_activity_log.sql"):
+            db.executescript((migrations / name).read_text())
     fixture.binding = PlanLimitedD1(fixture.binding, now=fixture.now + 3)
     yield fixture
     fixture.tearDown()

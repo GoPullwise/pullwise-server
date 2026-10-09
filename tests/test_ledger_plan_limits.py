@@ -34,8 +34,9 @@ def setup(tmp_path):
     fixture, _, frozen = seed(tmp_path / "plans.db")
     seed_auth(fixture)
     with fixture.store._immediate() as db:
-        db.executescript((Path(__file__).resolve().parents[1] /
-                          "cloudflare/server/migrations/0004_ledger_plan_usage.sql").read_text())
+        migrations = Path(__file__).resolve().parents[1] / "cloudflare/server/migrations"
+        for name in ("0004_ledger_plan_usage.sql", "0009_activity_log.sql"):
+            db.executescript((migrations / name).read_text())
     return fixture, frozen
 
 

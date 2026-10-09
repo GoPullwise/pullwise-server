@@ -18,12 +18,15 @@ the implementation; `cloudflare/server/sync_server_modules.py` generates the
 ignored Worker mirror. The [ledger OpenAPI](openapi/ledger-v1.yaml) is the shared
 business contract.
 
-## Current version (2026-10-08)
+## Current version (2026-10-09)
 
 Standalone named projects, optional repository/Organization associations and
-shared ledgers are implemented. The current source adds development/product
-links and server-generated weekly, monthly, calendar-quarterly and yearly
-expenses with schema v7, now published to preview. The [feature contract](docs/planning/recurring-expenses-project-links.md)
+shared ledgers are implemented. Development/product links and server-generated
+weekly, monthly, calendar-quarterly and yearly expenses remain available.
+The current schema v9 adds [recent operation history](docs/planning/activity-log.md)
+for project and shared-pool expenses, project settings and recurring rules.
+It identifies the actual actor and changed values for the latest rolling 24 hours,
+while preserving the original financial audits. The [recurring feature contract](docs/planning/recurring-expenses-project-links.md)
 describes timezone, month-end, permissions and duplicate prevention. Separate
 local role/browser evidence and actual remote publication checks are in
 [latest acceptance](docs/validation/local-acceptance.md). Original-version
@@ -31,8 +34,8 @@ acceptance remains historical rather than new-role evidence.
 
 A workspace ID is the existing ledger owner ID. Personal ledgers retain an
 implicit Owner; inviting members shares that ledger's current and future finance
-data without copying or rewriting expense history. Invitations resolve a GitHub
-username to a stable user ID, expire after 24 hours and store only a one-time
+data without copying or rewriting expense history. Invitations select a role
+without requiring a recipient, expire after 24 hours and store only a one-time
 token's hash. GitHub Organization membership grants no ledger role. The Owner's
 plan, write allowances and model budget serve the whole ledger; each member's
 personal subscription remains separate.

@@ -222,6 +222,10 @@ async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path
         from .cloudflare_ledger_recurring import handle_recurring_request
         return await handle_recurring_request(binding=binding, gateway=gateway,
             method=method, path=path, headers=headers, params=params, body=body, now=now)
+    if path == "/api/v1/activity":
+        from .cloudflare_ledger_activity import handle_activity_request
+        return await handle_activity_request(binding=binding, gateway=gateway, method=method,
+            path=path, headers=headers, params=params, now=now)
     if path.startswith("/api/v1/expenses"):
         from .cloudflare_ledger_expenses import handle_expense_request
         try:
@@ -380,8 +384,15 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
         if not any(row["github_repo_id"] in repos for row in current_bindings):
             return _error(403, "GITHUB_ACCESS_REQUIRED")
     stamp = _timestamp(now)
+    from .cloudflare_ledger_activity import activity_commands, project_snapshot
     if method == "POST":
         repo_id = selected[0] if selected else None
+        record = {"id": project_id, "github_repo_id": repo_id, "name": body.get("name", ""),
+            "github_organization_id": organization_id, "development_url": body.get("developmentUrl"),
+            "product_url": body.get("productUrl"), "description": body.get("description", ""),
+            "status": "active", "revision": 1}
+        activity = await activity_commands(binding, user, "project", project_id, "create", None,
+            project_snapshot(record, [{"github_repo_id": value} for value in selected]), now, proof=proof)
         commands = [_write_guard(binding, proof, user["id"], now),
             binding.prepare("""INSERT INTO ledger_projects(id,owner_id,github_repo_id,
                 github_full_name,description,status,revision,created_at,updated_at,name,github_organization_id,
@@ -390,6 +401,7 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
                     repos[repo_id]["fullName"] if repo_id is not None else None, body.get("description", ""), stamp, stamp,
                     body.get("name", ""), organization_id, body.get("developmentUrl"), body.get("productUrl")),
             *_insert_repository_bindings(binding, user["id"], project_id, selected, repos, stamp),
+            *activity,
             binding.prepare("DELETE FROM d1_command_guard")]
         try:
             await binding.batch(commands)
@@ -404,6 +416,16 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
             bindings=[{"github_repo_id": value} for value in selected], organizations=organizations)
     repo_id = (selected[0] if selected else None) if selected is not None else existing["github_repo_id"]
     full_name = (repos[repo_id]["fullName"] if repo_id is not None else None) if selected is not None else existing["github_full_name"]
+    updated = {**existing, "description": body.get("description", existing["description"]),
+        "development_url": body.get("developmentUrl", existing.get("development_url")),
+        "product_url": body.get("productUrl", existing.get("product_url")),
+        "name": body.get("name", existing["name"]), "github_organization_id": organization_id,
+        "github_repo_id": repo_id, "status": status, "revision": expected + 1}
+    bindings = [{"github_repo_id": value} for value in selected] if selected is not None else current_bindings
+    action = "archive" if existing["status"] != status and status == "archived" else (
+        "restore" if existing["status"] != status and status == "active" else "update")
+    activity = await activity_commands(binding, user, "project", item_id, action,
+        project_snapshot(existing, current_bindings), project_snapshot(updated, bindings), now, proof=proof)
     commands = [_write_guard(binding, proof, user["id"], now),
         binding.prepare("""UPDATE ledger_projects SET name=?,github_organization_id=?,
             github_repo_id=?,github_full_name=?,description=?,development_url=?,product_url=?,
@@ -420,7 +442,7 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
             WHERE project_id=? AND github_repo_id=? AND owner_id=?""").bind(
                 item_id, row["github_repo_id"], user["id"]) for row in current_bindings)
         commands.extend(_insert_repository_bindings(binding, user["id"], item_id, selected, repos, stamp))
-    commands.extend([binding.prepare("DELETE FROM d1_command_guard"),
+    commands.extend([*activity, binding.prepare("DELETE FROM d1_command_guard"),
         binding.prepare(f"""SELECT currency,{AGGREGATE_SQL} FROM expenses
             WHERE owner_id=? AND project_id=? AND deleted_at IS NULL GROUP BY currency""").bind(
                 user["id"], item_id)])

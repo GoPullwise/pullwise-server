@@ -1,4 +1,4 @@
-"""Four-request local native proof for the populated v7-to-v8 invitation-approval extension.
+"""Five-request local native proof for the populated v8-to-v9 rolling activity extension.
 
 The generated fixture packages canonical modules without changing them. It has
 two separate local D1 bindings and one local SQLite Durable Object namespace;
@@ -25,7 +25,7 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 ROOT = Path(__file__).resolve().parents[1]
 WORKER = ROOT / "cloudflare/server"
 BUNDLE_SHA256 = "3c3fd5a4179230e21e018e28b0e735e7c4abd8fe8e4ff39d2fd6bb2ea3a2e260"
-HTTP_PATHS = ("setup", "upgrade", "restart", "rollback")
+HTTP_PATHS = ("setup", "upgrade", "restart", "rollback", "rollback-restart")
 
 ENTRY = r'''
 import hashlib
@@ -34,11 +34,10 @@ import time
 from workers import WorkerEntrypoint, DurableObject, Response
 from pullwise_server.cloudflare_native_d1 import NativeD1
 from pullwise_server.cloudflare_validation_budget import BudgetJournal, BudgetError, _field
-from pullwise_server.cloudflare_preview_budget import upgrade_product_schema_v8
+from pullwise_server.cloudflare_preview_budget import upgrade_product_schema_v9
 from pullwise_server.cloudflare_preview_schema import (
-    V7_SCHEMA_SQL, V7_SCHEMA_OBJECTS, V7_SCHEMA_FINGERPRINT, V7_INDEX_COUNTS,
-    V8_SCHEMA_OBJECTS as SCHEMA_OBJECTS, V8_SCHEMA_FINGERPRINT as SCHEMA_FINGERPRINT,
-    V8_SCHEMA_VERSION as SCHEMA_VERSION, UPGRADE_V8_SQL,
+    V8_SCHEMA_SQL, V8_SCHEMA_OBJECTS, V8_SCHEMA_FINGERPRINT, V8_INDEX_COUNTS,
+    SCHEMA_OBJECTS, SCHEMA_FINGERPRINT, SCHEMA_VERSION, UPGRADE_V9_SQL,
 )
 from pullwise_server.cloudflare_state_records import STATE_KINDS, record_name, encode_record
 
@@ -51,6 +50,9 @@ OLD_V6_UPGRADE = {"from":5,"to":6,"request":63,"complete":True,
         "provenance":"d1-atomic-write-batch-with-fk-pragma-v1"}}
 OLD_V7_UPGRADE = {"from":6,"to":7,"request":90,"complete":True,
     "write_execution":{"native_attempts":[None]*13,
+        "provenance":"d1-nonretryable-write-contract-v1"}}
+OLD_V8_UPGRADE = {"from":7,"to":8,"request":91,"complete":True,
+    "write_execution":{"native_attempts":[None]*17,
         "provenance":"d1-nonretryable-write-contract-v1"}}
 OLD_CUTOVER = {"version":1,"request":41,"complete":True,"copied_records":7,
     "write_execution":{"provenance":"local-synthetic-historical-record-cutover"}}
@@ -91,10 +93,10 @@ class ObservedD1(NativeD1):
         assert statements and len(statements)<=64
         assert all(item.owner is self for item in statements)
         native = [item.native for item in statements]
-        injected = self.inject and tuple(item.sql for item in statements)==UPGRADE_V8_SQL
+        injected = self.inject and tuple(item.sql for item in statements)==UPGRADE_V9_SQL
         if injected:
             position = next(index for index,item in enumerate(statements)
-                if item.sql.strip().upper().startswith("DROP TABLE WORKSPACE_INVITES"))
+                if item.sql.strip().upper().startswith("CREATE INDEX LEDGER_ACTIVITY_EVENTS_OWNER_TARGET_TIME"))
             # Only this isolated rollback fixture inserts the failure. The
             # canonical migration and every copied module remain unchanged.
             native.insert(position+1,super().prepare("INSERT INTO d1_command_guard(ok) VALUES(0)"))
@@ -103,9 +105,9 @@ class ObservedD1(NativeD1):
             results = await super().batch(native)
         except BaseException:
             failure = {"binding":self.label,"statements":len(native),
-                "injectedAfterInviteDrop":injected,"nativeResultsUnavailable":True}
+                "injectedAfterActivityIndex":injected,"nativeResultsUnavailable":True}
             self.failed.append(failure)
-            print(json.dumps({"nativeInviteApprovalSchemaFailure":failure}))
+            print(json.dumps({"nativeActivitySchemaFailure":failure}))
             raise
         values = [{"rowsRead":_field(_field(item,"meta"),"rows_read"),
             "rowsWritten":_field(_field(item,"meta"),"rows_written"),
@@ -117,7 +119,7 @@ class ObservedD1(NativeD1):
             "rowsWritten":sum(item["rowsWritten"] for item in values),
             "nativeAttempts":[item["attempts"] for item in values]}
         self.groups.append(group)
-        print(json.dumps({"nativeInviteApprovalSchemaMeta":group}))
+        print(json.dumps({"nativeActivitySchemaMeta":group}))
         return results
 
 
@@ -192,6 +194,14 @@ def seed_commands():
             created_at,updated_at,accepted_by_user_id,accepted_at)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",identity,OWNER,recipient,
             login,token*64,role,status,4,2000000000,OWNER,1,"created","updated",accepted,accepted_at)
+    for identity,invite,applicant,status,revision,reviewed,reviewed_at in (
+        ("join_legacy_pending","inv_pending","usr_github_740003","pending",1,None,None),
+        ("join_legacy_approved","inv_accepted",MEMBER,"approved",2,OWNER,"reviewed"),
+        ("join_legacy_rejected","inv_revoked","usr_github_740004","rejected",2,OWNER,"reviewed")):
+        add("""INSERT INTO workspace_join_requests(id,workspace_id,invite_id,
+            applicant_user_id,status,revision,created_at,updated_at,reviewed_by_user_id,
+            reviewed_at) VALUES(?,?,?,?,?,?,?,?,?,?)""",identity,OWNER,invite,applicant,
+            status,revision,"created","updated",reviewed,reviewed_at)
     for identity,action,subject,actor,before,after in (
         ("ws_invite","invite","inv_pending",OWNER,None,'{"role":"viewer"}'),
         ("ws_accept","accept_invite","inv_accepted",MEMBER,'{"status":"pending"}','{"status":"accepted"}'),
@@ -248,14 +258,23 @@ def seed_commands():
         ("githubStates","local-state",{"kind":"login","expiresAt":2000000000,"retained":True}),
         ("billingEvents","local-billing",{"retained":True,"applied":True}),
         ("billingPendingUpdates","local-pending",{"eventId":"local-pending","retained":True}))
+    email = "local-native@example.invalid"
+    email_identity = hashlib.sha256(("pullwise-email:"+email).encode("ascii")).hexdigest()
+    records += (
+        ("emailIdentities",email_identity,{"email":email,"userId":MEMBER,"createdAt":100,"verifiedAt":200}),
+        ("emailChallenges",email_identity,{"email":email,"challengeId":"a"*43,"purpose":"link",
+            "codeHash":"3"*64,"browserHash":"4"*64,"attempts":2,"createdAt":1791534600,
+            "expiresAt":1791535200,"userId":MEMBER,"sessionId":"local-session-member"}),
+        ("githubIdentities","740001",{"githubId":"740001","userId":OWNER,"createdAt":1}),
+        ("githubIdentities","740002",{"githubId":"740002","userId":MEMBER,"createdAt":2}))
     for kind,identity,value in records:
         add("INSERT INTO app_state(name,payload,updated_at) VALUES(?,?,?)",record_name(kind,identity),encode_record(kind,identity,value),17)
     return commands
 
 
 async def snapshot(native):
-    tables = sorted(V7_INDEX_COUNTS)
-    # All v7 columns are retained, including optional URLs and recurring facts.
+    tables = sorted(V8_INDEX_COUNTS)
+    # Every v8 stored field is retained, including links, recurring and invitation facts.
     commands = [("PRAGMA table_info("+table+")",()) for table in tables]
     commands += [("SELECT * FROM "+table,()) for table in tables]
     commands += [("PRAGMA foreign_keys",()),("PRAGMA foreign_key_check",()),
@@ -284,16 +303,20 @@ def historical_journal(sql, baseline):
     state = journal.snapshot()
     assert state["requests"]==0
     rows = {table:item["rows"] for table,item in baseline["tables"].items()}
-    state.update(schema_ready=True,schema_version=7,schema_fingerprint=V7_SCHEMA_FINGERPRINT,
-        requests=90,cases={"product-schema":1,"product":89,"product-schema-v4-to-v5":1,
-            "product-state-record-v1":1,"product-schema-v5-to-v6":1,"product-schema-v6-to-v7":1},
-        reserved_read=30056,reserved_written=1053,actual_read=1530,actual_written=246,
+    state.update(schema_ready=True,schema_version=8,schema_fingerprint=V8_SCHEMA_FINGERPRINT,
+        requests=91,cases={"product-schema":1,"product":90,"product-schema-v4-to-v5":1,
+            "product-state-record-v1":1,"product-schema-v5-to-v6":1,"product-schema-v6-to-v7":1,"product-schema-v7-to-v8":1},
+        reserved_read=61832,reserved_written=1482,actual_read=2572,actual_written=336,
         evidence=[{"request":1,"operation":1,"rows_read":800,"rows_written":200},
-            {"request":90,"operation":2,"rows_read":730,"rows_written":46}],
+            {"request":90,"operation":2,"rows_read":730,"rows_written":46},
+            {"request":91,"operation":3,"rows_read":1042,"rows_written":90}],
         schema_upgrade=OLD_UPGRADE,schema_upgrade_v6=OLD_V6_UPGRADE,schema_upgrade_v7=OLD_V7_UPGRADE,
+        schema_upgrade_v8=OLD_V8_UPGRADE,
         state_record_migration=OLD_CUTOVER,state_storage_version=1,
+        state_record_integrity_version=2,state_record_integrity_request=91,
         product_data={"rows":rows,"json":{},"arrays":262144,
-            "records":{"users":2,"sessions":2,"githubStates":1,"billingEvents":1,"billingPendingUpdates":1}},
+            "records":{"users":2,"sessions":2,"githubStates":1,"billingEvents":1,"billingPendingUpdates":1,
+                "emailIdentities":1,"emailChallenges":1,"githubIdentities":2}},
         product_data_verified=True)
     journal._save(state)
     return journal
@@ -302,16 +325,16 @@ def historical_journal(sql, baseline):
 def preserved(before, after):
     mutable = {"requests","reserved_read","reserved_written","actual_read","actual_written",
         "active","deadline","stopped","cases","evidence","product_evidence_rows",
-        "schema_version","schema_fingerprint","product_data","product_data_verified"}
+        "schema_version","schema_fingerprint","product_data","product_data_verified","schema_upgrade_v9"}
     for key in set(before)-mutable:
         assert after[key]==before[key],key
     assert after["evidence"][:len(before["evidence"])]==before["evidence"]
     assert all(after[key]>=before[key] for key in COUNTERS)
     assert after["requests"]==before["requests"]+1
     assert after["cases"]=={**before["cases"],"product":before["cases"]["product"]+1,
-        "product-schema-v7-to-v8":1}
+        "product-schema-v8-to-v9":1}
     assert {table:n for table,n in after["product_data"]["rows"].items()
-        if table!="workspace_join_requests"}==before["product_data"]["rows"]
+        if table!="ledger_activity_events"}==before["product_data"]["rows"]
 
 
 class Default(WorkerEntrypoint):
@@ -319,9 +342,9 @@ class Default(WorkerEntrypoint):
         if getattr(self.env,"PULLWISE_MODE","")!="local":
             return Response.json({"error":"LOCAL_ONLY"},status=503)
         path = str(request.url).rsplit("/",1)[-1]
-        if path not in {"setup","upgrade","restart","rollback"} or request.method!="POST":
+        if path not in {"setup","upgrade","restart","rollback","rollback-restart"} or request.method!="POST":
             return Response.json({"error":"NOT_FOUND"},status=404)
-        name = "local-invite-approval-rollback-fixture" if path=="rollback" else "local-invite-approval-main-fixture"
+        name = "local-activity-rollback-fixture" if path in {"rollback","rollback-restart"} else "local-activity-main-fixture"
         return await self.env.FIXTURE_JOURNAL.get(self.env.FIXTURE_JOURNAL.idFromName(name)).fetch(request)
 
 
@@ -330,53 +353,53 @@ class FixtureJournal(DurableObject):
         self.ctx,self.env = ctx,env
     async def fetch(self, request):
         path = str(request.url).rsplit("/",1)[-1]
-        native = ObservedD1(self.env.ROLLBACK_DB if path=="rollback" else self.env.DB,
-            "rollback" if path=="rollback" else "main",inject=path=="rollback")
+        native = ObservedD1(self.env.ROLLBACK_DB if path in {"rollback","rollback-restart"} else self.env.DB,
+            "rollback" if path in {"rollback","rollback-restart"} else "main",inject=path=="rollback")
         if path=="setup":
             baselines = []
             for item in (native,ObservedD1(self.env.ROLLBACK_DB,"rollback")):
-                await execute(item,[(sql,()) for sql in V7_SCHEMA_SQL])
+                await execute(item,[(sql,()) for sql in V8_SCHEMA_SQL])
                 await execute(item,seed_commands())
                 value = await snapshot(item)
-                assert value["schemaObjects"]==V7_SCHEMA_OBJECTS
+                assert value["schemaObjects"]==V8_SCHEMA_OBJECTS
                 baselines.append(value)
             assert baselines[0]["tables"]==baselines[1]["tables"]
             historical_journal(self.ctx.storage.sql,baselines[0])
             await save_fixture(self.ctx.storage,"fixtureBaseline",baselines[0])
-            return Response.json({"passed":True,"v7Fingerprint":V7_SCHEMA_FINGERPRINT,
+            return Response.json({"passed":True,"v8Fingerprint":V8_SCHEMA_FINGERPRINT,
                 "twoFreshLocalBindings":True,"syntheticPriorJournal":True,
                 "foreignKeysEnabled":True,"tables":baselines[0]["tables"],
-                "schemaObjects":len(V7_SCHEMA_OBJECTS),"fixtureSeedStatementsPerBinding":len(seed_commands()),
+                "schemaObjects":len(V8_SCHEMA_OBJECTS),"fixtureSeedStatementsPerBinding":len(seed_commands()),
                 "fixtureSeedOutsideMigrationJournal":True})
         if path=="upgrade":
             journal = BudgetJournal(self.ctx.storage.sql,preview_product=True,product_operations=True)
             baseline = await load_fixture(self.ctx.storage,"fixtureBaseline")
             before = journal.snapshot()
             start = len(native.groups)
-            await upgrade_product_schema_v8(native,journal)
+            await upgrade_product_schema_v9(native,journal)
             after = journal.snapshot()
             migration_groups = native.groups[start:]
             preserved(before,after)
-            assert SCHEMA_VERSION==8 and after["schema_version"]==8
+            assert SCHEMA_VERSION==9 and after["schema_version"]==9
             assert after["schema_fingerprint"]==SCHEMA_FINGERPRINT
-            assert after["schema_upgrade_v8"]["complete"] is True
-            assert after["cases"]["product-schema-v7-to-v8"]==1
+            assert after["schema_upgrade_v9"]["complete"] is True
+            assert after["cases"]["product-schema-v8-to-v9"]==1
             assert after["active"] is None and after["stopped"] is None
             assert after["actual_read"]-before["actual_read"]==sum(item["rowsRead"] for item in migration_groups)
             assert after["actual_written"]-before["actual_written"]==sum(item["rowsWritten"] for item in migration_groups)
             verified = await snapshot(native)
             assert verified["tables"]==baseline["tables"]
             assert verified["schemaObjects"]==SCHEMA_OBJECTS
-            assert after["product_data"]["rows"]["workspace_join_requests"]==0
+            assert after["product_data"]["rows"]["ledger_activity_events"]==0
             final = after
             await save_fixture(self.ctx.storage,"postUpgradeJournal",final)
             await save_fixture(self.ctx.storage,"postUpgradeTables",(await snapshot(native))["tables"])
-            return Response.json({"passed":True,"schemaVersion":8,"schemaFingerprint":SCHEMA_FINGERPRINT,
-                "all20HistoricalTablesPreserved":True,"joinRequestsInitiallyEmpty":True,"foreignKeyViolations":0,
-                "stableIDsAndEveryStoredField":True,"legacyTargetedInvitesPreserved":True,"legacyMarkersAndEvidencePreserved":True,
+            return Response.json({"passed":True,"schemaVersion":9,"schemaFingerprint":SCHEMA_FINGERPRINT,
+                "all21HistoricalTablesPreserved":True,"activityInitiallyEmpty":True,"foreignKeyViolations":0,
+                "stableIDsAndEveryStoredField":True,"legacyInvitesAndJoinRequestsPreserved":True,"typedEmailAndGithubIdentityRecordsPreserved":True,"legacyMarkersAndEvidencePreserved":True,
                 "oneShotCaseCount":1,"migrationNativeBatches":migration_groups,
                 "migrationJournalActualDeltasMatchRawMeta":True,
-                "migrationWriteExecution":after["schema_upgrade_v8"].get("write_execution"),
+                "migrationWriteExecution":after["schema_upgrade_v9"].get("write_execution"),
                 "counterBefore":{key:before[key] for key in COUNTERS},
                 "counterAfter":{key:after[key] for key in COUNTERS},
                 "postUpgradeCounters":{key:final[key] for key in COUNTERS}})
@@ -384,57 +407,104 @@ class FixtureJournal(DurableObject):
             journal = BudgetJournal(self.ctx.storage.sql,preview_product=True,product_operations=True)
             before = journal.snapshot()
             assert before==await load_fixture(self.ctx.storage,"postUpgradeJournal")
-            await upgrade_product_schema_v8(native,journal)
+            await upgrade_product_schema_v9(native,journal)
             assert native.dispatches==0 and journal.snapshot()==before
             value = await snapshot(native)
             assert value["tables"]==await load_fixture(self.ctx.storage,"postUpgradeTables")
             assert value["schemaObjects"]==SCHEMA_OBJECTS
-            # These are bounded local schema probes, deliberately outside the
-            # migration journal. They never invoke application routes/providers.
-            await execute(native,[("""INSERT INTO workspace_invites(id,workspace_id,
-                github_recipient_id,github_login,token_hash,role,status,revision,expires_at,
-                created_by_user_id,created_by_revision,created_at,updated_at)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",("inv_open",OWNER,None,None,"0"*64,
-                "viewer","pending",1,2000000000,OWNER,1,"local","local"))])
-            request_sql = """INSERT INTO workspace_join_requests(id,workspace_id,invite_id,
-                applicant_user_id,status,revision,created_at,updated_at,reviewed_by_user_id,
-                reviewed_at) VALUES(?,?,?,?,?,?,?,?,?,?)"""
-            await execute(native,[(request_sql,("join_pending",OWNER,"inv_open",
-                "usr_github_740003","pending",1,"local","local",None,None)),
-                (request_sql,("join_approved",OWNER,"inv_open","usr_github_740004",
-                    "approved",2,"local","local",OWNER,"reviewed")),
-                (request_sql,("join_rejected",OWNER,"inv_open","usr_github_740005",
-                    "rejected",2,"local","local",OWNER,"reviewed"))])
-            for identity,action in (("event_request","request_join"),
-                    ("event_approve","approve_join"),("event_reject","reject_join")):
-                await execute(native,[("""INSERT INTO workspace_events(id,workspace_id,
-                    actor_user_id,action,subject_id,before_json,after_json,created_at)
-                    VALUES(?,?,?,?,?,?,?,?)""",(identity,OWNER,OWNER,action,"inv_open",
-                    None,'{"local":true}',"local"))])
+            # Bounded native constraint/query probes remain deliberately outside
+            # the migration journal and never invoke application/provider routes.
+            insert = """INSERT INTO ledger_activity_events(id,operation_id,owner_id,
+                target_kind,project_id,actor_json,resource_kind,resource_id,action,
+                before_json,after_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)"""
+            actor = json.dumps({"kind":"session","userId":MEMBER,"name":"成员🙂",
+                "githubLogin":"local-member"},ensure_ascii=False,separators=(",",":"))
+            now,cutoff,old = "2026-10-09T12:00:00Z","2026-10-08T12:00:00Z","2026-10-08T11:59:59Z"
+            valid = ("activity_valid","local-operation",OWNER,"project","prj_live",actor,
+                "expense","exp_live","update",'{"purpose":"before"}',
+                '{"purpose":"after"}',now)
+            def entry(identity,*,target="project",project="prj_live",created=now,
+                    owner=OWNER,resource="expense",action="update",before=None,after=None):
+                return (identity,"operation-"+identity,owner,target,project,actor,resource,
+                    "retained-tombstone-"+identity,action,before,after,created)
+            seeded = [valid,
+                entry("activity_zz",created=now),entry("activity_boundary",created=cutoff),
+                entry("activity_old",created=old),
+                entry("activity_shared",target="shared",project=None),
+                entry("activity_shared_old",target="shared",project=None,created=old),
+                entry("activity_other_project",project="prj_other"),
+                entry("activity_other_owner",owner="usr_github_740099")]
+            for action in ("create","delete","archive","restore","pause","resume","cancel","move","generate"):
+                seeded.append(entry("activity_action_"+action,resource="recurring_rule",action=action))
+            seeded.append(entry("activity_project",resource="project",action="update"))
+            # Exercise the exact UTF-8 byte boundaries, including non-ASCII data.
+            actor_limit = '{"memo":"'+("a"*2037)+'"}'
+            payload_limit = '{"memo":"'+("a"*16373)+'"}'
+            assert len(actor_limit.encode())==2048 and len(payload_limit.encode())==16384
+            bounded = list(entry("activity_json_limit"))
+            bounded[5],bounded[9],bounded[10] = actor_limit,payload_limit,payload_limit
+            seeded.append(tuple(bounded))
+            await execute(native,[(insert,row) for row in seeded])
+            def invalid(identity,position,value):
+                row=list(entry(identity)); row[position]=value; return (insert,tuple(row))
             probes = [
-                ("UPDATE workspace_invites SET github_recipient_id=? WHERE id=?",
-                    (740099,"inv_open")),
-                (request_sql,("join_duplicate",OWNER,"inv_open","usr_github_740003",
-                    "pending",1,"local","local",None,None)),
-                ("UPDATE workspace_join_requests SET reviewed_at=? WHERE id=?",
-                    ("invalid","join_pending")),
-                ("UPDATE workspace_join_requests SET status=? WHERE id=?",
-                    ("approved","join_pending")),
-                (request_sql,("join_bad_fk",OWNER,"inv_missing","usr_github_740006",
-                    "pending",1,"local","local",None,None)),
+                invalid("invalid_actor_array",5,"[]"),invalid("invalid_actor_json",5,"bad-json"),
+                invalid("invalid_actor_bytes",5,json.dumps({"memo":"🙂"*600},ensure_ascii=False)),
+                invalid("invalid_before_array",9,"[]"),invalid("invalid_after_array",10,"[]"),
+                invalid("invalid_before_json",9,"bad-json"),invalid("invalid_after_json",10,"bad-json"),
+                invalid("invalid_before_bytes",9,json.dumps({"memo":"🙂"*4096},ensure_ascii=False)),
+                invalid("invalid_after_bytes",10,json.dumps({"memo":"🙂"*4096},ensure_ascii=False)),
+                invalid("invalid_target_pair",4,None),invalid("invalid_shared_pair",3,"shared"),
+                invalid("invalid_target",3,"public"),invalid("invalid_resource",6,"account"),
+                invalid("invalid_action",8,"subscribe"),invalid("invalid_operation_empty",1,""),
+                invalid("invalid_operation_bytes",1,"a"*161),invalid("invalid_resource_empty",7,""),
+                invalid("invalid_resource_bytes",7,"a"*161),(insert,valid),
                 ("""INSERT INTO ledger_project_repositories(owner_id,project_id,
                     github_repo_id,github_full_name,created_at) VALUES(?,?,?,?,?)""",
                     (OWNER,"prj_missing",9090,"local/invalid","local")),
             ]
             for sql,values in probes:
                 await rejected_probe(native,sql,values)
-            local = await snapshot(native)
-            assert local["tables"]["workspace_members"]==value["tables"]["workspace_members"]
-            await execute(native,[("DELETE FROM workspace_events WHERE id=?",(identity,))
-                for identity in ("event_request","event_approve","event_reject")]
-                + [("DELETE FROM workspace_join_requests WHERE invite_id=?",("inv_open",)),
-                   ("DELETE FROM workspace_invites WHERE id=?",("inv_open",))])
-            empty = await execute(native,[("SELECT COUNT(*) AS n FROM workspace_join_requests",())])
+            query_project = """SELECT id FROM ledger_activity_events WHERE owner_id=?
+                AND target_kind=? AND project_id=? AND created_at>=?
+                ORDER BY created_at DESC,id DESC LIMIT ?"""
+            query_shared = """SELECT id FROM ledger_activity_events WHERE owner_id=?
+                AND target_kind=? AND project_id IS NULL AND created_at>=?
+                ORDER BY created_at DESC,id DESC LIMIT ?"""
+            query_keyset = """SELECT id FROM ledger_activity_events WHERE owner_id=?
+                AND target_kind=? AND project_id=? AND created_at>=?
+                AND (created_at,id)<(?,?) ORDER BY created_at DESC,id DESC LIMIT ?"""
+            query_expiry = """SELECT id FROM ledger_activity_events WHERE created_at<?
+                ORDER BY created_at,id LIMIT ?"""
+            commands = [(query_project,(OWNER,"project","prj_live",cutoff,100)),
+                (query_shared,(OWNER,"shared",cutoff,100)),
+                (query_keyset,(OWNER,"project","prj_live",cutoff,now,"activity_valid",100)),
+                (query_expiry,(cutoff,100))]
+            results = await execute(native,commands)
+            ids = [[_field(row,"id") for row in _field(result,"results")] for result in results]
+            assert "activity_boundary" in ids[0] and "activity_old" not in ids[0]
+            assert all(identity not in ids[0] for identity in
+                ("activity_shared","activity_other_project","activity_other_owner"))
+            assert ids[1]==["activity_shared"]
+            assert "activity_zz" not in ids[2] and "activity_valid" not in ids[2]
+            assert set(ids[2])==set(ids[0])-{ "activity_zz","activity_valid" }
+            assert set(ids[3])=={"activity_old","activity_shared_old"}
+            plans = await execute(native,[("EXPLAIN QUERY PLAN "+sql,values) for sql,values in commands])
+            details = [[_field(row,"detail") for row in _field(result,"results")] for result in plans]
+            for index,rows in enumerate(details):
+                expected = "ledger_activity_events_time" if index==3 else "ledger_activity_events_owner_target_time"
+                assert any("SEARCH" in row and expected in row for row in rows),(index,rows)
+                assert not any("TEMP B-TREE" in row or "SCAN ledger_activity_events" in row for row in rows)
+            # Expiry removes only the finite indexed old rows; financial/audit
+            # history and the boundary row remain untouched.
+            await execute(native,[("""DELETE FROM ledger_activity_events WHERE id IN
+                (SELECT id FROM ledger_activity_events WHERE created_at<? ORDER BY created_at,id LIMIT ?)""",
+                (cutoff,1))])
+            remaining = await execute(native,[(query_expiry,(cutoff,100))])
+            assert len(list(_field(remaining[0],"results")))==1
+            assert (await snapshot(native))["tables"]==value["tables"]
+            await execute(native,[("DELETE FROM ledger_activity_events WHERE id=?",(row[0],)) for row in seeded])
+            empty = await execute(native,[("SELECT COUNT(*) AS n FROM ledger_activity_events",())])
             assert _field(list(_field(empty[0],"results"))[0],"n")==0
             assert (await snapshot(native))["tables"]==value["tables"]
             assert journal.snapshot()==before
@@ -442,49 +512,76 @@ class FixtureJournal(DurableObject):
                 "canonicalNoReplayNativeDispatches":0,"journalUnchanged":True,
                 "foreignKeysStillEnforced":True,"failedIntegrityProbesNativeMetaUnavailable":True,
                 "integrityProbesOutsideMigrationJournal":True,"schemaObjectsMatch":True,
-                "nullRecipientPairAccepted":True,"halfNullRecipientPairRejected":True,
-                "pendingApprovedRejectedRequestsAccepted":True,"duplicateApplicantRejected":True,
-                "reviewStatusConsistencyEnforced":True,"newAuditActionsAccepted":True,
-                "schemaProbesGrantNoMembership":True,"invalidProbeCount":len(probes),
+                "projectAndSharedTargetsAccepted":True,"targetNullPairEnforced":True,
+                "allResourceKindsAndActionsAccepted":True,"utf8JsonByteBoundsAccepted":True,
+                "malformedArrayAndOversizedJsonRejected":True,"duplicatePrimaryIdRejected":True,
+                "tombstoneResourceIDsRetainedWithoutFinancialForeignKeys":True,
+                "last24HoursBoundaryEnforced":True,"projectSharedAndOwnerScopeSeparated":True,
+                "descendingKeysetNoDuplicateTieRows":True,"indexedExpiryDeleteBoundedToOne":True,
+                "queryPlanDetails":{name:rows for name,rows in zip(("project","shared","keyset","expiry"),details)},
+                "validProbeRows":len(seeded),"invalidProbeCount":len(probes),
                 "allProbeRowsRemoved":True,"allHistoricalTableDigestsPreserved":True})
         if path=="rollback":
             baseline = await snapshot(native)
-            assert baseline["schemaObjects"]==V7_SCHEMA_OBJECTS
+            assert baseline["schemaObjects"]==V8_SCHEMA_OBJECTS
             journal = historical_journal(self.ctx.storage.sql,baseline)
             before = journal.snapshot()
             try:
-                await upgrade_product_schema_v8(native,journal)
+                await upgrade_product_schema_v9(native,journal)
             except BudgetError as error:
                 assert str(error)=="D1_OUTCOME_UNKNOWN"
             else:
                 raise AssertionError("Injected native failure unexpectedly completed")
             after = journal.snapshot()
-            assert after["stopped"]=="D1_OUTCOME_UNKNOWN" and after["schema_version"]==7
-            assert after["schema_upgrade_v8"]["complete"] is False
+            assert after["stopped"]=="D1_OUTCOME_UNKNOWN" and after["schema_version"]==8
+            assert after["schema_upgrade_v9"]["complete"] is False
             assert after["reserved_read"]>before["reserved_read"]
             assert after["reserved_written"]>before["reserved_written"]
             preserved(before,after)
             value = await snapshot(native)
-            assert value["tables"]==baseline["tables"] and value["schemaObjects"]==V7_SCHEMA_OBJECTS
-            assert any(item["injectedAfterInviteDrop"] for item in native.failed)
+            assert value["tables"]==baseline["tables"] and value["schemaObjects"]==V8_SCHEMA_OBJECTS
+            assert any(item["injectedAfterActivityIndex"] for item in native.failed)
             reconstructed = BudgetJournal(self.ctx.storage.sql,preview_product=True,product_operations=True)
             stopped = reconstructed.snapshot()
             before_dispatches = native.dispatches
             try:
-                await upgrade_product_schema_v8(native,reconstructed)
+                await upgrade_product_schema_v9(native,reconstructed)
             except BudgetError:
                 pass
             else:
                 raise AssertionError("Unknown native outcome was admitted for retry")
             assert native.dispatches==before_dispatches and reconstructed.snapshot()==stopped
             assert stopped["stopped"]=="D1_OUTCOME_UNKNOWN"
-            return Response.json({"passed":True,"injectedAfterInviteDrop":True,
-                "entireAtomicBatchRolledBack":True,"all20TableDigestsAndIndexesPreserved":True,
-                "foreignKeysEnabled":True,"foreignKeyViolations":0,"schemaVersionRetained":7,
+            await save_fixture(self.ctx.storage,"failedUpgradeJournal",stopped)
+            await save_fixture(self.ctx.storage,"failedUpgradeTables",baseline["tables"])
+            return Response.json({"passed":True,"injectedAfterActivityIndex":True,
+                "entireAtomicBatchRolledBack":True,"all21TableDigestsAndIndexesPreserved":True,
+                "foreignKeysEnabled":True,"foreignKeyViolations":0,"schemaVersionRetained":8,
                 "unknownOutcomeStopRetained":True,"reconstructedJournalNoRetryDispatches":0,
                 "fullReadWriteReservationRetained":True,"failedBatchNativeResultsUnavailable":True,
                 "counterBefore":{key:before[key] for key in COUNTERS},
                 "counterAfter":{key:after[key] for key in COUNTERS}})
+        if path=="rollback-restart":
+            journal = BudgetJournal(self.ctx.storage.sql,preview_product=True,product_operations=True)
+            before = journal.snapshot()
+            assert before==await load_fixture(self.ctx.storage,"failedUpgradeJournal")
+            try:
+                await upgrade_product_schema_v9(native,journal)
+            except BudgetError as error:
+                assert str(error)=="D1_OUTCOME_UNKNOWN"
+            else:
+                raise AssertionError("Unknown native outcome retried after actual restart")
+            assert native.dispatches==0 and journal.snapshot()==before
+            assert before["stopped"]=="D1_OUTCOME_UNKNOWN"
+            value=await snapshot(native)
+            assert value["tables"]==await load_fixture(self.ctx.storage,"failedUpgradeTables")
+            assert value["schemaObjects"]==V8_SCHEMA_OBJECTS
+            assert journal.snapshot()==before
+            return Response.json({"passed":True,"actualProcessRestart":True,
+                "unknownOutcomeNoRetryNativeDispatches":0,"journalUnchanged":True,
+                "all21HistoricalTableDigestsAndIndexesPreserved":True,
+                "schemaVersionRetained":8,"unknownOutcomeStopRetained":True,
+                "fullReadWriteReservationRetained":True})
 '''
 
 
@@ -501,7 +598,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--port", type=int, default=8908)
+    parser.add_argument("--port", type=int, default=8909)
     args = parser.parse_args()
     directory = args.run_dir.resolve()
     if not directory.is_relative_to(Path("/workspace")) or not 1024 <= args.port <= 64535:
@@ -521,14 +618,14 @@ def main():
     # Resolve npx to the same already-installed Wrangler and Workerd release;
     # do not install a different tooling version inside this generated fixture.
     (directory / "node_modules").symlink_to(WORKER / "node_modules", target_is_directory=True)
-    config = {"name": "pullwise-invite-approval-schema-native-local-only", "main": "src/entry.py",
+    config = {"name": "pullwise-activity-schema-native-local-only", "main": "src/entry.py",
         "compatibility_date": "2026-09-23", "compatibility_flags": ["python_workers"],
         "workers_dev": False, "preview_urls": False, "routes": [],
         "vars": {"PULLWISE_MODE": "local", "PULLWISE_D1_ACCESS_ENABLED": "1"},
         "d1_databases": [{"binding": binding, "database_name": name,
             "database_id": identity, "remote": False} for binding, name, identity in (
-                ("DB", "invite-approval-schema-main-local-only", "00000000-0000-0000-0000-000000000028"),
-                ("ROLLBACK_DB", "invite-approval-schema-rollback-local-only", "00000000-0000-0000-0000-000000000029"))],
+                ("DB", "activity-schema-main-local-only", "00000000-0000-0000-0000-000000000038"),
+                ("ROLLBACK_DB", "activity-schema-rollback-local-only", "00000000-0000-0000-0000-000000000039"))],
         "durable_objects": {"bindings": [{"name": "FIXTURE_JOURNAL", "class_name": "FixtureJournal"}]},
         "migrations": [{"tag": "local-fixture-v1", "new_sqlite_classes": ["FixtureJournal"]}]}
     config_path = directory / "wrangler.jsonc"
@@ -604,7 +701,7 @@ def main():
             start_runtime()
             opener = build_opener(ProxyHandler({}), NoRedirect())
             for path in HTTP_PATHS:
-                if path == "restart":
+                if path in {"restart", "rollback-restart"}:
                     stop_runtime()
                     start_runtime()
                 attempted += 1
@@ -636,10 +733,10 @@ def main():
                 process.wait(timeout=5)
         groups, failures = [], []
         for line in log_path.read_text(errors="replace").splitlines() if log_path.exists() else []:
-            if line.startswith('{"nativeInviteApprovalSchemaMeta":'):
-                groups.append(json.loads(line)["nativeInviteApprovalSchemaMeta"])
-            elif line.startswith('{"nativeInviteApprovalSchemaFailure":'):
-                failures.append(json.loads(line)["nativeInviteApprovalSchemaFailure"])
+            if line.startswith('{"nativeActivitySchemaMeta":'):
+                groups.append(json.loads(line)["nativeActivitySchemaMeta"])
+            elif line.startswith('{"nativeActivitySchemaFailure":'):
+                failures.append(json.loads(line)["nativeActivitySchemaFailure"])
         evidence.update(localHttpRequestsAttempted=attempted, localHttpRequestsCompleted=len(results),
             runtimeProcessesStarted=processes_started, actualProcessRestarts=max(0, processes_started - 1),
             nativeResultStatements=sum(group["statements"] for group in groups),

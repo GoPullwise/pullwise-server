@@ -1,5 +1,19 @@
 # Pullwise Server
 
+## Recent operation history (2026-10-09)
+
+The user requests project and Shared pool operation logs with actual actor,
+timestamp, affected record and changes for a rolling last 24 hours. Log successful
+expense, project-setting and recurring-rule changes atomically with their current
+authority, CAS/idempotency and commercial-plan fences; failed/replayed operations
+must not produce extra entries. Keep immutable actor/record snapshots and target
+scope authorization, including restricted keys, moves and removed users.
+The recent activity projection has indexed bounded reads and bounded retirement
+of expired rows through existing write/scheduled paths, never GET-side cleanup or
+an added cron. Preserve financial records and the original durable audits.
+This feature authorizes necessary schema/native checks, main pushes and preview
+publication through the existing DB/coordinator/journal; production remains paused.
+
 ## Invitation approval (2026-10-09)
 
 New member links select a role without a GitHub recipient. Opening the hash

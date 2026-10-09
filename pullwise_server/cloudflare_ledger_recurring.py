@@ -15,6 +15,7 @@ from .cloudflare_ledger_api import (
     _error, _page_inputs, _param, _revision, _timestamp, _valid_resource_id, _write_guard,
 )
 from .cloudflare_ledger_auth import ROLE_SCOPES, target_allowed
+from .cloudflare_ledger_activity import activity_commands, retention_commands
 from .cloudflare_ledger_expenses import (
     _creation_key, _decimal_amount, _dto as expense_dto, _input as expense_input, _snapshot,
     _target_guard, _valid_target,
@@ -165,9 +166,14 @@ async def _http(binding, gateway, method, identifier, headers, params, body, now
             return (204, None) if method == "DELETE" else _error(409, "RECURRING_CANCELED")
         if current["revision"] >= 9007199254740991:
             return _error(409, "REVISION_LIMIT")
+        changed = {**current, "status": status, "revision": expected + 1,
+                   "updated_at": _timestamp(now), "blocked_code": None}
+        activity = await activity_commands(binding, user, "recurring_rule", current["id"],
+            "cancel" if method == "DELETE" else "pause", rule_dto(current), rule_dto(changed), now, proof=proof)
         commands = [_write_guard(binding, proof, user["id"], now), _rule_guard(binding, current),
             binding.prepare("UPDATE expense_recurring_rules SET status='" + status + "', revision=revision+1, updated_at=?, blocked_code=NULL WHERE id=? AND owner_id=? AND revision=?").bind(
                 _timestamp(now), current["id"], user["id"], expected),
+            *activity,
             binding.prepare("DELETE FROM d1_command_guard")]
         await binding.batch(commands)
         return (204, None) if method == "DELETE" else (200, rule_dto({**current, "status": status,
@@ -226,6 +232,9 @@ async def _http(binding, gateway, method, identifier, headers, params, body, now
             "updated_at", "create_key", "create_sha256", "create_response_json")
         commands.append(binding.prepare("INSERT INTO expense_recurring_rules(" + ",".join(columns) + ") VALUES(" +
             ",".join("?" for _ in columns) + ")").bind(*(row[name] for name in columns)))
+    commands.extend(await activity_commands(binding, user, "recurring_rule", row["id"],
+        "create" if not current else "resume" if resuming else "update",
+        rule_dto(current) if current else None, rule_dto(row), now, proof=proof))
     commands.append(binding.prepare("DELETE FROM d1_command_guard"))
     await binding.batch(commands)
     return (200 if current else 201), rule_dto(row)
@@ -306,6 +315,9 @@ async def generate_occurrence(*, binding, maintenance_binding, gateway, row, now
     record = {**template, "occurred_on": occurred.isoformat(), "id": "exp_" + uuid.uuid4().hex,
               "owner_id": row["owner_id"], "revision": 1, "created_at": stamp, "updated_at": stamp, "deleted_at": None}
     payload = expense_dto(record)
+    event_id = "evt_" + uuid.uuid4().hex
+    activity = await activity_commands(binding, user, "expense", record["id"], "generate", None,
+        payload, now, scheduled=True, operation_id=event_id)
     fields = next_fields(schedule, following)
     columns = ("id", "owner_id", "target_kind", "project_id", "category_id", "occurred_on", "amount_minor",
                "currency", "purpose", "note", "quantity_decimal", "unit", "revision", "created_at", "updated_at", "deleted_at")
@@ -315,14 +327,14 @@ async def generate_occurrence(*, binding, maintenance_binding, gateway, row, now
     commands.extend([binding.prepare("INSERT INTO expenses(" + ",".join(columns) + ") VALUES(" + ",".join("?" for _ in columns) + ")").bind(*(record[name] for name in columns)),
         binding.prepare("""INSERT INTO expense_events(id,expense_id,owner_id,actor_kind,actor_id,
             action,before_json,after_json,created_at) VALUES(?,?,?,'schedule',?,'create',NULL,?,?)""").bind(
-                "evt_" + uuid.uuid4().hex, record["id"], row["owner_id"], row["id"] + ":" + row["actor_user_id"], _json(payload, 16384), stamp),
+                event_id, record["id"], row["owner_id"], row["id"] + ":" + row["actor_user_id"], _json(payload, 16384), stamp),
         binding.prepare("""INSERT INTO expense_recurring_occurrences(rule_id,owner_id,period_key,
             scheduled_on,expense_id,rule_revision,created_at) VALUES(?,?,?,?,?,?,?)""").bind(
                 row["id"], row["owner_id"], row["next_period_key"], occurred.isoformat(), record["id"], row["revision"], stamp),
         binding.prepare("""UPDATE expense_recurring_rules SET status=?,revision=revision+1,next_run_at=?,
             next_occurrence_on=?,next_period_key=?,blocked_code=NULL,updated_at=? WHERE id=? AND owner_id=? AND revision=?""").bind(
                 "active" if following else "completed", fields["next_run_at"], fields["next_occurrence_on"], fields["next_period_key"], stamp,
-                row["id"], row["owner_id"], row["revision"]), binding.prepare("DELETE FROM d1_command_guard")])
+                row["id"], row["owner_id"], row["revision"]), *activity, binding.prepare("DELETE FROM d1_command_guard")])
     try:
         await binding.batch(commands)
     except PlanLimitError as error:
@@ -338,6 +350,11 @@ async def run_due_recurring(*, binding, gateway, now, rule_limit=MAX_TICK_RULES,
             or type(occurrence_limit) is not int or not 1 <= occurrence_limit <= MAX_TICK_OCCURRENCES):
         raise ValueError("recurring tick bounds")
     maintenance_binding = maintenance_binding or getattr(binding, "binding", binding)
+    # Reuse the existing bounded hourly maintenance path, including idle ticks.
+    # Financial expense/workspace audit history is never part of this cleanup.
+    expired = await retention_commands(maintenance_binding, now)
+    if expired:
+        await maintenance_binding.batch(expired)
     found = await binding.prepare("""SELECT * FROM expense_recurring_rules WHERE status='active'
         AND next_run_at<=? ORDER BY next_run_at,id LIMIT ?""").bind(now, rule_limit).all()
     counts = {"scanned": len(found.results), "created": 0, "blocked": 0, "replayed": 0}

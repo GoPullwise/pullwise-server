@@ -30,6 +30,7 @@ MODULES = (
     "cloudflare_github_identity_http",
     "cloudflare_http_contract",
     "cloudflare_jev_gateway",
+    "cloudflare_ledger_activity",
     "cloudflare_ledger_api",
     "cloudflare_ledger_auth",
     "cloudflare_ledger_expenses",

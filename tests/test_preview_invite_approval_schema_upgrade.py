@@ -11,12 +11,13 @@ from test_preview_recurring_schema_upgrade import v6, schema
 from test_preview_schema_upgrade import SQLiteD1
 from test_preview_state_cutover import auth_record
 from pullwise_server.cloudflare_preview_schema import (
-    SCHEMA_VERSION, SCHEMA_FINGERPRINT, SCHEMA_OBJECTS, INDEX_COUNTS,
+    V8_SCHEMA_VERSION as SCHEMA_VERSION, V8_SCHEMA_FINGERPRINT as SCHEMA_FINGERPRINT,
+    V8_SCHEMA_OBJECTS as SCHEMA_OBJECTS, V8_INDEX_COUNTS as INDEX_COUNTS,
     V7_INDEX_COUNTS, UPGRADE_V8_SQL,
 )
 from pullwise_server.cloudflare_preview_budget import (
     upgrade_product_schema, upgrade_product_schema_v6, upgrade_product_schema_v7,
-    upgrade_product_schema_v8, migrate_product_state_records, ProductMeteredD1,
+    upgrade_product_schema_v8, upgrade_product_schema_v9, migrate_product_state_records, ProductMeteredD1,
     _upgrade_v8_plan, begin_product_schema_upgrade_v8, _V7_COUNT_SQL,
     _RECORD_COUNT_SQL, _STRICT_RECORD_SQL, STATE_RECORD_INTEGRITY_VERSION,
 )
@@ -142,11 +143,13 @@ def test_email_records_upgrade_reuses_strict_proof_and_never_replays_old_migrati
 
     asyncio.run(completed_paths())
     assert raw.calls == 4 and restarted.snapshot() == after
-    ticket = restarted.begin_product(now=12)
-    meter = ProductMeteredD1(raw, restarted, ticket, clock=lambda: 13)
+    # Current product SQL requires the independent activity schema extension.
+    asyncio.run(upgrade_product_schema_v9(raw, restarted, clock=lambda: 12))
+    ticket = restarted.begin_product(now=13)
+    meter = ProductMeteredD1(raw, restarted, ticket, clock=lambda: 14)
     asyncio.run(meter.ensure_cardinality())
-    assert raw.calls == 4 and meter.records_integrity_verified is True
-    restarted.finish(ticket, now=14)
+    assert raw.calls == 8 and meter.records_integrity_verified is True
+    restarted.finish(ticket, now=15)
     assert restarted.snapshot()['state_record_integrity_request'] == expected_request
 
 
@@ -317,7 +320,7 @@ def test_unassigned_invitation_and_review_constraints_preserve_targeted_rows(v7)
 
 def test_final_empty_schema_matches_all_canonical_migrations_within_batch_cap():
     from pathlib import Path
-    from pullwise_server.cloudflare_preview_schema import SCHEMA_SQL
+    from pullwise_server.cloudflare_preview_schema import V8_SCHEMA_SQL as SCHEMA_SQL
     canonical = sqlite3.connect(':memory:')
     compiled = sqlite3.connect(':memory:')
     try:
@@ -325,6 +328,8 @@ def test_final_empty_schema_matches_all_canonical_migrations_within_batch_cap():
         compiled.execute('PRAGMA foreign_keys=ON')
         directory = Path(__file__).resolve().parents[1] / 'cloudflare/server/migrations'
         for migration in sorted(directory.glob('*.sql')):
+            if migration.name > '0008_workspace_join_approval.sql':
+                continue
             canonical.executescript(migration.read_text())
         for sql in SCHEMA_SQL:
             compiled.execute(sql)

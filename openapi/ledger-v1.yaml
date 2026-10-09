@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Pullwise Project Expense Ledger API
-  version: 0.6.0
+  version: 0.7.0
   description: |
     Current ledger contract for Pullwise, the project expense tracker for
     developers and teams at pull-wise.com. Users and authorized API clients
@@ -38,6 +38,10 @@ info:
     explicit GitHub links preserve the immutable account ID, personal ledger,
     memberships and billing. Matching provider or billing contact emails never
     merge accounts. Authentication endpoints do not grant API-key scopes.
+    Project and shared-pool activity records identify the authenticated actor,
+    operation time and exact changed record. Only the latest rolling 24 hours
+    are visible, using the Server clock. History starts when activity logging
+    is enabled; old financial audit events are not backfilled or deleted.
 servers:
   - url: /
 security:
@@ -597,6 +601,47 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '412': {$ref: '#/components/responses/PreconditionFailed'}
         '428': {description: If-Match is required}
+  /api/v1/activity:
+    get:
+      tags: [Ledger]
+      operationId: listLedgerActivity
+      x-pullwise-scope: expenses:read
+      description: |
+        Indexed history for one project or the shared pool in the selected ledger.
+        A project target requires projectId; a shared target forbids projectId.
+        Results are newest first by createdAt and id. The opaque nextCursor
+        freezes the first page's upper window boundary; every page still excludes
+        records at or before the current Server clock minus 24 hours. Clients
+        cannot extend the window with dates or their own clock. GET performs no
+        cleanup writes and makes no external provider requests.
+        Cookie members see expense, project settings and recurring-rule activity.
+        Expense-read API keys see only expense activity within their current
+        workspace and target restrictions. A move appears in both affected pools;
+        a restricted key sees only the target change and the permitted-side
+        record label when the opposite pool is outside its allowlist.
+        Actors are immutable name/GitHub-login/user-ID snapshots. Email-only
+        identities are supported; private email, credentials, provider metadata
+        and API-key hashes are never exposed. API-key events identify the issuing
+        person and are labeled api_key, without claiming which person used the
+        credential. Generated expenses are labeled system and identify the rule's
+        actual saved execution actor.
+        New history is published in the same CAS/idempotency/commercial-quota
+        transaction as its operation. Exact replays, failed operations and
+        unchanged revisions publish no activity. At most 16 expired activity
+        rows are retired per changed operation or existing hourly maintenance
+        tick; original expense/workspace audit and financial rows are preserved.
+      parameters:
+        - {name: target, in: query, required: true, schema: {type: string, enum: [project, shared]}}
+        - {$ref: '#/components/parameters/ProjectId'}
+        - {$ref: '#/components/parameters/Limit'}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 256, pattern: '^[A-Za-z0-9_-]+$'}, description: Opaque cursor returned by this endpoint; not an expense or project resource ID}
+        - {$ref: '#/components/parameters/WorkspaceHeader'}
+      responses:
+        '200': {description: Latest 24-hour activity, content: {application/json: {schema: {$ref: '#/components/schemas/ActivityPage'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/InvalidInput'}
   /api/v1/reports/summary:
     get:
       operationId: getLedgerSummary
@@ -1097,6 +1142,63 @@ components:
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/Expense'}}
         nextCursor: {type: [string, 'null']}
+    ActivityActor:
+      type: object
+      additionalProperties: false
+      required: [kind, userId, name, githubLogin]
+      properties:
+        kind: {type: string, enum: [user, api_key, system]}
+        userId: {type: string, maxLength: 120}
+        name: {type: [string, 'null'], maxLength: 120}
+        githubLogin: {type: [string, 'null'], maxLength: 39}
+    ActivityChange:
+      type: object
+      additionalProperties: false
+      required: [field, before, after]
+      properties:
+        field: {type: string, enum: [target, purpose, amount, currency, occurredOn, categoryId, note, quantity, unit, name, description, developmentUrl, productUrl, status, githubRepoIds, githubOrganizationId, schedule]}
+        before: {$ref: '#/components/schemas/ActivityValue'}
+        after: {$ref: '#/components/schemas/ActivityValue'}
+    ActivityValue:
+      description: |
+        A bounded safe JSON value. Amount values are exact decimal/currency
+        objects such as {amount: "12.30", currency: "USD"}; they never expose raw
+        minor units as display amounts. Category values are {id, name}; target
+        values are {kind, projectId?, projectName?}, or {kind: restricted} for
+        the opposite side of a move outside an API key's permission. Schedule
+        values contain the saved calendar schedule. Other fields contain their
+        original string, safe integer, bounded array or null. Removed/created
+        values use null for the absent side.
+      type: [string, number, boolean, object, array, 'null']
+    ActivityEvent:
+      type: object
+      additionalProperties: false
+      required: [id, operationId, createdAt, actor, resource, action, target, changes]
+      properties:
+        id: {type: string, maxLength: 120}
+        operationId: {type: string, maxLength: 160, description: Shared across the two activity rows of a cross-pool move}
+        createdAt: {type: string, format: date-time}
+        actor: {$ref: '#/components/schemas/ActivityActor'}
+        resource:
+          type: object
+          additionalProperties: false
+          required: [kind, id, label]
+          properties:
+            kind: {type: string, enum: [expense, project, recurring_rule]}
+            id: {type: string, maxLength: 160}
+            label: {type: string, maxLength: 500, description: Saved purpose or financial project name; falls back to record ID and never to a protected GitHub repository name}
+        action: {type: string, enum: [create, update, delete, archive, restore, pause, resume, cancel, move, generate]}
+        target: {$ref: '#/components/schemas/Target'}
+        changes: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/ActivityChange'}}
+    ActivityPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor, windowStart, windowEnd]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/ActivityEvent'}}
+        nextCursor: {type: [string, 'null'], maxLength: 256}
+        windowStart: {type: string, format: date-time, description: Exclusive Server-clock 24-hour floor, refreshed on every page}
+        windowEnd: {type: string, format: date-time, description: Inclusive upper window boundary anchored by the first page}
     MoneyTotal:
       type: object
       required: [currency, amountMinor]

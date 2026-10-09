@@ -9,7 +9,7 @@ from ledger_d1_fixture import D1ShapedSQLite
 from test_ledger_plan_limits import setup
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1, PlanLimitError
 from pullwise_server.cloudflare_preview_budget import _input_bound, sql_write_bound
-from pullwise_server.cloudflare_preview_schema import INDEX_COUNTS, UPGRADE_V6_SQL, UPGRADE_V7_SQL, UPGRADE_V8_SQL
+from pullwise_server.cloudflare_preview_schema import INDEX_COUNTS, UPGRADE_V6_SQL, UPGRADE_V7_SQL, UPGRADE_V8_SQL, UPGRADE_V9_SQL
 from pullwise_server.cloudflare_state_records import record_name
 from pullwise_server.ledger_plan_policy import default_policy
 
@@ -23,6 +23,11 @@ def recurring(setup):
         db.execute("BEGIN")
         for sql in (*UPGRADE_V6_SQL, *UPGRADE_V7_SQL, *UPGRADE_V8_SQL):
             db.execute(sql)
+        # The shared current-runtime plan fixture already has activity logging.
+        # Keep this extension usable with an older base without applying v9 twice.
+        if not db.execute("SELECT 1 FROM sqlite_schema WHERE name='ledger_activity_events'").fetchone():
+            for sql in UPGRADE_V9_SQL:
+                db.execute(sql)
         db.execute("INSERT INTO expense_categories(id,owner_id,name,created_at,updated_at) "
                    "VALUES('category','owner','Hosting','local','local')")
     return fixture, frozen
