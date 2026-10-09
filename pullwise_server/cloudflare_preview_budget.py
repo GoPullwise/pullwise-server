@@ -221,6 +221,55 @@ _RECORD_COUNT_SQL = "SELECT " + ",".join(
     for kind in STATE_KINDS) + " FROM app_state"
 
 
+def _auth_record_invalid_sql(kind, suffix):
+    def text(field, maximum):
+        value = f"json_extract(payload,'$.{field}')"
+        return (f"json_type(payload,'$.{field}') IS NOT 'text' OR "
+                f"length(CAST({value} AS BLOB)) NOT BETWEEN 1 AND {maximum} OR "
+                f"instr({value},char(0))>0 OR "
+                f"{value} GLOB ('*['||char(1)||'-'||char(31)||char(127)||']*')")
+
+    def clock(field):
+        return (f"json_type(payload,'$.{field}') IS NOT 'integer' OR "
+                f"json_extract(payload,'$.{field}') NOT BETWEEN 0 AND 9007199254740991")
+
+    if kind == "githubIdentities":
+        return (f"length({suffix}) NOT BETWEEN 1 AND 16 OR {suffix} GLOB '*[^0-9]*' OR "
+                f"CAST(CAST({suffix} AS INTEGER) AS TEXT) IS NOT {suffix} OR "
+                f"CAST({suffix} AS INTEGER) NOT BETWEEN 1 AND 9007199254740991 OR "
+                f"json_extract(payload,'$.githubId') IS NOT {suffix} OR "
+                f"({text('userId', MAX_RECORD_ID_BYTES)}) OR ({clock('createdAt')}) OR "
+                "json_extract(payload,'$.createdAt')=0")
+    if kind not in {"emailIdentities", "emailChallenges"}:
+        return "0"
+    email = "json_extract(payload,'$.email')"
+    base = (f"length({suffix})!=64 OR {suffix} GLOB '*[^0-9a-f]*' OR "
+            f"({text('email', 254)}) OR {email}!=lower({email}) OR "
+            f"{email} GLOB '*[^!-~]*' OR instr({email},'@')<2 OR "
+            f"instr(substr({email},instr({email},'@')+1),'@')>0 OR "
+            f"length({email})<=instr({email},'@') OR ({clock('createdAt')})")
+    if kind == "emailIdentities":
+        return (base + f" OR ({text('userId', MAX_RECORD_ID_BYTES)}) OR ({clock('verifiedAt')}) OR "
+                "json_extract(payload,'$.verifiedAt')<json_extract(payload,'$.createdAt')")
+    hashes = " OR ".join(
+        f"json_type(payload,'$.{field}') IS NOT 'text' OR length(json_extract(payload,'$.{field}'))!=64 OR "
+        f"json_extract(payload,'$.{field}') GLOB '*[^0-9a-f]*'"
+        for field in ("codeHash", "browserHash"))
+    return (base + f" OR {hashes} OR ({clock('expiresAt')}) OR "
+            "json_extract(payload,'$.expiresAt')<=json_extract(payload,'$.createdAt') OR "
+            "json_extract(payload,'$.expiresAt')>json_extract(payload,'$.createdAt')+600 OR "
+            "json_type(payload,'$.attempts') IS NOT 'integer' OR "
+            "json_extract(payload,'$.attempts') NOT BETWEEN 0 AND 5 OR "
+            "json_type(payload,'$.challengeId') IS NOT 'text' OR "
+            "length(json_extract(payload,'$.challengeId'))!=43 OR "
+            "json_extract(payload,'$.challengeId') GLOB '*[^A-Za-z0-9_-]*' OR "
+            "json_extract(payload,'$.purpose') IS NOT 'login' AND json_extract(payload,'$.purpose') IS NOT 'link' OR "
+            "json_extract(payload,'$.purpose')='login' AND (json_type(payload,'$.userId') IS NOT NULL OR "
+            "json_type(payload,'$.sessionId') IS NOT NULL) OR "
+            f"json_extract(payload,'$.purpose')='link' AND (({text('userId', MAX_RECORD_ID_BYTES)}) OR "
+            f"({text('sessionId', MAX_RECORD_ID_BYTES)}))")
+
+
 def _strict_record_sql():
     # Structural aggregate only. Semantic validity is closed over empty init,
     # strictly decoded legacy cutover, and strictly decoded typed mutations.
@@ -232,7 +281,7 @@ def _strict_record_sql():
         identity = (f"json_extract(payload,'$.id') IS NOT {suffix}" if kind == "users"
                     else f"(json_type(payload,'$.id') IS NOT NULL AND json_extract(payload,'$.id') IS NOT {suffix})"
                     if kind == "sessions" else f"json_extract(payload,'$.eventId') IS NOT {suffix}"
-                    if kind == "billingPendingUpdates" else "0")
+                    if kind == "billingPendingUpdates" else _auth_record_invalid_sql(kind, suffix))
         cases.append(f"""WHEN name GLOB '{prefix}*' THEN CASE
             WHEN instr(name,char(0))>0 OR name GLOB ('*['||char(1)||'-'||char(31)||char(127)||']*') THEN 1
             WHEN json_valid(payload)=0 THEN 1
@@ -247,6 +296,9 @@ def _strict_record_sql():
 
 _STRICT_RECORD_SQL = _strict_record_sql()
 _STATE_RECORD_CASE = "product-state-record-v1"
+# This proves the expanded typed-record vocabulary without rerunning the
+# completed storage-v1 cutover or changing the canonical D1 schema.
+STATE_RECORD_INTEGRITY_VERSION = 2
 
 
 def _record_product_data(count_result, state_result, upper, strict_result=None, *, tables=INDEX_COUNTS):
@@ -883,6 +935,13 @@ async def upgrade_product_schema_v8(binding, journal, *, clock=time.time):
         saved = journal.check(ticket, now=clock())
         saved.update(product_data=data, schema_version=8,
                      schema_fingerprint=SCHEMA_FINGERPRINT, product_data_verified=True)
+        if (plan.records_mode and
+                saved.get("state_record_integrity_version") != STATE_RECORD_INTEGRITY_VERSION):
+            # The upgraded snapshot already passed the expanded strict record
+            # proof. Reuse it on the next healthy read without a second scan;
+            # retain an existing proof's original ticket across this upgrade.
+            saved["state_record_integrity_version"] = STATE_RECORD_INTEGRITY_VERSION
+            saved["state_record_integrity_request"] = ticket
         saved["schema_upgrade_v8"]["complete"] = True
         journal._save(saved)
         journal.finish(ticket, now=clock())
@@ -1071,7 +1130,8 @@ class ProductMeteredD1(MeteredD1):
         self.inflight = False
         self.cardinality_verified = journal.snapshot().get("product_data_verified") is True
         self.records_mode = journal.snapshot().get("state_storage_version") == STATE_STORAGE_VERSION
-        self.records_integrity_verified = self.records_mode and self.cardinality_verified
+        self.records_integrity_verified = (self.records_mode and self.cardinality_verified
+            and journal.snapshot().get("state_record_integrity_version") == STATE_RECORD_INTEGRITY_VERSION)
         self.rate_limiter, self.rate_channel = rate_limiter, rate_channel
         self.rate_rejection = None
         self._actor_admitted = False
@@ -1096,7 +1156,7 @@ class ProductMeteredD1(MeteredD1):
         # journal. A completed, persisted refresh remains authoritative until
         # the next mutation, which always refreshes before closing its ticket.
         # Avoid scanning every table for each healthy read-only request.
-        if not self.cardinality_verified:
+        if not self.cardinality_verified or (self.records_mode and not self.records_integrity_verified):
             await self.refresh()
 
     async def _operation(self, statements, reads, writes):
@@ -1158,9 +1218,15 @@ class ProductMeteredD1(MeteredD1):
         except BudgetError as error:
             self.journal._reject(str(error))
         self.journal.save_product_state(self.ticket, self.data, now=self.clock(), verified=True)
+        if strict:
+            state = self.journal.check(self.ticket, now=self.clock())
+            state["state_record_integrity_version"] = STATE_RECORD_INTEGRITY_VERSION
+            state["state_record_integrity_request"] = self.ticket
+            self.journal._save(state)
         self.cardinality_verified = True
         self.records_mode = True
-        self.records_integrity_verified = True
+        if strict:
+            self.records_integrity_verified = True
 
     async def batch(self, statements):
         statements = list(statements)

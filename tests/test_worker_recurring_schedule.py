@@ -169,7 +169,11 @@ def runtime(monkeypatch):
         connection.close()
 
 
-def test_rpc_runs_bounded_due_work_under_commercial_and_global_meters(runtime):
+@pytest.mark.parametrize("schema_version", [7, 8])
+def test_rpc_runs_bounded_due_work_under_commercial_and_global_meters(runtime, schema_version):
+    state = runtime.journal.snapshot()
+    state["schema_version"] = schema_version
+    runtime.journal._save(state)
     result = asyncio.run(runtime.coordinator.runRecurring())
     assert result == {"ok": True, "scanned": 2, "created": 1, "blocked": 1, "replayed": 0}
     assert runtime.events == ["native", "meter", "cardinality", "due"]
@@ -178,8 +182,8 @@ def test_rpc_runs_bounded_due_work_under_commercial_and_global_meters(runtime):
     assert runtime.coordinator._waiting == 0
 
 
-@pytest.mark.parametrize("ready,version", [(False, 7), (True, 6), (True, 5), (True, None)])
-def test_rpc_requires_completed_schema7_without_auto_initializing_or_upgrading(runtime, ready, version):
+@pytest.mark.parametrize("ready,version", [(False, 7), (False, 8), (True, 6), (True, 5), (True, 9), (True, None)])
+def test_rpc_requires_known_recurring_schema_without_auto_initializing_or_upgrading(runtime, ready, version):
     state = runtime.journal.snapshot()
     state.update(schema_ready=ready, schema_version=version)
     runtime.journal._save(state)

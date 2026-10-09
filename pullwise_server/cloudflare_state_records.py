@@ -5,14 +5,21 @@ operation; local fixtures call their explicit normalization helper.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 
-STATE_KINDS = ("users", "sessions", "githubStates", "billingEvents", "billingPendingUpdates")
+STATE_KINDS = ("users", "sessions", "githubStates", "billingEvents", "billingPendingUpdates",
+               "emailIdentities", "emailChallenges", "githubIdentities")
 STATE_STORAGE_VERSION = 1
 USER_RECORD_BYTES = 512 * 1024
 SMALL_RECORD_BYTES = 8192
 MAX_RECORD_ID_BYTES = 4096
 MAX_RECORD_PAGE_BYTES = 8 * 1024 * 1024
+MAX_SAFE_INTEGER = 9007199254740991
+_HEX_DIGEST = re.compile(r"[0-9a-f]{64}\Z")
+_CHALLENGE_ID = re.compile(r"[A-Za-z0-9_-]{43}\Z")
+_EMAIL = re.compile(r"[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\Z")
 
 
 def record_name(kind, identity):
@@ -22,6 +29,12 @@ def record_name(kind, identity):
         raise ValueError("invalid state record identity")
     if len(identity.encode("utf-8")) > MAX_RECORD_ID_BYTES:
         raise ValueError("state record identity is too large")
+    if kind in {"emailIdentities", "emailChallenges"} and not _HEX_DIGEST.fullmatch(identity):
+        raise ValueError("invalid email state identity")
+    if kind == "githubIdentities" and not (
+            identity.isascii() and identity.isdigit() and not identity.startswith("0")
+            and len(identity) <= 16 and int(identity) <= MAX_SAFE_INTEGER):
+        raise ValueError("invalid GitHub state identity")
     return f"record:{kind}:{identity}"
 
 
@@ -49,6 +62,49 @@ def _unique_object(pairs):
     return value
 
 
+def _clock(value):
+    return type(value) is int and 0 <= value <= MAX_SAFE_INTEGER
+
+
+def _email_identity(identity, email):
+    return (isinstance(email, str) and len(email) <= 254 and _EMAIL.fullmatch(email)
+            and hashlib.sha256(("pullwise-email:" + email).encode("ascii")).hexdigest() == identity)
+
+
+def _decode_identity_record(kind, identity, value):
+    if kind == "emailIdentities":
+        if (set(value) != {"email", "userId", "createdAt", "verifiedAt"}
+                or not _email_identity(identity, value.get("email"))
+                or not _clock(value.get("createdAt")) or not _clock(value.get("verifiedAt"))
+                or not value["createdAt"] <= value["verifiedAt"]):
+            raise ValueError("invalid email identity record")
+        record_name("users", value.get("userId"))
+    elif kind == "emailChallenges":
+        fields = {"email", "challengeId", "purpose", "codeHash", "browserHash", "attempts",
+                  "createdAt", "expiresAt"}
+        if value.get("purpose") == "link":
+            fields |= {"userId", "sessionId"}
+        if (set(value) != fields or value.get("purpose") not in {"login", "link"}
+                or not _email_identity(identity, value.get("email"))
+                or not isinstance(value.get("challengeId"), str)
+                or not _CHALLENGE_ID.fullmatch(value["challengeId"])
+                or any(not isinstance(value.get(field), str) or not _HEX_DIGEST.fullmatch(value[field])
+                       for field in ("codeHash", "browserHash"))
+                or type(value.get("attempts")) is not int or not 0 <= value["attempts"] <= 5
+                or not _clock(value.get("createdAt")) or not _clock(value.get("expiresAt"))
+                or not value["createdAt"] < value["expiresAt"] <= value["createdAt"] + 600):
+            raise ValueError("invalid email challenge record")
+        if value["purpose"] == "link":
+            record_name("users", value["userId"])
+            record_name("sessions", value["sessionId"])
+    elif kind == "githubIdentities":
+        if (set(value) != {"githubId", "userId", "createdAt"}
+                or value.get("githubId") != identity
+                or not _clock(value.get("createdAt")) or value["createdAt"] == 0):
+            raise ValueError("invalid GitHub identity record")
+        record_name("users", value.get("userId"))
+
+
 def decode_record(kind, identity, payload):
     record_name(kind, identity)
     if not isinstance(payload, str) or len(payload.encode("utf-8")) > record_limit(kind):
@@ -64,6 +120,7 @@ def decode_record(kind, identity, payload):
         raise ValueError("state session identity mismatch")
     if kind == "billingPendingUpdates" and value.get("eventId") != identity:
         raise ValueError("pending event identity mismatch")
+    _decode_identity_record(kind, identity, value)
     return value
 
 
@@ -132,11 +189,13 @@ def write_record_commands(kind, identity, value, *, expected_json, now):
 
 async def expired_record_commands(binding, kind, *, now, limit=8):
     """Clean only a finite page of expired ephemeral records during issuance."""
-    if kind not in {"sessions", "githubStates"} or type(limit) is not int or not 1 <= limit <= 8:
+    if (kind not in {"sessions", "githubStates", "emailChallenges"}
+            or not _clock(now) or type(limit) is not int or not 1 <= limit <= 8):
         raise ValueError("invalid ephemeral state cleanup")
+    expiry = "<=" if kind == "emailChallenges" else "<"
     result = await binding.batch([binding.prepare("""SELECT name,payload FROM app_state
         WHERE name GLOB ? AND json_type(payload,'$.expiresAt')='integer'
-          AND json_extract(payload,'$.expiresAt')<? ORDER BY name LIMIT ?""").bind(
+          AND json_extract(payload,'$.expiresAt')""" + expiry + "? ORDER BY name LIMIT ?").bind(
               f"record:{kind}:*", now, limit)])
     from .cloudflare_validation_budget import _field
     commands = []

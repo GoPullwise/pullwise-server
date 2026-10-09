@@ -18,6 +18,13 @@ class D1OAuthStates:
                 or record.get('kind') not in {'login', 'install', 'manage_installation', 'install_identity'}
                 or type(record.get('expiresAt')) is not int or not now < record['expiresAt'] <= now + 600):
             raise ValueError('invalid trusted OAuth state')
+        if record.get('intent') == 'link':
+            if (record.get('kind') != 'login'
+                    or not isinstance(record.get('userId'), str) or not record['userId']
+                    or not isinstance(record.get('sessionId'), str) or not record['sessionId']):
+                raise ValueError('invalid trusted OAuth link state')
+            record_name('users', record['userId'])
+            record_name('sessions', record['sessionId'])
         if await read_record_json(self.binding, 'githubStates', state_id) is not None:
             raise ValueError('OAUTH_STATE_ALREADY_EXISTS')
         name = record_name('githubStates', state_id)

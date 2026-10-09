@@ -185,6 +185,119 @@ def test_members_viewer_can_read_but_not_govern(app):
     assert count(app, "workspace_events") == 0
 
 
+def linked_email_recipient(app, *, github=True, joined=False):
+    identifier = "usr_email_recipient"
+    user = {"id": identifier, "name": "Email recipient", "email": "recipient@example.test",
+            "emailVerified": True, "emailVerifiedAt": NOW - 100, "providers": ["email"]}
+    if github:
+        user.update(githubId="5", githubLogin="recipient", providers=["email", "github"])
+    with app[0]._immediate() as db:
+        db.execute("DELETE FROM app_state WHERE name=?", (record_name("users", RECIPIENT),))
+        db.execute("INSERT INTO app_state(name,payload,updated_at) VALUES(?,?,?)",
+            (record_name("users", identifier), encode_record("users", identifier, user), NOW))
+        db.execute("UPDATE app_state SET payload=? WHERE name=?",
+            (encode_record("sessions", "session-5", {"userId": identifier, "expiresAt": NOW + 1000}),
+             record_name("sessions", "session-5")))
+        if github:
+            db.execute("INSERT INTO app_state(name,payload,updated_at) VALUES(?,?,?)",
+                (record_name("githubIdentities", "5"), encode_record("githubIdentities", "5",
+                 {"githubId": "5", "userId": identifier, "createdAt": NOW - 100}), NOW))
+        if joined:
+            db.execute("INSERT INTO workspace_members VALUES(?,?,'viewer',1,'joined','updated',NULL,?)",
+                (OWNER, identifier, OWNER))
+    return identifier
+
+
+def test_unassigned_invitation_recognizes_already_joined_linked_email_identity(app):
+    identifier = linked_email_recipient(app, joined=True)
+    issued = invite(app)
+    status, payload = apply_to_invitation(app, issued)
+    assert (status, payload["error"]["code"]) == (409, "ALREADY_MEMBER")
+    assert count(app, "workspace_invites") == count(app, "workspace_events") == 1
+    assert count(app, "workspace_join_requests") == 0
+    assert app[3]("GET", path("members"))[1]["items"][-1]["userId"] != RECIPIENT
+    with app[0].connect() as db:
+        assert db.execute("SELECT user_id FROM workspace_members WHERE user_id=?", (identifier,)).fetchone()
+
+
+def test_linked_email_account_accepts_exact_github_recipient_without_legacy_user_id(app):
+    identifier = linked_email_recipient(app)
+    issued = invite(app)
+    with app[0]._immediate() as db:
+        db.execute("UPDATE workspace_invites SET github_recipient_id=5,github_login='old-login'")
+    status, result = accept(app, issued)
+    assert status == 200 and result["workspace"]["id"] == OWNER
+    with app[0].connect() as db:
+        assert db.execute("SELECT accepted_by_user_id FROM workspace_invites").fetchone()[0] == identifier
+        assert db.execute("SELECT user_id FROM workspace_members WHERE user_id=?", (identifier,)).fetchone()
+        assert db.execute("SELECT user_id FROM workspace_members WHERE user_id=?", (RECIPIENT,)).fetchone() is None
+
+
+def test_verified_email_alone_does_not_grant_github_invitation_recipient_authority(app):
+    linked_email_recipient(app, github=False)
+    issued = invite(app)
+    with app[0]._immediate() as db:
+        db.execute("UPDATE workspace_invites SET github_recipient_id=5,github_login='old-login'")
+    status, payload = accept(app, issued)
+    assert (status, payload["error"]["code"]) == (403, "INVITATION_RECIPIENT_MISMATCH")
+    assert count(app, "workspace_members") == 3
+
+
+@pytest.mark.parametrize("email_only_inviter", [False, True])
+def test_email_only_account_requests_and_original_inviter_approves_unassigned_link(app, email_only_inviter):
+    identifier = linked_email_recipient(app, github=False)
+    if email_only_inviter:
+        with app[0]._immediate() as db:
+            owner = json.loads(db.execute("SELECT payload FROM app_state WHERE name=?",
+                (record_name("users", OWNER),)).fetchone()[0])
+            for field in ("githubId", "githubLogin", "githubAccessToken"):
+                owner.pop(field, None)
+            owner.update(email="owner@example.test", emailVerified=True,
+                emailVerifiedAt=NOW - 100, providers=["email"])
+            db.execute("UPDATE app_state SET payload=? WHERE name=?",
+                (encode_record("users", OWNER, owner), record_name("users", OWNER)))
+    with app[0].connect() as db:
+        applicant_before = db.execute("SELECT payload FROM app_state WHERE name=?",
+            (record_name("users", identifier),)).fetchone()[0]
+        owner_before = db.execute("SELECT payload FROM app_state WHERE name=?",
+            (record_name("users", OWNER),)).fetchone()[0]
+    issued = invite(app, role="editor")
+    assert issued["recipient"] is None and issued["createdByUserId"] == OWNER
+    status, preview = apply_to_invitation(app, issued, method="preview")
+    assert status == 200 and preview["request"] is None
+    assert not any(preview["workspace"]["permissions"].values())
+    status, application = apply_to_invitation(app, issued,
+        headers={"X-Pullwise-Workspace": OWNER})
+    assert status == 202 and application["request"]["status"] == "pending"
+    assert application["request"]["applicant"] == {
+        "userId": identifier, "name": "Email recipient", "githubLogin": None}
+    assert app[3]("GET", "/api/v1/expenses", actor=5,
+        headers={"X-Pullwise-Workspace": OWNER})[0] == 404
+    assert count(app, "workspace_members") == 3
+    assert review(app, issued, application["request"], actor=2)[0] == 403
+    assert review(app, issued, application["request"], actor=5)[0] == 404
+    inbox = app[3]("GET", "/api/v1/workspace-invitation-requests")[1]
+    assert [item["applicant"]["userId"] for item in inbox["items"]] == [identifier]
+    status, approved = review(app, issued, application["request"])
+    assert status == 200 and approved["request"]["status"] == "approved"
+    assert approved["workspace"]["id"] == OWNER
+    assert approved["workspace"]["permissions"]["writeExpenses"] is True
+    assert app[3]("GET", "/api/v1/expenses", actor=5,
+        headers={"X-Pullwise-Workspace": OWNER})[0] == 200
+    assert review(app, issued, approved["request"])[0] == 410
+    assert app[2].calls == []
+    with app[0].connect() as db:
+        member = db.execute("SELECT * FROM workspace_members WHERE user_id=?", (identifier,)).fetchone()
+        assert (member["workspace_id"], member["role"], member["invited_by_user_id"]) == (OWNER, "editor", OWNER)
+        assert db.execute("SELECT accepted_by_user_id FROM workspace_invites").fetchone()[0] == identifier
+        assert db.execute("SELECT payload FROM app_state WHERE name=?",
+            (record_name("users", identifier),)).fetchone()[0] == applicant_before
+        assert db.execute("SELECT payload FROM app_state WHERE name=?",
+            (record_name("users", OWNER),)).fetchone()[0] == owner_before
+        assert db.execute("SELECT payload FROM app_state WHERE name=?",
+            (record_name("users", RECIPIENT),)).fetchone() is None
+
+
 @pytest.mark.parametrize("actor,target,new_role", [(2, 2, "viewer"), (2, 3, "admin"), (3, 4, "editor"), (4, 3, "viewer")])
 def test_roles_cannot_self_promote_or_modify_peer_admin(app, actor, target, new_role):
     assert app[3]("PATCH", path("members", f"usr_github_{target}"), {"role": new_role},

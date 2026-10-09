@@ -70,6 +70,25 @@ async def _user(binding: Any, owner_id: str) -> dict | None:
     return user if isinstance(user, dict) and user.get("id") == owner_id else None
 
 
+def has_verified_email_identity(user: dict) -> bool:
+    providers = user.get("providers")
+    return (isinstance(providers, list) and "email" in providers
+            and isinstance(user.get("email"), str) and bool(user["email"].strip())
+            and type(user.get("emailVerifiedAt")) is int and user["emailVerifiedAt"] > 0)
+
+
+def session_identity_usable(user: dict) -> bool:
+    providers = user.get("providers")
+    providers = providers if isinstance(providers, list) else []
+    if has_verified_email_identity(user):
+        return True
+    if "github" in providers:
+        return bool(user.get("githubAccessToken"))
+    # Preserve legacy sessions without provider annotations; an explicit email
+    # identity must have its own verified login facts, never billing contact data.
+    return "email" not in providers
+
+
 async def _principal(binding: Any, headers: Mapping[str, object],
                      *, scope: str, now: int) -> tuple[dict, dict]:
     bearer = _bearer(headers)
@@ -127,9 +146,7 @@ async def _principal(binding: Any, headers: Mapping[str, object],
             if expires_at is None or expires_at < now or not isinstance(owner_id, str):
                 continue
             user = await _user(binding, owner_id)
-            if (user is not None and not (
-                    "github" in (user.get("providers") or [])
-                    and not user.get("githubAccessToken"))):
+            if user is not None and session_identity_usable(user):
                 _observe_authenticated_actor(binding, user["id"])
                 return user, {}
     raise PrincipalAuthError(401, "UNAUTHENTICATED", "A session or API key is required.")

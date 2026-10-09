@@ -1,5 +1,6 @@
 """Server Worker with coordinated preview-only recurring expense scheduling."""
 import asyncio
+import hashlib
 import io
 import json
 import time
@@ -16,6 +17,8 @@ from pullwise_server.cloudflare_validation_budget import (
 
 from pullwise_server.cloudflare_http_contract import handle_http_request
 from pullwise_server.cloudflare_github_identity_http import handle_identity_request
+from pullwise_server.cloudflare_email_auth import handle_email_request
+from pullwise_server.cloudflare_email_gateway import WorkerEmailGateway
 from pullwise_server.cloudflare_github_gateway import GitHubFailure, WorkerGitHubGateway
 from pullwise_server.cloudflare_billing_mutations import handle_billing_mutation
 from pullwise_server.cloudflare_billing_catalog_refresh import read_or_refresh_catalog
@@ -28,7 +31,7 @@ from pullwise_server.cloudflare_ledger_reports import CsvExport
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1, PlanLimitError
 from pullwise_server.ledger_plan_policy import parse_policy
 from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initialize_product, reconcile_schema_reads, upgrade_product_schema, upgrade_product_schema_v6, upgrade_product_schema_v7, upgrade_product_schema_v8, migrate_product_state_records
-from pullwise_server.cloudflare_preview_rate import PreviewRateLimiter, PreviewRateLimit, request_channel
+from pullwise_server.cloudflare_preview_rate import PreviewRateLimiter, PreviewRateLimit, EmailRateLimiter, EmailRateLimit, request_channel
 from pullwise_server.cloudflare_native_d1 import NativeD1
 from pullwise_server.json_input import validate_json_unicode
 
@@ -86,6 +89,7 @@ class _Application:
             policy=parse_policy(getattr(env, "PULLWISE_PLAN_LIMITS_JSON", None)), now=int(time.time()))
         self.jev_gateway = WorkerJevGateway(env)
         self.binding.jev_available = self.jev_gateway.enabled
+        self.email_admission = None
 
     async def fetch(self, request):
         if str(getattr(self.env, "PULLWISE_D1_ACCESS_ENABLED", "0")) != "1":
@@ -133,6 +137,34 @@ class _Application:
             getattr(self.env, "PULLWISE_ALLOWED_ORIGINS", "") + "," +
             getattr(self.env, "PULLWISE_APP_URL", "")).split(",")
             if value.strip() and value.strip() != "*"}
+        if path in {"/auth/email/request-code", "/auth/email/verify-code"}:
+            try:
+                body = None
+                if request.method == "POST":
+                    raw = await read_body()
+                    if len(raw) > 8192:
+                        return Response.json({"error": {"code": "REQUEST_TOO_LARGE"}},
+                            status=413, headers={"Cache-Control": "no-store"})
+                    body = json.loads(raw)
+                    validate_json_unicode(body)
+                result = await handle_email_request(
+                    binding=self.binding, gateway=WorkerEmailGateway(self.env),
+                    secret=getattr(self.env, "PULLWISE_EMAIL_CODE_SECRET", None),
+                    admit=self.email_admission, method=request.method, path=path,
+                    body=body, headers=headers, now=now,
+                    cookie_same_site=getattr(self.env, "PULLWISE_COOKIE_SAME_SITE", "Lax"),
+                    trusted_origins=trusted_origins)
+                status, payload, response_headers = result
+                return Response.json(payload, status=status, headers=response_headers)
+            except EmailRateLimit as error:
+                return Response.json(error.response(), status=429,
+                    headers={"Cache-Control": "no-store", "Retry-After": str(error.retry_after)})
+            except (ValueError, UnicodeError):
+                return Response.json({"error": {"code": "INVALID_INPUT"}}, status=422,
+                    headers={"Cache-Control": "no-store"})
+            except Exception:
+                # No exception text, OTP, email or provider diagnostic is public.
+                return _unavailable("EMAIL_AUTH_UNAVAILABLE")
         try:
             identity = None if path == "/api/v1/repositories" else await handle_identity_request(
                 method=request.method, path=path, params=params,
@@ -317,6 +349,32 @@ def _recurring_enabled(env):
         and str(getattr(env, "PULLWISE_RECURRING_EXPENSES_ENABLED", "0")) == "1")
 
 
+def _email_ip_subject(request):
+    # Cloudflare supplies this header at ingress. Do not trust X-Forwarded-For
+    # or expose raw network addresses to the admission RPC or journal.
+    request_headers = getattr(request, "headers", None)
+    address = (request_headers.get("cf-connecting-ip") if request_headers is not None else None) or "unknown"
+    return hashlib.sha256(("pullwise-email-ip:" + address).encode("utf-8")).hexdigest()
+
+
+def _remote_email_admission(env, request):
+    namespace = getattr(env, "VALIDATION_BUDGET", None)
+    if namespace is None:
+        return None
+    ip_subject = _email_ip_subject(request)
+
+    async def admit(kind, email_subject):
+        stub = namespace.get(namespace.idFromName(BUDGET_SCOPE))
+        result = await stub.admitEmail(kind, email_subject, ip_subject)
+        if not bool(_field(result, "ok", False)):
+            retry_after = _field(result, "retryAfter", None)
+            if retry_after is not None:
+                raise EmailRateLimit(retry_after)
+            raise RuntimeError("EMAIL_ADMISSION_UNAVAILABLE")
+        return True
+    return admit
+
+
 class Default(WorkerEntrypoint):
     async def scheduled(self, controller, env, ctx):
         # Await the only background task. Keep all D1 work inside the existing
@@ -344,7 +402,10 @@ class Default(WorkerEntrypoint):
             # Local-only config exercises the same chain; remote config checks
             # reject that local mode. Both still require explicit D1 access.
             try:
-                return await _Application(self.env, NativeD1(self.env.DB)).fetch(request)
+                application = _Application(self.env, NativeD1(self.env.DB))
+                if urlsplit(str(request.url)).path in {"/auth/email/request-code", "/auth/email/verify-code"}:
+                    application.email_admission = _remote_email_admission(self.env, request)
+                return await application.fetch(request)
             except ValueError:
                 return _unavailable("PLAN_POLICY_INVALID")
             except Exception:
@@ -369,6 +430,7 @@ class ValidationBudget(DurableObject):
         self.ctx, self.env = ctx, env
         self.journal = None
         self.rate_limiter = None
+        self.email_rate_limiter = None
         self._product_lock = asyncio.Lock()
         self._waiting = 0
 
@@ -379,6 +441,23 @@ class ValidationBudget(DurableObject):
             self.journal = BudgetJournal(self.ctx.storage.sql, preview_product=preview_product,
                 product_operations=preview_product)
         return self.journal
+
+    def _email_admit(self, kind, email_subject, ip_subject):
+        if (str(getattr(self.env, "PULLWISE_D1_ACCESS_ENABLED", "0")) != "1"
+                or str(getattr(self.env, "PULLWISE_EMAIL_AUTH_ENABLED", "0")) != "1"):
+            return {"ok": False, "error": "EMAIL_AUTH_NOT_CONFIGURED"}
+        if self.email_rate_limiter is None:
+            self.email_rate_limiter = EmailRateLimiter(self.ctx.storage.sql)
+        self.email_rate_limiter.email(kind, email_subject64hex=email_subject,
+            ip_subject64hex=ip_subject, now=time.time())
+        return {"ok": True}
+
+    async def admitEmail(self, kind, email_subject, ip_subject):
+        """Binding-only admission for non-preview email auth; never accesses D1."""
+        try:
+            return self._email_admit(kind, email_subject, ip_subject)
+        except EmailRateLimit as error:
+            return {"ok": False, "retryAfter": error.retry_after}
 
     async def stop(self):
         journal = self._journal()
@@ -461,7 +540,7 @@ class ValidationBudget(DurableObject):
                 state = journal.snapshot()
                 # Scheduler never initializes or migrates user data. Publication
                 # upgrades once through the reviewed ordinary preview path first.
-                if not state.get("schema_ready") or state.get("schema_version") != 7:
+                if not state.get("schema_ready") or state.get("schema_version") not in {7, 8}:
                     return {"ok": False, "error": "SCHEMA_UPGRADE_REQUIRED"}
                 ticket = binding = None
                 try:
@@ -560,7 +639,16 @@ class ValidationBudget(DurableObject):
                         binding = ProductMeteredD1(native, journal, ticket, rate_limiter=self.rate_limiter,
                             rate_channel=request_channel(request.method, path))
                         await binding.ensure_cardinality()
-                        response = await _Application(self.env, binding).fetch(request)
+                        application = _Application(self.env, binding)
+                        ip_subject = _email_ip_subject(request)
+
+                        async def admit_email(kind, email_subject):
+                            result = self._email_admit(kind, email_subject, ip_subject)
+                            if not result["ok"]:
+                                raise RuntimeError("EMAIL_ADMISSION_UNAVAILABLE")
+                            return True
+                        application.email_admission = admit_email
+                        response = await application.fetch(request)
                         if binding.rate_rejection is not None:
                             error = binding.rate_rejection
                             response = Response.json(error.response(), status=429,

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Pullwise Project Expense Ledger API
-  version: 0.5.0
+  version: 0.6.0
   description: |
     Current ledger contract for Pullwise, the project expense tracker for
     developers and teams at pull-wise.com. Users and authorized API clients
@@ -33,15 +33,168 @@ info:
     saved execution actor's current membership and GitHub access. A rule records one ordinary
     expense per calendar period without making a payment or extending a
     subscription. Stopping a rule preserves its previously recorded expenses.
+    Email verification codes provide independent registration and sign-in.
+    GitHub identity and repository connections are optional. Verified email and
+    explicit GitHub links preserve the immutable account ID, personal ledger,
+    memberships and billing. Matching provider or billing contact emails never
+    merge accounts. Authentication endpoints do not grant API-key scopes.
 servers:
   - url: /
 security:
   - cookieSession: []
   - bearerKey: []
 tags:
+  - name: Authentication
   - name: Ledger
   - name: Reports
 paths:
+  /auth/session:
+    get:
+      operationId: getAccountSession
+      x-pullwise-scope: account:auth
+      security: []
+      tags: [Authentication]
+      description: Read the current cookie session without initialization, provider calls or token refresh. An absent or expired session returns authenticated false and user null. Verified email sessions remain valid independently of GitHub authorization; GitHub contact email and billing email are not verified login identities.
+      responses:
+        '200':
+          description: Current session; authenticated users may have email, GitHub or both providers
+          headers: {Cache-Control: {$ref: '#/components/headers/NoStore'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AccountSession'}}}
+  /auth/sign-out:
+    post:
+      operationId: signOutAccount
+      x-pullwise-scope: account:auth
+      security: []
+      tags: [Authentication]
+      description: Requires the current cookie session and a trusted Origin or Referer. Revoke only this session and clear pw_session; account identities, ledger data and billing remain intact. API keys cannot sign out a browser session.
+      parameters: [{$ref: '#/components/parameters/AuthOrigin'}]
+      responses:
+        '200':
+          description: Session revoked; pw_session is cleared with Max-Age 0
+          headers: {Cache-Control: {$ref: '#/components/headers/NoStore'}, Set-Cookie: {$ref: '#/components/headers/AuthCookie'}}
+          content: {application/json: {schema: {type: object, required: [ok], properties: {ok: {type: boolean, const: true}}}}}
+        '401': {description: UNAUTHENTICATED; a current cookie session is required}
+        '403': {description: UNTRUSTED_ORIGIN}
+  /auth/email/request-code:
+    post:
+      operationId: requestEmailCode
+      x-pullwise-scope: account:auth
+      x-pullwise-max-body-bytes: 8192
+      security: []
+      tags: [Authentication]
+      description: |
+        Request a six-digit code for a normalized ASCII email address. purpose
+        login verifies an existing email identity or registers a new account
+        after successful verification; it does not disclose account existence.
+        purpose link requires the current cookie session, binds the challenge
+        to that account and session, and never merges accounts. Changing an
+        already verified login email requires a separate flow and is rejected.
+        A trusted Origin header and at most 8 KiB of strict JSON are required.
+        A Referer header does not replace a missing Origin.
+        Only one challenge is active per email; explicit resend after 60 seconds
+        invalidates the earlier challenge. Codes expire after 600 seconds and
+        are never returned or logged. Delivery uncertainty is not retried.
+        Set-Cookie issues a random pw_email_challenge browser binding, Secure
+        and HttpOnly with a 600-second lifetime; verification must use this same
+        browser. The binding's SameSite policy follows the configured app origin.
+      parameters: [{$ref: '#/components/parameters/EmailAuthOrigin'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/EmailCodeRequest'}}}}
+      responses:
+        '202':
+          description: Code request accepted; only challenge metadata is returned
+          headers: {Cache-Control: {$ref: '#/components/headers/NoStore'}, Set-Cookie: {$ref: '#/components/headers/AuthCookie'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/EmailCodeChallenge'}}}
+        '401': {description: UNAUTHENTICATED for link without a current cookie session}
+        '403': {description: UNTRUSTED_ORIGIN}
+        '409': {description: EMAIL_CHANGE_NOT_SUPPORTED; a different verified login email cannot be replaced}
+        '413': {description: REQUEST_TOO_LARGE; JSON exceeds 8 KiB}
+        '422': {description: INVALID_INPUT; unknown fields, invalid email or unsupported purpose}
+        '429':
+          description: EMAIL_RATE_LIMIT; email and source admission or the 60-second resend interval was exceeded
+          headers: {Retry-After: {$ref: '#/components/headers/AuthRetryAfter'}}
+        '503': {description: EMAIL_AUTH_NOT_CONFIGURED, EMAIL_AUTH_UNAVAILABLE or EMAIL_SEND_UNAVAILABLE; no automatic resend}
+  /auth/email/verify-code:
+    post:
+      operationId: verifyEmailCode
+      x-pullwise-scope: account:auth
+      x-pullwise-max-body-bytes: 8192
+      security: []
+      tags: [Authentication]
+      description: |
+        Verify the email, challenge ID and six-digit code using the original
+        pw_email_challenge cookie and a trusted Origin header. A Referer header
+        does not replace a missing Origin. At most five
+        incorrect codes are allowed per challenge. Success consumes the proof
+        once; replay never creates another session. Login atomically initializes
+        a new account when necessary, retains a previously registered account
+        ID, and issues Secure HttpOnly pw_session with a seven-day lifetime.
+        Link requires the original authenticated session, preserves its cookie,
+        user ID, ledger and billing, and clears pw_email_challenge. An email
+        already owned by another account is rejected after proof with 409;
+        no automatic account merge occurs. JSON is strict and bounded to 8 KiB.
+        All responses have Cache-Control no-store. Incorrect browser bindings
+        never consume one of the five code attempts.
+      parameters: [{$ref: '#/components/parameters/EmailAuthOrigin'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/EmailCodeVerification'}}}}
+      responses:
+        '200':
+          description: Verified account session; login sets pw_session, link keeps it and clears the challenge cookie
+          headers: {Cache-Control: {$ref: '#/components/headers/NoStore'}, Set-Cookie: {$ref: '#/components/headers/AuthCookie'}}
+          content: {application/json: {schema: {$ref: '#/components/schemas/AccountSession'}}}
+        '400': {description: EMAIL_CODE_INVALID for wrong, replayed or browser-unbound proof; EMAIL_CODE_EXPIRED at the exact 600-second deadline}
+        '401': {description: UNAUTHENTICATED; the original link session was changed, revoked or expired}
+        '403': {description: UNTRUSTED_ORIGIN}
+        '409': {description: EMAIL_ALREADY_LINKED or ACCOUNT_CHANGED; no account merge or overwrite of concurrent account facts}
+        '413': {description: REQUEST_TOO_LARGE; JSON exceeds 8 KiB}
+        '422': {description: INVALID_INPUT; unknown fields or malformed email, challenge ID or code}
+        '429':
+          description: EMAIL_RATE_LIMIT or EMAIL_ATTEMPTS_EXCEEDED; no account or session write
+          headers: {Retry-After: {$ref: '#/components/headers/AuthRetryAfter'}}
+        '503': {description: EMAIL_AUTH_NOT_CONFIGURED, EMAIL_AUTH_UNAVAILABLE or EMAIL_IDENTITY_UNAVAILABLE; no implicit identity repair}
+  /auth/github/authorize:
+    get:
+      operationId: authorizeGithubAccount
+      x-pullwise-scope: account:auth
+      security: []
+      tags: [Authentication]
+      description: |
+        Optional GitHub OAuth sign-in or explicit identity link. intent login
+        (the default) signs in the account mapped to the stable GitHub numeric
+        identity. intent link requires a current cookie session and a trusted
+        Origin or Referer, binds the one-use ten-minute state to that account
+        and session, and preserves its immutable ID and billing. It never
+        matches accounts using GitHub profile email. Repository authorization
+        is a separate optional integration. redirectTo must stay within the
+        trusted app origin; an invalid destination falls back to /projects.
+      parameters:
+        - {$ref: '#/components/parameters/AuthOrigin'}
+        - {name: intent, in: query, schema: {type: string, enum: [login, link], default: login}}
+        - {name: redirectTo, in: query, schema: {type: string}, description: Trusted app destination after OAuth}
+        - {name: response, in: query, schema: {type: string, enum: [redirect]}, description: Return an HTTP redirect instead of the JSON authorization URL}
+      responses:
+        '200': {description: OAuth authorization URL, headers: {Cache-Control: {$ref: '#/components/headers/NoStore'}}, content: {application/json: {schema: {type: object, required: [url, mode], properties: {url: {type: string, format: uri}, mode: {type: string, const: github}}}}}}
+        '302': {description: Redirect to the GitHub OAuth authorization URL}
+        '401': {description: UNAUTHENTICATED for explicit link without a current cookie session}
+        '403': {description: UNTRUSTED_ORIGIN for explicit link}
+        '422': {description: INVALID_INPUT; unsupported intent}
+        '503': {description: GITHUB_NOT_CONFIGURED}
+  /auth/github/callback:
+    get:
+      operationId: completeGithubAccountAuthorization
+      x-pullwise-scope: account:auth
+      security: []
+      tags: [Authentication]
+      description: Consume the one-use OAuth state and verify the actual GitHub identity. Explicit linking requires the original account and session at callback and commits identity mapping, user and session fences atomically. A GitHub identity already owned by another account returns 409 rather than merging accounts. Successful login sets a seven-day pw_session; successful linking retains the current session. Provider denial redirects to the trusted destination with github_error.
+      parameters:
+        - {name: state, in: query, required: true, schema: {type: string}}
+        - {name: code, in: query, schema: {type: string}}
+        - {name: error, in: query, schema: {type: string}}
+      responses:
+        '302': {description: Trusted app redirect after sign-in or linking, headers: {Cache-Control: {$ref: '#/components/headers/NoStore'}, Set-Cookie: {$ref: '#/components/headers/AuthCookie'}}}
+        '400': {description: OAUTH_STATE_INVALID; absent, expired or consumed state}
+        '401': {description: UNAUTHENTICATED; original link session is missing or changed}
+        '409': {description: GITHUB_IDENTITY_CONFLICT or ACCOUNT_CHANGED; account IDs and billing are preserved}
+        '502': {description: GITHUB_PROFILE_INVALID; no trusted numeric identity}
   /api/v1/workspaces:
     get:
       operationId: listWorkspaces
@@ -488,6 +641,10 @@ paths:
         '204': {description: Decision recorded}
         '403': {$ref: '#/components/responses/Forbidden'}
 components:
+  headers:
+    NoStore: {description: Authentication responses are never cached, schema: {type: string, const: no-store}}
+    AuthCookie: {description: Secure HttpOnly cookie with Path / and the configured SameSite policy; pw_email_challenge lasts 600 seconds, pw_session lasts 604800 seconds, and explicit clearing uses Max-Age 0, schema: {type: string}}
+    AuthRetryAfter: {description: Minimum whole seconds before another request is admitted, schema: {type: integer, minimum: 1}}
   requestBodies:
     InvitationToken:
       required: true
@@ -496,6 +653,8 @@ components:
     cookieSession: {type: apiKey, in: cookie, name: pw_session}
     bearerKey: {type: http, scheme: bearer, bearerFormat: 'pwk_ API key'}
   parameters:
+    AuthOrigin: {name: Origin, in: header, schema: {type: string, format: uri}, description: Trusted app Origin for sign-out and explicit GitHub link; a trusted Referer origin is accepted when Origin is absent}
+    EmailAuthOrigin: {name: Origin, in: header, required: true, schema: {type: string, format: uri}, description: Trusted app Origin required for both email POSTs; Referer is never a substitute}
     WorkspacePath: {name: workspaceId, in: path, required: true, schema: {type: string, pattern: '^[A-Za-z0-9_-]{1,120}$'}}
     WorkspaceHeader: {name: X-Pullwise-Workspace, in: header, schema: {type: string}, description: Explicit ledger selection; never grants membership and cannot override a key binding}
     WorkspaceQuery: {name: workspaceId, in: query, schema: {type: string}, description: CSV/native-link selector; must agree with any header}
@@ -520,6 +679,55 @@ components:
     InvalidInput: {description: Invalid or missing field. CATEGORY_REQUIRED on create may include top-level assistance when eligible Max inference is unavailable or cannot confidently select an existing category. No expense is saved in that case.}
     RateLimited: {description: Runtime request rate or ledger owner write allowance exhausted. Jev budget exhaustion falls back to manual completion for ordinary expense writes and does not block a write with an explicit category.}
   schemas:
+    AccountSession:
+      type: object
+      additionalProperties: false
+      required: [authenticated, user, github]
+      properties:
+        authenticated: {type: boolean}
+        user:
+          oneOf: [{$ref: '#/components/schemas/SessionUser'}, {type: 'null'}]
+        github:
+          type: object
+          additionalProperties: false
+          required: [identityConnected, repositoriesConnected]
+          properties:
+            identityConnected: {type: boolean, description: Account has its own GitHub identity credential; email sign-in does not require it}
+            repositoriesConnected: {type: boolean, description: The account has a current authorized repository connection}
+    SessionUser:
+      type: object
+      additionalProperties: false
+      required: [id, name, avatarUrl, email, emailVerified, providers]
+      properties:
+        id: {type: string, description: Immutable account and personal-ledger identity; preserved across explicit provider links}
+        name: {type: [string, 'null']}
+        avatarUrl: {type: [string, 'null']}
+        email: {type: [string, 'null'], description: Verified login email only; never an unverified provider or billing contact}
+        emailVerified: {type: boolean}
+        providers: {type: array, uniqueItems: true, items: {type: string}, description: Explicit login identities such as email and github; legacy accounts may omit an explicit provider in stored facts}
+    EmailCodeRequest:
+      type: object
+      additionalProperties: false
+      required: [email, purpose]
+      properties:
+        email: {type: string, minLength: 3, maxLength: 254, description: ASCII mailbox normalized by trimming and lowercasing; provider aliases and plus tags remain distinct}
+        purpose: {type: string, enum: [login, link]}
+    EmailCodeChallenge:
+      type: object
+      additionalProperties: false
+      required: [challengeId, expiresIn, retryAfter]
+      properties:
+        challengeId: {type: string, pattern: '^[A-Za-z0-9_-]{43}$'}
+        expiresIn: {type: integer, const: 600}
+        retryAfter: {type: integer, const: 60}
+    EmailCodeVerification:
+      type: object
+      additionalProperties: false
+      required: [email, challengeId, code]
+      properties:
+        email: {type: string, minLength: 3, maxLength: 254}
+        challengeId: {type: string, pattern: '^[A-Za-z0-9_-]{43}$'}
+        code: {type: string, pattern: '^[0-9]{6}$', description: Six ASCII digits, including leading zeros}
     AssignableRole: {type: string, enum: [admin, editor, viewer]}
     Workspace:
       type: object

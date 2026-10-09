@@ -7,7 +7,7 @@
   "workers_dev": false,
   "preview_urls": false,
   "routes": [],
-  "vars": {"PULLWISE_D1_ACCESS_ENABLED": "1", "PULLWISE_MODE": "local"},
+  "vars": {"PULLWISE_D1_ACCESS_ENABLED": "1", "PULLWISE_MODE": "local", "PULLWISE_EMAIL_AUTH_ENABLED": "0"},
   "d1_databases": [
     {
       "binding": "DB",

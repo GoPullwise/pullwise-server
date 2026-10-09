@@ -9,9 +9,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from pullwise_server.cloudflare_github_identity_http import (
-    _repo_items, _user, _write_user, handle_identity_request,
+    _repo_items, _user, _write_user, _write_linked_user, handle_identity_request, session_payload,
 )
-from pullwise_server.cloudflare_state_records import record_name
+from pullwise_server.cloudflare_state_records import record_name, encode_record
 
 
 class ClosingConnection(sqlite3.Connection):
@@ -418,6 +418,298 @@ def test_explicit_legacy_cutover_preserves_identity_without_implicit_read_writes
     assert asyncio.run(_user(binding, user["id"])) == user
     with fixture.store.connect() as db:
         assert list(db.iterdump()) == after
+
+
+def email_account(fixture, *, identifier="usr_email_alice", session_id="ses-email", legacy_session=False):
+    user = {"id": identifier, "name": "Email account", "email": "alice@example.test",
+            "emailVerified": True, "emailVerifiedAt": fixture.now - 10,
+            "providers": ["email"], "createdAt": fixture.now - 100,
+            "billing": {"plan": "max", "subscriptionId": "sub_existing"},
+            "billingSubscriptionEvents": [{"eventId": "retained-event"}]}
+    session = {"userId": identifier, "expiresAt": fixture.now + 1000}
+    if not legacy_session:
+        session["id"] = session_id
+    with fixture.store.connect() as db:
+        for kind, identity, record in [("users", identifier, user), ("sessions", session_id, session)]:
+            db.execute("INSERT INTO app_state(name,payload,updated_at) VALUES(?,?,?)",
+                (record_name(kind, identity), encode_record(kind, identity, record), fixture.now))
+    return user, {**session, "id": session_id}, {"Cookie": "pw_session=" + session_id,
+                                              "Origin": "https://app.example.test"}
+
+
+def link_state(binding, gateway, fixture, headers):
+    from urllib.parse import parse_qs, urlsplit
+    status, payload, _ = call(binding, gateway, fixture.now, "GET", "/auth/github/authorize",
+        {"intent": "link", "redirectTo": "/settings"}, headers)
+    assert status == 200, payload
+    return parse_qs(urlsplit(payload["url"]).query)["state"][0]
+
+
+@pytest.mark.parametrize("legacy_session", [False, True])
+def test_email_account_github_link_preserves_identity_session_email_and_billing(tmp_path, legacy_session):
+    fixture, _, _ = seed(tmp_path / "email-link.db")
+    binding, gateway = D1ShapedSQLite(fixture.store), GitHubStub()
+    original, _, headers = email_account(fixture, legacy_session=legacy_session)
+    state = link_state(binding, gateway, fixture, headers)
+    status, _, response_headers = call(binding, gateway, fixture.now + 1, "GET", "/auth/github/callback",
+        {"state": state, "code": "synthetic-code"}, headers)
+    assert status == 302 and "Set-Cookie" not in response_headers
+    user = asyncio.run(_user(binding, original["id"]))
+    assert user["id"] == original["id"] and user["name"] == original["name"]
+    assert user["email"] == original["email"] and user["emailVerifiedAt"] == original["emailVerifiedAt"]
+    assert user["billing"] == original["billing"]
+    assert user["billingSubscriptionEvents"] == original["billingSubscriptionEvents"]
+    assert user["providers"] == ["email", "github"] and user["githubId"] == "77"
+    with fixture.store.connect() as db:
+        mapping = json.loads(db.execute("SELECT payload FROM app_state WHERE name=?",
+            (record_name("githubIdentities", "77"),)).fetchone()[0])
+        assert mapping == {"githubId": "77", "userId": original["id"], "createdAt": fixture.now + 1}
+        assert db.execute("SELECT COUNT(*) FROM app_state WHERE name GLOB 'record:sessions:*'").fetchone()[0] == 1
+        assert db.execute("SELECT payload FROM app_state WHERE name=?",
+            (record_name("users", "usr_github_77"),)).fetchone() is None
+    assert call(binding, gateway, fixture.now + 2, "GET", "/auth/session", headers=headers)[1]["user"] == {
+        "id": original["id"], "name": original["name"], "avatarUrl": "",
+        "email": original["email"], "emailVerified": True, "providers": ["email", "github"]}
+    status, _, login_headers = login(binding, gateway, fixture.now + 3)
+    assert status == 302 and "Set-Cookie" in login_headers
+    assert asyncio.run(_user(binding, original["id"]))["providers"] == ["email", "github"]
+    cookie = login_headers["Set-Cookie"].split(";", 1)[0]
+    assert call(binding, gateway, fixture.now + 4, "GET", "/auth/session",
+                headers={"Cookie": cookie})[1]["user"]["id"] == original["id"]
+
+
+@pytest.mark.parametrize("conflict", ["legacy", "mapping", "different_github"])
+def test_github_link_rejects_existing_identity_without_merging_accounts_or_failing_guard(tmp_path, conflict):
+    fixture, _, _ = seed(tmp_path / "conflict.db")
+    binding, gateway = D1ShapedSQLite(fixture.store), GitHubStub()
+    original, _, headers = email_account(fixture)
+    if conflict == "different_github":
+        asyncio.run(_write_user(binding, {**original, "githubId": "88"}, fixture.now, original))
+    else:
+        other = {"id": "usr_github_77" if conflict == "legacy" else "usr_email_other", "githubId": "77"}
+        asyncio.run(_write_user(binding, other, fixture.now, {}))
+        if conflict == "mapping":
+            with fixture.store.connect() as db:
+                db.execute("INSERT INTO app_state(name,payload,updated_at) VALUES(?,?,?)",
+                    (record_name("githubIdentities", "77"), encode_record("githubIdentities", "77",
+                     {"githubId": "77", "userId": other["id"], "createdAt": fixture.now}), fixture.now))
+    state = link_state(binding, gateway, fixture, headers)
+    with fixture.store.connect() as db:
+        before = [tuple(row) for row in db.execute("SELECT * FROM app_state WHERE name NOT GLOB 'record:githubStates:*' ORDER BY name")]
+    prepared, prepare = [], binding.prepare
+    def observe(sql):
+        prepared.append(sql)
+        return prepare(sql)
+    binding.prepare = observe
+    status, payload, response_headers = call(binding, gateway, fixture.now + 1, "GET", "/auth/github/callback",
+        {"state": state, "code": "synthetic-code"}, headers)
+    assert (status, payload["error"]["code"]) == (409, "GITHUB_IDENTITY_CONFLICT")
+    assert "Set-Cookie" not in response_headers
+    # The sole guard belongs to successful one-use state consumption; conflict
+    # preflight never dispatches a doomed account/identity transaction.
+    assert sum("INSERT INTO d1_command_guard" in sql for sql in prepared) == 1
+    with fixture.store.connect() as db:
+        assert [tuple(row) for row in db.execute("SELECT * FROM app_state WHERE name NOT GLOB 'record:githubStates:*' ORDER BY name")] == before
+
+
+def test_github_link_authorize_requires_trusted_cookie_and_callback_same_session(tmp_path):
+    fixture, _, _ = seed(tmp_path / "binding.db")
+    binding, gateway = D1ShapedSQLite(fixture.store), GitHubStub()
+    _, _, headers = email_account(fixture)
+    assert call(binding, gateway, fixture.now, "GET", "/auth/github/authorize", {"intent": "link"},
+                {"Origin": "https://app.example.test"})[0] == 401
+    assert call(binding, gateway, fixture.now, "GET", "/auth/github/authorize", {"intent": "link"},
+                {**headers, "Origin": "https://evil.example"})[0] == 403
+    state = link_state(binding, gateway, fixture, headers)
+    class NoExchange(GitHubStub):
+        async def exchange(self, *args):
+            raise AssertionError("A different session must stop before GitHub")
+    status, payload, _ = call(binding, NoExchange(), fixture.now + 1, "GET", "/auth/github/callback",
+        {"state": state, "code": "synthetic-code"}, {})
+    assert (status, payload["error"]["code"]) == (401, "UNAUTHENTICATED")
+    assert call(binding, gateway, fixture.now + 2, "GET", "/auth/github/callback",
+                {"state": state, "code": "synthetic-code"}, headers)[0] == 400
+
+
+def test_github_link_atomic_fence_rolls_back_mapping_on_concurrent_user_change(tmp_path):
+    fixture, _, _ = seed(tmp_path / "atomic.db")
+    original, session, _ = email_account(fixture)
+    class Race(D1ShapedSQLite):
+        async def batch(self, statements):
+            with self.store.connect() as db:
+                changed = {**original, "name": "Concurrent name"}
+                db.execute("UPDATE app_state SET payload=? WHERE name=?",
+                    (encode_record("users", original["id"], changed), record_name("users", original["id"])))
+            return await super().batch(statements)
+    binding = Race(fixture.store)
+    with pytest.raises(sqlite3.IntegrityError):
+        asyncio.run(_write_linked_user(binding, user={**original, "githubId": "77"},
+            expected_user=original, session=session, github_id="77", now=fixture.now))
+    with fixture.store.connect() as db:
+        assert db.execute("SELECT payload FROM app_state WHERE name=?",
+            (record_name("githubIdentities", "77"),)).fetchone() is None
+        assert db.execute("SELECT COUNT(*) FROM d1_command_guard").fetchone()[0] == 0
+
+
+def test_normal_github_login_preflights_new_mapping_without_dispatching_failed_guard(tmp_path):
+    fixture, _, _ = seed(tmp_path / "login-mapping-preflight.db")
+    binding = D1ShapedSQLite(fixture.store)
+    original, session, _ = email_account(fixture)
+    linked = {**original, "providers": ["email", "github"], "githubId": "77",
+              "githubAccessToken": "sealed:synthetic-access-token"}
+    dispatched = []
+    batch = binding.batch
+    async def observe_batch(statements):
+        dispatched.append(statements)
+        return await batch(statements)
+    binding.batch = observe_batch
+    class Linking(GitHubStub):
+        async def seal(self, token):
+            await _write_linked_user(binding, user=linked, expected_user=original,
+                session=session, github_id="77", now=fixture.now + 1)
+            self.dispatches_after_link = list(dispatched)
+            return await super().seal(token)
+    gateway = Linking()
+    status, payload, response_headers = login(binding, gateway, fixture.now)
+    assert (status, payload["error"]["code"]) == (409, "GITHUB_IDENTITY_CONFLICT")
+    assert "Set-Cookie" not in response_headers
+    # After the concurrent link settles, the ordinary callback rejects the
+    # known conflict before dispatching any additional write transaction.
+    assert dispatched == gateway.dispatches_after_link
+    with fixture.store.connect() as db:
+        assert db.execute("SELECT payload FROM app_state WHERE name=?",
+            (record_name("users", "usr_github_77"),)).fetchone() is None
+        assert db.execute("SELECT COUNT(*) FROM app_state WHERE name GLOB 'record:sessions:*'").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM account_entitlement_authority").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM d1_command_guard").fetchone()[0] == 0
+    assert asyncio.run(_user(binding, original["id"])) == linked
+
+
+def test_normal_github_login_atomic_mapping_fence_rolls_back_concurrent_legacy_creation(tmp_path):
+    fixture, _, _ = seed(tmp_path / "login-mapping-race.db")
+    original, session, _ = email_account(fixture)
+    linked = {**original, "providers": ["email", "github"], "githubId": "77",
+              "githubAccessToken": "sealed:synthetic-access-token"}
+    class Linking(D1ShapedSQLite):
+        async def batch(self, statements):
+            if any(item.sql.startswith("INSERT INTO app_state") and item.params
+                    and item.params[0] == record_name("users", "usr_github_77")
+                    for item in statements):
+                await _write_linked_user(D1ShapedSQLite(self.store), user=linked,
+                    expected_user=original, session=session, github_id="77", now=fixture.now + 1)
+            return await super().batch(statements)
+    binding = Linking(fixture.store)
+    with pytest.raises(sqlite3.IntegrityError):
+        login(binding, GitHubStub(), fixture.now)
+    with fixture.store.connect() as db:
+        mapping = json.loads(db.execute("SELECT payload FROM app_state WHERE name=?",
+            (record_name("githubIdentities", "77"),)).fetchone()[0])
+        assert mapping["userId"] == original["id"]
+        assert db.execute("SELECT payload FROM app_state WHERE name=?",
+            (record_name("users", "usr_github_77"),)).fetchone() is None
+        assert db.execute("SELECT COUNT(*) FROM app_state WHERE name GLOB 'record:sessions:*'").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM account_entitlement_authority").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM d1_command_guard").fetchone()[0] == 0
+    assert asyncio.run(_user(binding, original["id"])) == linked
+    status, _, response_headers = login(binding, GitHubStub(), fixture.now + 2)
+    assert status == 302
+    cookie = response_headers["Set-Cookie"].split(";", 1)[0]
+    assert call(binding, GitHubStub(), fixture.now + 3, "GET", "/auth/session",
+        headers={"Cookie": cookie})[1]["user"]["id"] == original["id"]
+
+
+def test_github_link_uses_admitted_exact_record_sql_and_parameter_envelopes(tmp_path):
+    from pullwise_server.cloudflare_preview_budget import _input_bound, sql_write_bound
+    fixture, _, _ = seed(tmp_path / "admitted-link.db")
+    original, session, _ = email_account(fixture)
+    class Bounded(D1ShapedSQLite):
+        async def batch(self, statements):
+            guards = 0
+            for item in statements:
+                _input_bound(item.params, sql=item.sql)
+                assert sql_write_bound(item.sql, guards) <= 4
+                if item.sql.startswith("INSERT INTO d1_command_guard"):
+                    guards += 1
+            return await super().batch(statements)
+    asyncio.run(_write_linked_user(Bounded(fixture.store),
+        user={**original, "providers": ["email", "github"], "githubId": "77"},
+        expected_user=original, session=session, github_id="77", now=fixture.now))
+    assert login(Bounded(fixture.store), GitHubStub(), fixture.now + 1)[0] == 302
+
+
+def test_email_session_revoked_during_github_provider_request_cannot_publish_link(tmp_path):
+    fixture, _, _ = seed(tmp_path / "revoked-link.db")
+    binding = D1ShapedSQLite(fixture.store)
+    user, session, headers = email_account(fixture)
+    class Revoking(GitHubStub):
+        async def profile(self, token):
+            with fixture.store.connect() as db:
+                db.execute("DELETE FROM app_state WHERE name=?", (record_name("sessions", session["id"]),))
+            return await super().profile(token)
+    gateway = Revoking()
+    state = link_state(binding, gateway, fixture, headers)
+    status, payload, _ = call(binding, gateway, fixture.now + 1, "GET", "/auth/github/callback",
+        {"state": state, "code": "synthetic-code"}, headers)
+    assert (status, payload["error"]["code"]) == (401, "UNAUTHENTICATED")
+    assert asyncio.run(_user(binding, user["id"])) == user
+    with fixture.store.connect() as db:
+        assert db.execute("SELECT payload FROM app_state WHERE name=?",
+            (record_name("githubIdentities", "77"),)).fetchone() is None
+
+
+def test_verified_email_auth_survives_missing_github_credentials_and_stays_unconnected(tmp_path):
+    from pullwise_server.cloudflare_principal import _principal, PrincipalAuthError
+    fixture, _, _ = seed(tmp_path / "email-principal.db")
+    binding, gateway = D1ShapedSQLite(fixture.store), GitHubStub()
+    user, _, headers = email_account(fixture)
+    linked = {**user, "providers": ["email", "github"], "githubId": "77"}
+    asyncio.run(_write_user(binding, linked, fixture.now, user))
+    assert asyncio.run(_principal(binding, headers, scope="profile:read", now=fixture.now))[0] == linked
+    assert call(binding, gateway, fixture.now, "GET", "/auth/session", headers=headers)[1]["authenticated"] is True
+    assert call(binding, gateway, fixture.now, "GET", "/integrations/github/authorize", headers=headers)[1]["error"]["code"] == "GITHUB_IDENTITY_REQUIRED"
+    assert call(binding, gateway, fixture.now, "GET", "/repositories", headers=headers)[1]["githubAccess"] == "not_connected"
+    unverified = {**linked, "emailVerifiedAt": None}
+    asyncio.run(_write_user(binding, unverified, fixture.now, linked))
+    with pytest.raises(PrincipalAuthError) as failure:
+        asyncio.run(_principal(binding, headers, scope="profile:read", now=fixture.now))
+    assert failure.value.code == "UNAUTHENTICATED"
+    assert session_payload({"id": "usr_github_99", "email": "contact@example.test", "providers": ["github"],
+                            "githubAccessToken": "sealed:token", "billing": {"customerEmail": "billing@example.test"}})["user"]["email"] is None
+
+
+def test_email_only_installation_callback_requires_linked_github_identity(tmp_path):
+    from pullwise_server.cloudflare_oauth_state_adapter import D1OAuthStates
+    fixture, _, _ = seed(tmp_path / "email-install.db")
+    binding = D1ShapedSQLite(fixture.store)
+    user, session, headers = email_account(fixture)
+    asyncio.run(D1OAuthStates(binding).issue(state_id="install-email", record={
+        "kind": "install", "userId": user["id"], "sessionId": session["id"],
+        "expiresAt": fixture.now + 600}, now=fixture.now))
+    class NoProvider(GitHubStub):
+        async def unseal(self, token):
+            raise AssertionError("Unlinked identity cannot call GitHub installation APIs")
+    status, payload, _ = call(binding, NoProvider(), fixture.now + 1, "GET", "/integrations/github/callback",
+        {"state": "install-email", "installation_id": "501"}, headers)
+    assert (status, payload["error"]["code"]) == (409, "GITHUB_IDENTITY_REQUIRED")
+    assert asyncio.run(_user(binding, user["id"])) == user
+
+
+def test_rejected_github_token_keeps_verified_email_session_but_hides_repository_access(tmp_path):
+    from pullwise_server.cloudflare_github_gateway import GitHubFailure
+    fixture, _, _ = seed(tmp_path / "email-rejected-token.db")
+    binding = D1ShapedSQLite(fixture.store)
+    original, _, headers = email_account(fixture)
+    linked = {**original, "providers": ["email", "github"], "githubId": "77",
+              "githubAccessToken": "sealed:synthetic-access-token"}
+    asyncio.run(_write_user(binding, linked, fixture.now, original))
+    class Rejected(GitHubStub):
+        async def installations(self, token):
+            raise GitHubFailure("GITHUB_REAUTHORIZATION_REQUIRED")
+    gateway = Rejected()
+    assert call(binding, gateway, fixture.now + 1, "GET", "/auth/session", headers=headers)[1]["authenticated"] is True
+    status, payload, _ = call(binding, gateway, fixture.now + 1, "GET", "/repositories", headers=headers)
+    assert status == 200 and payload == {"items": [], "githubAccess": "reauthorization_required"}
+    assert asyncio.run(_user(binding, original["id"])) == linked
 
 
 class GitHubIdentityHttpTests(unittest.TestCase):

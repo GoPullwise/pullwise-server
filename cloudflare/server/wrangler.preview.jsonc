@@ -17,6 +17,8 @@
     "PULLWISE_PREVIEW_SCHEMA_V8_UPGRADE_ENABLED": "1",
     "PULLWISE_RECURRING_EXPENSES_ENABLED": "1",
     "PULLWISE_MODE": "preview",
+    "PULLWISE_EMAIL_AUTH_ENABLED": "1",
+    "PULLWISE_EMAIL_FROM": "login@auth.pull-wise.com",
     "PULLWISE_APP_URL": "https://preview.pull-wise.com",
     "PULLWISE_GITHUB_CALLBACK_URL": "https://preview.pull-wise.com/api/auth/github/callback",
     "PULLWISE_GITHUB_CLIENT_ID": "Iv23liUTSufy2U2Dc5l7",
@@ -29,6 +31,7 @@
     "PULLWISE_JEV_SUGGESTIONS_ENABLED": "1",
     "PULLWISE_JEV_SUGGESTIONS_EVALUATED": "1"
   },
+  "send_email": [{"name": "EMAIL", "allowed_sender_addresses": ["login@auth.pull-wise.com"]}],
   "d1_databases": [{
     "binding": "DB",
     "database_name": "pullwise-ledger-preview",

@@ -1,5 +1,8 @@
 # Local Worker example only; use reviewed environment configs and Cloudflare Secrets.
-# Wrangler/workerd and D1 commands remain paused until explicit authorization.
+# Use local-only simulated email bindings; never enable remote mail in local tests.
+PULLWISE_EMAIL_AUTH_ENABLED=0
+PULLWISE_EMAIL_FROM=login@auth.pull-wise.com
+PULLWISE_EMAIL_CODE_SECRET=replace-with-random-secret-at-least-32-characters
 PULLWISE_GITHUB_CLIENT_ID=replace-me
 PULLWISE_GITHUB_CLIENT_SECRET=replace-me
 PULLWISE_GITHUB_TOKEN_KEY=replace-with-reviewed-token-encryption-key

@@ -11,7 +11,7 @@ import re
 import uuid
 
 from .cloudflare_github_gateway import GitHubFailure
-from .cloudflare_github_identity_http import _random_urlsafe
+from .cloudflare_github_identity_http import _random_urlsafe, _github_identity_owner
 from .cloudflare_ledger_auth import ledger_principal, workspace_payload
 from .cloudflare_plan_limits import PlanLimitError
 from .cloudflare_principal import PrincipalAuthError, _cookie_sessions, _header
@@ -312,8 +312,17 @@ async def _accept(binding, headers, body, now, method):
     if len(rows[0]) != 1:
         return _error(404, "INVITATION_NOT_FOUND")
     invite = rows[0][0]
-    if invite["github_recipient_id"] is not None and _github_id(actor) != invite["github_recipient_id"]:
-        return _error(403, "INVITATION_RECIPIENT_MISMATCH")
+    if invite["github_recipient_id"] is not None:
+        if _github_id(actor) != invite["github_recipient_id"]:
+            return _error(403, "INVITATION_RECIPIENT_MISMATCH")
+        # Historical targeted links retain their provider identity restriction.
+        # Explicitly linked email users keep their original account identity.
+        try:
+            recipient_id = await _github_identity_owner(binding, str(invite["github_recipient_id"]))
+        except ValueError:
+            return _error(409, "GITHUB_IDENTITY_CONFLICT")
+        if recipient_id != actor["id"]:
+            return _error(403, "INVITATION_RECIPIENT_MISMATCH")
     if invite["status"] == "revoked":
         return _error(410, "INVITATION_REVOKED")
     accepted_preview = invite["status"] == "accepted" and method == "preview"

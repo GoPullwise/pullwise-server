@@ -76,3 +76,26 @@ def test_wrong_kind_callback_consumes_state_once(tmp_path):
     with pytest.raises(ValueError, match="OAUTH_STATE_INVALID"):
         asyncio.run(adapter.consume(state_id="state-synthetic",
             expected_kind="login", now=fixture.now))
+
+
+@pytest.mark.parametrize("binding_fields", [{}, {"userId": "usr_email_local"}, {"sessionId": "ses-local"}])
+def test_link_oauth_state_requires_both_current_identity_and_session(tmp_path, binding_fields):
+    fixture, _, _ = seed(tmp_path / "link-state.db")
+    adapter = D1OAuthStates(D1ShapedSQLite(fixture.store))
+    with pytest.raises(ValueError, match="OAuth link state"):
+        asyncio.run(adapter.issue(state_id="link-state", record={"kind": "login", "intent": "link",
+            "expiresAt": fixture.now + 300, **binding_fields}, now=fixture.now))
+    with closing(fixture.store.connect()) as db:
+        assert db.execute("SELECT name FROM app_state WHERE name=?",
+            (record_name("githubStates", "link-state"),)).fetchone() is None
+
+
+def test_link_oauth_state_keeps_cookie_binding_until_single_use_consumption(tmp_path):
+    fixture, _, _ = seed(tmp_path / "bound-link.db")
+    adapter = D1OAuthStates(D1ShapedSQLite(fixture.store))
+    record = {"kind": "login", "intent": "link", "userId": "usr_email_local", "sessionId": "ses-local",
+              "expiresAt": fixture.now + 300, "codeVerifier": "synthetic-verifier"}
+    asyncio.run(adapter.issue(state_id="link-state", record=record, now=fixture.now))
+    assert asyncio.run(adapter.consume(state_id="link-state", expected_kind="login", now=fixture.now)) == record
+    with pytest.raises(ValueError, match="OAUTH_STATE_INVALID"):
+        asyncio.run(adapter.consume(state_id="link-state", expected_kind="login", now=fixture.now))

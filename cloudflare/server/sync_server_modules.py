@@ -24,6 +24,8 @@ MODULES = (
     "cloudflare_creem_handler",
     "cloudflare_d1_batch",
     "cloudflare_d1_mapping",
+    "cloudflare_email_auth",
+    "cloudflare_email_gateway",
     "cloudflare_github_gateway",
     "cloudflare_github_identity_http",
     "cloudflare_http_contract",

@@ -1,5 +1,6 @@
 """Populated v7-to-v8 integrity; native D1 metadata is proved separately."""
 import asyncio
+import json
 import sqlite3
 
 import pytest
@@ -8,14 +9,18 @@ from test_d1_validation_budget import LocalSql
 from test_preview_blank_schema_upgrade import v5
 from test_preview_recurring_schema_upgrade import v6, schema
 from test_preview_schema_upgrade import SQLiteD1
+from test_preview_state_cutover import auth_record
 from pullwise_server.cloudflare_preview_schema import (
     SCHEMA_VERSION, SCHEMA_FINGERPRINT, SCHEMA_OBJECTS, INDEX_COUNTS,
     V7_INDEX_COUNTS, UPGRADE_V8_SQL,
 )
 from pullwise_server.cloudflare_preview_budget import (
-    upgrade_product_schema_v7, upgrade_product_schema_v8, _upgrade_v8_plan,
-    begin_product_schema_upgrade_v8, _V7_COUNT_SQL,
+    upgrade_product_schema, upgrade_product_schema_v6, upgrade_product_schema_v7,
+    upgrade_product_schema_v8, migrate_product_state_records, ProductMeteredD1,
+    _upgrade_v8_plan, begin_product_schema_upgrade_v8, _V7_COUNT_SQL,
+    _RECORD_COUNT_SQL, _STRICT_RECORD_SQL, STATE_RECORD_INTEGRITY_VERSION,
 )
+from pullwise_server.cloudflare_state_records import STATE_KINDS, record_name, encode_record
 from pullwise_server.cloudflare_validation_budget import BudgetJournal, BudgetError
 
 
@@ -82,6 +87,90 @@ def test_upgrade_preserves_every_fact_marker_and_accounting_across_restart(v7):
     restarted = BudgetJournal(LocalSql(storage), preview_product=True, product_operations=True)
     run(raw, restarted)
     assert raw.calls == 4 and restarted.snapshot() == after
+
+
+def add_auth_records(db, journal):
+    for kind in ('emailIdentities', 'emailChallenges', 'githubIdentities'):
+        key, value = auth_record(kind)
+        db.execute('INSERT INTO app_state VALUES(?,?,?)',
+                   (record_name(kind, key), encode_record(kind, key, value), 100))
+    db.commit()
+    state = journal.snapshot()
+    state['product_data']['rows'] = dict(db.execute(_V7_COUNT_SQL).fetchone())
+    state['product_data']['records'] = dict(db.execute(_RECORD_COUNT_SQL).fetchone())
+    journal._save(state)
+
+
+@pytest.mark.parametrize('integrity_version', [None, 1, STATE_RECORD_INTEGRITY_VERSION])
+def test_email_records_upgrade_reuses_strict_proof_and_never_replays_old_migrations(v7, integrity_version):
+    db, storage, journal = v7
+    add_auth_records(db, journal)
+    state = journal.snapshot()
+    if integrity_version is not None:
+        state['state_record_integrity_version'] = integrity_version
+        state['state_record_integrity_request'] = 71
+    journal._save(state)
+    original = history(db)
+    raw = SQLiteD1(db, journal)
+    plan = _upgrade_v8_plan(state)
+    assert _STRICT_RECORD_SQL in plan.operations[1].sql
+    assert _STRICT_RECORD_SQL in plan.operations[3].sql
+    run(raw, journal)
+    after = journal.snapshot()
+    assert history(db) == original
+    assert set(after['product_data']['records']) == set(STATE_KINDS)
+    assert all(after['product_data']['records'][kind] == 1 for kind in
+               ('emailIdentities', 'emailChallenges', 'githubIdentities'))
+    assert after['state_storage_version'] == 1
+    assert after['state_record_integrity_version'] == STATE_RECORD_INTEGRITY_VERSION
+    expected_request = (71 if integrity_version == STATE_RECORD_INTEGRITY_VERSION
+                        else after['schema_upgrade_v8']['request'])
+    assert after['state_record_integrity_request'] == expected_request
+    for key in ('scope', 'schema_upgrade', 'schema_upgrade_v6', 'schema_upgrade_v7',
+                'state_record_migration', 'state_storage_version'):
+        assert after[key] == state[key]
+    for key in ('requests', 'reserved_read', 'actual_read', 'reserved_written', 'actual_written'):
+        assert after[key] >= state[key]
+
+    restarted = BudgetJournal(LocalSql(storage), preview_product=True, product_operations=True)
+
+    async def completed_paths():
+        for migration in (upgrade_product_schema, upgrade_product_schema_v6,
+                          upgrade_product_schema_v7, upgrade_product_schema_v8,
+                          migrate_product_state_records):
+            await migration(raw, restarted, clock=lambda: 11)
+
+    asyncio.run(completed_paths())
+    assert raw.calls == 4 and restarted.snapshot() == after
+    ticket = restarted.begin_product(now=12)
+    meter = ProductMeteredD1(raw, restarted, ticket, clock=lambda: 13)
+    asyncio.run(meter.ensure_cardinality())
+    assert raw.calls == 4 and meter.records_integrity_verified is True
+    restarted.finish(ticket, now=14)
+    assert restarted.snapshot()['state_record_integrity_request'] == expected_request
+
+
+@pytest.mark.parametrize('kind,changes', [
+    ('emailChallenges', {'attempts': 6}),
+    ('emailIdentities', {'verifiedAt': 99}),
+    ('githubIdentities', {'githubId': '78'}),
+])
+def test_v8_invalid_identity_snapshot_stops_before_invitation_rewrite(v7, kind, changes):
+    db, _, journal = v7
+    add_auth_records(db, journal)
+    key, value = auth_record(kind)
+    db.execute('UPDATE app_state SET payload=? WHERE name=?',
+               (json.dumps({**value, **changes}), record_name(kind, key)))
+    db.commit()
+    original = history(db)
+    raw = SQLiteD1(db, journal)
+    with pytest.raises(BudgetError, match='STATE_RECORD_INVALID'):
+        run(raw, journal)
+    assert raw.calls == 2 and history(db) == original
+    state = journal.snapshot()
+    assert state['schema_version'] == 7 and state['schema_upgrade_v8']['complete'] is False
+    assert state.get('state_record_integrity_version') != STATE_RECORD_INTEGRITY_VERSION
+    assert not db.execute("SELECT 1 FROM sqlite_schema WHERE name='workspace_join_requests'").fetchone()
 
 
 @pytest.mark.parametrize('call', [1, 2, 3, 4])

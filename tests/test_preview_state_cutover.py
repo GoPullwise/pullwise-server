@@ -1,5 +1,6 @@
 """Local SQL behavior of the closed cutover; native accounting is separate."""
 import asyncio
+import hashlib
 import json
 import sqlite3
 from contextlib import closing
@@ -11,9 +12,10 @@ from test_d1_validation_budget import LocalSql
 from pullwise_server.cloudflare_preview_budget import (
     migrate_product_state_records, ProductMeteredD1, _COUNT_SQL, _STATE_SQL,
     _STRICT_RECORD_SQL, _compile_state_record_cutover, _input_bound,
+    STATE_RECORD_INTEGRITY_VERSION,
 )
 from pullwise_server.cloudflare_preview_schema import SCHEMA_SQL, SCHEMA_VERSION, SCHEMA_FINGERPRINT
-from pullwise_server.cloudflare_state_records import record_name, encode_record, read_records
+from pullwise_server.cloudflare_state_records import STATE_KINDS, record_name, encode_record, read_records
 from pullwise_server.cloudflare_validation_budget import BudgetJournal, BudgetError
 
 
@@ -237,3 +239,94 @@ def test_record_mutation_refresh_uses_numeric_queries_and_unverified_state_check
         asyncio.run(meter.ensure_cardinality())
         assert len(raw.groups) == previous
         journal.finish(ticket, now=16)
+
+
+def test_expanded_integrity_proof_checks_old_verified_state_once_without_cutover_or_counter_reset():
+    with closing(sqlite3.connect(":memory:")) as sql, closing(sqlite3.connect(":memory:")) as d1:
+        journal = BudgetJournal(LocalSql(sql), preview_product=True, product_operations=True)
+        historical_fixture(d1, journal)
+        raw = SQLiteBehavior(d1)
+        asyncio.run(migrate_product_state_records(raw, journal, clock=lambda: 10))
+        before = journal.snapshot()
+        before.pop("state_record_integrity_version", None)
+        before.pop("state_record_integrity_request", None)
+        for kind in ("emailIdentities", "emailChallenges", "githubIdentities"):
+            before["product_data"]["records"].pop(kind, None)
+        journal._save(before)
+        changes, groups = d1.total_changes, len(raw.groups)
+        ticket = journal.begin_product(now=11)
+        meter = ProductMeteredD1(raw, journal, ticket, clock=lambda: 12)
+        asyncio.run(meter.ensure_cardinality())
+        assert len(raw.groups) == groups + 1 and _STRICT_RECORD_SQL in raw.groups[-1]
+        assert set(meter.data["records"]) == set(STATE_KINDS)
+        proven = journal.snapshot()
+        assert proven["state_record_integrity_version"] == STATE_RECORD_INTEGRITY_VERSION
+        assert proven["state_record_integrity_request"] == ticket
+        for key in ("schema_version", "schema_fingerprint", "state_storage_version", "state_record_migration",
+                    "reserved_written", "actual_written", "evidence"):
+            assert proven[key] == before[key]
+        assert proven["cases"] == {**before["cases"], "product": before["cases"].get("product", 0) + 1}
+        assert proven["reserved_read"] >= before["reserved_read"]
+        assert proven["actual_read"] >= before["actual_read"]
+        assert d1.total_changes == changes
+        asyncio.run(meter.ensure_cardinality())
+        assert len(raw.groups) == groups + 1
+        journal.finish(ticket, now=13)
+        restarted = BudgetJournal(LocalSql(sql), preview_product=True, product_operations=True)
+        next_ticket = restarted.begin_product(now=14)
+        next_meter = ProductMeteredD1(raw, restarted, next_ticket, clock=lambda: 15)
+        asyncio.run(next_meter.ensure_cardinality())
+        assert len(raw.groups) == groups + 1
+        restarted.finish(next_ticket, now=16)
+
+
+def auth_record(kind, **changes):
+    email = "alice@example.test"
+    key = hashlib.sha256(("pullwise-email:" + email).encode()).hexdigest()
+    if kind == "emailIdentities":
+        value = {"email": email, "userId": "owner", "createdAt": 100, "verifiedAt": 101}
+    elif kind == "emailChallenges":
+        value = {"email": email, "challengeId": "a" * 43, "purpose": "login", "codeHash": "b" * 64,
+                 "browserHash": "c" * 64, "attempts": 0, "createdAt": 100, "expiresAt": 700}
+    else:
+        key = "77"
+        value = {"githubId": "77", "userId": "owner", "createdAt": 100}
+    return key, {**value, **changes}
+
+
+@pytest.mark.parametrize("kind,changes", [
+    ("emailIdentities", {"verifiedAt": 99}), ("emailIdentities", {"userId": ""}),
+    ("emailChallenges", {"codeHash": "plaintext"}), ("emailChallenges", {"browserHash": "B" * 64}),
+    ("emailChallenges", {"attempts": 6}), ("emailChallenges", {"attempts": True}),
+    ("emailChallenges", {"expiresAt": 701}), ("emailChallenges", {"challengeId": "a" * 44}),
+    ("emailChallenges", {"purpose": "unknown"}), ("emailChallenges", {"purpose": "link"}),
+    ("githubIdentities", {"githubId": "78"}), ("githubIdentities", {"createdAt": 0}),
+])
+def test_expanded_structural_proof_accepts_auth_records_and_rejects_invalid_shapes(kind, changes):
+    with closing(sqlite3.connect(":memory:")) as connection:
+        connection.execute("CREATE TABLE app_state(name TEXT PRIMARY KEY,payload TEXT,updated_at INTEGER)")
+        key, value = auth_record(kind)
+        name = record_name(kind, key)
+        connection.execute("INSERT INTO app_state VALUES(?,?,0)", (name, encode_record(kind, key, value)))
+        assert connection.execute(_STRICT_RECORD_SQL).fetchone()[0] == 0
+        connection.execute("UPDATE app_state SET payload=? WHERE name=?", (json.dumps({**value, **changes}), name))
+        assert connection.execute(_STRICT_RECORD_SQL).fetchone()[0] == 1
+
+
+def test_invalid_auth_payload_is_a_request_error_before_dispatch_not_a_shared_accounting_stop():
+    with closing(sqlite3.connect(":memory:")) as sql, closing(sqlite3.connect(":memory:")) as d1:
+        journal = BudgetJournal(LocalSql(sql), preview_product=True, product_operations=True)
+        historical_fixture(d1, journal)
+        raw = SQLiteBehavior(d1)
+        asyncio.run(migrate_product_state_records(raw, journal, clock=lambda: 10))
+        ticket = journal.begin_product(now=11)
+        meter = ProductMeteredD1(raw, journal, ticket, clock=lambda: 12)
+        key, invalid = auth_record("emailChallenges", otp="000001")
+        groups = len(raw.groups)
+        with pytest.raises(ValueError):
+            asyncio.run(meter.batch([meter.prepare("INSERT INTO app_state(name,payload,updated_at) VALUES(?,?,?)")
+                .bind(record_name("emailChallenges", key), json.dumps(invalid), 100)]))
+        assert len(raw.groups) == groups
+        assert journal.snapshot()["stopped"] is None
+        assert d1.execute("SELECT COUNT(*) FROM app_state WHERE name GLOB 'record:emailChallenges:*'").fetchone()[0] == 0
+        journal.finish(ticket, now=13)

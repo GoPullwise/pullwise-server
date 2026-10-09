@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parents[1]
 SERVER = ROOT / "cloudflare" / "server"
 PLACEHOLDER_ID = "00000000-0000-0000-0000-000000000000"
+EMAIL_SENDER = "login@auth.pull-wise.com"
 
 
 def validate_config(environment: str, allow_placeholders: bool,
@@ -56,6 +57,17 @@ def validate_config(environment: str, allow_placeholders: bool,
                 or bindings[0].get("class_name") != "ValidationBudget"
                 or vars_.get("PULLWISE_CREEM_API_BASE_URL") != "https://test-api.creem.io"):
             raise ValueError("product preview requires the existing budget coordinator and test provider")
+    email_auth = vars_.get("PULLWISE_EMAIL_AUTH_ENABLED", "0")
+    if email_auth not in {"0", "1"}:
+        raise ValueError("email authentication must be explicitly enabled or disabled")
+    if email_auth == "1":
+        email_bindings = config.get("send_email", [])
+        if (not product_preview or access != "1"
+                or vars_.get("PULLWISE_EMAIL_FROM") != EMAIL_SENDER
+                or not isinstance(email_bindings, list) or len(email_bindings) != 1
+                or not isinstance(email_bindings[0], dict)
+                or email_bindings[0] != {"name": "EMAIL", "allowed_sender_addresses": [EMAIL_SENDER]}):
+            raise ValueError("enabled email authentication requires coordinated preview and one fixed EMAIL sender without recipient restrictions")
     crons = config.get("triggers", {}).get("crons", [])
     recurring = vars_.get("PULLWISE_RECURRING_EXPENSES_ENABLED", "0")
     if recurring not in {"0", "1"}:

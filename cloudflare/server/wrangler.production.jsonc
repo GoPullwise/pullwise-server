@@ -10,6 +10,7 @@
   "vars": {
     "PULLWISE_D1_ACCESS_ENABLED": "0",
     "PULLWISE_MODE": "production",
+    "PULLWISE_EMAIL_AUTH_ENABLED": "0",
     "PULLWISE_APP_URL": "https://pull-wise.com",
     "PULLWISE_GITHUB_CALLBACK_URL": "https://pull-wise.com/api/auth/github/callback",
     "PULLWISE_GITHUB_CLIENT_ID": "Iv23lipOl05N1ZULZmYW",
