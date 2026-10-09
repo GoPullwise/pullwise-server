@@ -1,5 +1,25 @@
 # Current local acceptance
 
+## Explicit category removal (2026-10-09)
+
+`POST /api/v1/categories/{id}/remove` removes an unused active or archived
+category with current category-management authority and If-Match. Existing
+DELETE continues to archive. All expenses, durable audits, original creation
+responses, recurring schedules and persisted actual Jev selections retain their
+category definitions. Removal never deletes associated records or their history;
+the permission, revision and absence fences commit atomically with commercial
+usage, and failed races roll back. No category schema migration is introduced.
+
+After merging concurrent project-removal schema 10, the full suite passes
+**1,731 tests and 60 subtests**. Static preview checks and source mirror checks
+pass. `scripts/check-category-removal-native-runtime.py` passes 20 finite local
+HTTP calls through the canonical Python Worker, NativeD1 and original-scope
+ValidationBudget with native schema 10. Nine independent historical references
+return CATEGORY_IN_USE without writes; active/archived unused removal succeeds.
+Native metadata reports 406 metered reads and 208 writes, including isolated
+fixture initialization. Financial/history hashes, account proof and accounting
+remain intact; provider/model calls are zero. This is local synthetic evidence.
+
 Updated 2026-10-09. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
 
 ## Preview operator Max trial (2026-10-09)
