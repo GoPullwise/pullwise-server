@@ -1,0 +1,250 @@
+{
+  "date": "2026-10-09",
+  "passed": true,
+  "scope": "Explicit unused category removal; preview-only publication",
+  "serverSourceCommit": "f9d0649",
+  "webSourceCommit": "72471cd",
+  "schemaVersion": 10,
+  "categoryMigration": false,
+  "concurrentProjectSchemaPreserved": true,
+  "bindingsPreserved": true,
+  "schedulesPreserved": true,
+  "productionD1Paused": true,
+  "remoteBusinessMutations": 0,
+  "remoteModelCalls": 0,
+  "realPayments": 0,
+  "realAccountWorkflowAcceptance": false,
+  "serverTests": {
+    "passed": 1731,
+    "subtestsPassed": 60
+  },
+  "webTests": {
+    "files": 48,
+    "passed": 897
+  },
+  "nativeLocal": {
+    "passed": true,
+    "httpCalls": 20,
+    "rowsRead": 406,
+    "rowsWritten": 208,
+    "originalSingleton": true,
+    "financeAndHistoryPreserved": true,
+    "sourceTreeSha256": "00d22777067805198765be356dbb6895b8deeb10f15b7fd6463563c484a4b1c1",
+    "entrySha256": "73e80af951fe46ea88cf1aa5fb2b410478ea71b1997bcb35a7ff03c466dde110"
+  },
+  "browserLocal": {
+    "passed": true,
+    "scope": "Loopback-only synthetic UI fixtures; no remote API/provider/D1 operations",
+    "engine": {
+      "name": "Chromium",
+      "version": "151.0.7922.173",
+      "playwright": "1.62.1",
+      "physicalDevice": false
+    },
+    "buildIndexSha256": "3508ebb0a4eba40f55db66fdda58c4b82de196651a4f3746f87b5311ffff1281",
+    "custom": {
+      "profiles": [
+        {
+          "name": "en-light-1440",
+          "states": 4,
+          "requests": 36,
+          "violations": 0,
+          "themes": [
+            "light"
+          ],
+          "languages": [
+            "en"
+          ]
+        },
+        {
+          "name": "en-light-390",
+          "states": 3,
+          "requests": 27,
+          "violations": 0,
+          "themes": [
+            "light"
+          ],
+          "languages": [
+            "en"
+          ]
+        },
+        {
+          "name": "en-dark-1440",
+          "states": 2,
+          "requests": 27,
+          "violations": 0,
+          "themes": [
+            "dark"
+          ],
+          "languages": [
+            "en"
+          ]
+        },
+        {
+          "name": "en-dark-390",
+          "states": 3,
+          "requests": 27,
+          "violations": 0,
+          "themes": [
+            "dark"
+          ],
+          "languages": [
+            "en"
+          ]
+        },
+        {
+          "name": "zh-light-1440",
+          "states": 2,
+          "requests": 34,
+          "violations": 0,
+          "themes": [
+            "light"
+          ],
+          "languages": [
+            "zh-CN"
+          ]
+        },
+        {
+          "name": "zh-light-390",
+          "states": 3,
+          "requests": 34,
+          "violations": 0,
+          "themes": [
+            "light"
+          ],
+          "languages": [
+            "zh-CN"
+          ]
+        },
+        {
+          "name": "zh-dark-1440",
+          "states": 2,
+          "requests": 34,
+          "violations": 0,
+          "themes": [
+            "dark"
+          ],
+          "languages": [
+            "zh-CN"
+          ]
+        },
+        {
+          "name": "zh-dark-390",
+          "states": 3,
+          "requests": 34,
+          "violations": 0,
+          "themes": [
+            "dark"
+          ],
+          "languages": [
+            "zh-CN"
+          ]
+        }
+      ],
+      "viewerRequests": 34,
+      "checks": [
+        "Cancel and Escape restore opener focus without POST",
+        "Active unused removal uses one versioned POST, locks write and refresh, then removes row and focuses heading",
+        "Archived unused category can be removed",
+        "CATEGORY_IN_USE preserves row/confirmation and restores confirm focus",
+        "Legacy Archive still uses DELETE and retains category",
+        "Ledger switch dismisses idle confirmation; viewer has no actions; switch back has no stale confirmation or mutation",
+        "Viewer has no Rename/Archive/Remove/Create controls"
+      ]
+    },
+    "persistentLayout": {
+      "command": "node --import temporary scratch resolver scripts/check-date-layout.mjs --browser=chromium",
+      "scope": "Local GET-only fixtures; browser engines and simulated viewports, not physical devices. No save, CSV download, external delivery or screenshots.",
+      "profiles": [
+        {
+          "name": "desktop-1440",
+          "states": 81,
+          "requests": 80,
+          "violations": 0,
+          "externalDelivered": 0
+        },
+        {
+          "name": "tablet-1280-zh",
+          "states": 81,
+          "requests": 87,
+          "violations": 0,
+          "externalDelivered": 0
+        },
+        {
+          "name": "phone-390-to-320",
+          "states": 48,
+          "requests": 80,
+          "violations": 0,
+          "externalDelivered": 0
+        },
+        {
+          "name": "android-size-412-to-360",
+          "states": 48,
+          "requests": 79,
+          "violations": 0,
+          "externalDelivered": 0
+        }
+      ]
+    },
+    "visualInspection": [
+      "en-light-1440-idle.png",
+      "zh-dark-390-confirm.png",
+      "zh-light-390-idle.png",
+      "en-dark-1440-confirm.png",
+      "en-dark-390-confirm.png",
+      "en-light-390-confirm.png",
+      "zh-light-1440-confirm.png",
+      "zh-dark-1440-confirm.png"
+    ],
+    "capture": "Viewport captures retain verified coarse media and touch points. Initial fullPage capture reset emulation; failed fixture evidence kept separately, no source defect.",
+    "requestCapPerContext": 100
+  },
+  "deployments": {
+    "pullwise-server-preview": [
+      {
+        "version_id": "012c2be6-2e25-4c58-9e2d-996b33bd35ef",
+        "percentage": 100
+      }
+    ],
+    "pullwise-web-preview": [
+      {
+        "version_id": "54bfb188-c016-4f96-9f35-0c8d576a20ae",
+        "percentage": 100
+      }
+    ]
+  },
+  "staticReadback": [
+    {
+      "path": "/",
+      "status": 200,
+      "bytes": 4839,
+      "sha256": "2c3e224a466612e7db1201b05de395bea1fb11c672748590e8a1675a68e42532",
+      "matchesBuiltArtifact": false,
+      "homepageAssetReferencesMatch": true
+    },
+    {
+      "path": "/assets/index-D0Yzea6X.js",
+      "status": 200,
+      "bytes": 44999,
+      "sha256": "4c2fe7789263828b1817ab65002aee16650ecebfbfe83b57dd2b01c07b498c6b",
+      "matchesBuiltArtifact": true,
+      "homepageAssetReferencesMatch": false
+    },
+    {
+      "path": "/assets/ledger-BWzK5lgi.js",
+      "status": 200,
+      "bytes": 93380,
+      "sha256": "ba6b2245e7792a9c6d33b642cb937b59e91396a2bb80f9fb01608cab010372af",
+      "matchesBuiltArtifact": true,
+      "homepageAssetReferencesMatch": false
+    },
+    {
+      "path": "/assets/email-sign-in-BbjG5AHR.css",
+      "status": 200,
+      "bytes": 848,
+      "sha256": "566b0d2cfb3ab9679d9c68ad5f5763232528b704353aafe82236f76eca9a7bf1",
+      "matchesBuiltArtifact": true,
+      "homepageAssetReferencesMatch": false
+    }
+  ]
+}

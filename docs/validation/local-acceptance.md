@@ -20,6 +20,11 @@ Native metadata reports 406 metered reads and 208 writes, including isolated
 fixture initialization. Financial/history hashes, account proof and accounting
 remain intact; provider/model calls are zero. This is local synthetic evidence.
 
+[Preview receipt](category-removal-preview-release-2026-10-09.json) records
+Server version `012c2be6-2e25-4c58-9e2d-996b33bd35ef`. The existing schema 10,
+bindings, database, singleton, schedules and Jev activation were preserved.
+This publication performs no remote business mutation or category migration.
+
 Updated 2026-10-09. Companion: [Web acceptance](../../../pullwise-web/docs/validation/local-acceptance.md).
 
 ## Preview operator Max trial (2026-10-09)
