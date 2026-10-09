@@ -32,6 +32,7 @@ MODULES = (
     "cloudflare_http_contract",
     "cloudflare_jev_gateway",
     "cloudflare_jev_preferences",
+    "cloudflare_expense_retention",
     "cloudflare_ledger_activity",
     "cloudflare_ledger_api",
     "cloudflare_ledger_auth",

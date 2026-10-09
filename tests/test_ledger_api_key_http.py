@@ -19,11 +19,8 @@ class LedgerApiKeyHttpTests(unittest.TestCase):
         self.store, self.now = fixture.store, fixture.now
         with self.store.connect() as db:
             migrations = Path(__file__).resolve().parents[1] / "cloudflare/server/migrations"
-            for name in ("0001_ledger.sql", "0004_ledger_plan_usage.sql"):
-                db.executescript((migrations / name).read_text())
-            db.execute("""CREATE TABLE api_keys(id TEXT PRIMARY KEY,user_id TEXT,name TEXT,
-                key_prefix TEXT,key_hash TEXT UNIQUE,scopes TEXT,expires_at INTEGER,
-                restrictions TEXT,created_at INTEGER,last_used_at INTEGER,revoked_at INTEGER)""")
+            for migration in sorted(migrations.glob("*.sql")):
+                db.executescript(migration.read_text())
         self.binding = D1ShapedSQLite(self.store)
         _, _, login_headers = login(self.binding, GitHubStub(), self.now)
         self.cookie = login_headers["Set-Cookie"].split(";", 1)[0]
@@ -94,6 +91,9 @@ class LedgerApiKeyHttpTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(profile["id"], "usr_github_77")
         self.assertIn("expenses:write", profile["scopes"])
+        self.assertEqual(profile["ledgerUsage"], {"workspaceId": profile["id"],
+            "projects": {"used": 0, "limit": 3, "remaining": 3},
+            "expenseRecords": {"used": 0, "limit": 100, "remaining": 100}})
         status, key = self.run_async(create_api_key(binding=self.binding, headers=cookie,
             body={}, now=self.now + 2))
         self.assertEqual(status, 201)
@@ -101,6 +101,7 @@ class LedgerApiKeyHttpTests(unittest.TestCase):
             headers={"Authorization": "Bearer " + key["key"]}, now=self.now + 3))
         self.assertEqual(status, 200)
         self.assertEqual(token_profile["id"], profile["id"])
+        self.assertEqual(token_profile["ledgerUsage"], profile["ledgerUsage"])
         self.assertEqual(token_profile["scopes"], key["scopes"])
         self.assertNotIn("expenses:write", token_profile["scopes"])
 

@@ -81,7 +81,7 @@ paths:
       x-pullwise-scope: account:billing
       tags: [Account Billing]
       security: [{cookieSession: []}]
-      description: Read the signed-in actor's own platform subscription account and personal-ledger capacity. API keys and Bearer session tokens are rejected. A workspace selector does not change billing ownership. Platform payments never create ledger expenses; ledgerUsage includes retained archived or removed records and uses the actor's personal effective plan.
+      description: Read the signed-in actor's own platform subscription account and personal-ledger capacity. API keys and Bearer session tokens are rejected. A workspace selector does not change billing ownership. Platform payments never create ledger expenses; ledgerUsage uses the actor's personal effective plan and current active expense count.
       responses:
         '200': {description: Private account billing and personal-ledger capacity, content: {application/json: {schema: {$ref: '#/components/schemas/BillingPage'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
@@ -156,6 +156,59 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/account/expense-retention:
+    get:
+      operationId: getAccountExpenseRetentionPreference
+      x-pullwise-scope: account:auth
+      security: [{cookieSession: []}]
+      tags: [Authentication]
+      description: |
+        Read the actual cookie account Owner's expense capacity policy for its
+        personal ledger. Ledger selectors cannot select another Owner's policy;
+        API keys, Bearer sessions and mixed credentials are rejected. Missing
+        legacy fields mean autoRemoveOldestExpense false and revision 1.
+        Malformed persisted preferences fail closed. Available on every plan.
+        This read never initializes state, removes expenses or changes usage.
+      responses:
+        '200': {description: Owner's stored expense capacity policy, content: {application/json: {schema: {$ref: '#/components/schemas/AccountExpenseRetentionPreference'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {description: RETENTION_PREFERENCE_UNAVAILABLE for malformed persisted preference state, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    patch:
+      operationId: updateAccountExpenseRetentionPreference
+      x-pullwise-scope: account:auth
+      security: [{cookieSession: []}]
+      tags: [Authentication]
+      parameters: [{$ref: '#/components/parameters/IfMatch'}, {$ref: '#/components/parameters/AuthOrigin'}]
+      description: |
+        Save the actual cookie account Owner's personal-ledger policy using a
+        trusted app Origin or Referer and its independent preference revision.
+        Changing the setting does not remove existing expenses, reset usage or
+        incur an extra charge. A matching revision and unchanged value returns
+        200 without a write. Every plan can change this policy.
+        When disabled, creating an expense at capacity returns RECORD_LIMIT.
+        When enabled and exactly at capacity, an otherwise authorized ordinary
+        or recurring expense creation atomically soft-removes one globally
+        oldest active expense and creates the new one. Ordering is occurredOn,
+        then createdAt, then id. The creation actor must currently be authorized
+        to delete that actual oldest target; restricted keys cannot skip it for
+        another target (RETENTION_TARGET_FORBIDDEN). Above capacity, creation
+        returns RETENTION_CLEANUP_REQUIRED until manual cleanup brings usage
+        within the limit. Historical audits, creation replays and occurrence
+        identities remain intact; replay never removes another expense.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [autoRemoveOldestExpense], properties: {autoRemoveOldestExpense: {type: boolean}}}
+      responses:
+        '200': {description: Confirmed policy; revision increments only on an actual change, content: {application/json: {schema: {$ref: '#/components/schemas/AccountExpenseRetentionPreference'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {description: PREFERENCE_REVISION_EXHAUSTED, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '422': {$ref: '#/components/responses/InvalidInput'}
+        '428': {description: Current preference If-Match is required, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '503': {description: RETENTION_PREFERENCE_UNAVAILABLE or SERVER_UNAVAILABLE; no automatic retry after an unknown write outcome, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /api/v1/account/jev:
     get:
       operationId: getAccountJevPreference
@@ -686,6 +739,14 @@ paths:
         returns assistance for manual completion. Provider failure or exhausted Jev
         budget does not block a write with an explicit category. Idempotent replay
         returns the stored result without another model call or budget reservation.
+        Capacity counts undeleted expenses in Shared pool and nonremoved
+        projects, including archived projects. If the Owner enabled automatic
+        removal, an at-capacity creation and deletion of the globally oldest
+        active expense share one transaction and one commercial write. The
+        actual oldest target must be writable under the caller's current grant;
+        otherwise RETENTION_TARGET_FORBIDDEN is returned without creating or
+        deleting anything. Above-capacity ledgers return RETENTION_CLEANUP_REQUIRED
+        and require manual cleanup. Invalid writes and replay never remove expenses.
       parameters: [{$ref: '#/components/parameters/IdempotencyKey'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ExpenseInput'}}}}
       responses:
@@ -816,6 +877,11 @@ paths:
         replays its original DTO; different input with that key conflicts.
         Creation keys remain scoped to the original creating user even if a
         later authorized edit or resume changes the saved execution actor.
+        Generated expenses follow the Owner's current automatic-removal policy.
+        At capacity they may atomically replace the globally oldest active
+        expense only when the saved actor and current original credential can
+        delete that target. Expired or revoked grants never remove expenses;
+        capacity or target denial blocks the pending period without generating it.
       parameters: [{$ref: '#/components/parameters/IdempotencyKey'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RecurringExpenseInput'}}}}
       responses:
@@ -1300,7 +1366,7 @@ components:
     LedgerUsage:
       type: object
       required: [workspaceId, projects, expenseRecords]
-      description: Read-only selected-ledger capacity. Counts include archived or removed projects and soft-deleted or generated expenses; deletion does not reclaim capacity. Current effective plan and operator configuration set the limits.
+      description: Read-only selected-ledger capacity. Project counts retain archived and removed projects. Expense counts include undeleted Shared pool expenses and undeleted expenses in nonremoved projects, including archived projects and recurring-generated expenses. Soft deletion and project removal release expense capacity while preserving financial audit and replay history. Current effective plan and operator configuration set the limits.
       properties:
         workspaceId: {type: string}
         projects: {$ref: '#/components/schemas/CapacityUsage'}
@@ -1312,6 +1378,13 @@ components:
         used: {type: integer, minimum: 0}
         limit: {type: integer, minimum: 1}
         remaining: {type: integer, minimum: 0, description: max(0; limit minus used)}
+    AccountExpenseRetentionPreference:
+      type: object
+      additionalProperties: false
+      required: [autoRemoveOldestExpense, revision]
+      properties:
+        autoRemoveOldestExpense: {type: boolean, default: false, description: Owner policy for at-capacity ordinary and recurring expense creation; changing it never immediately removes history}
+        revision: {type: integer, minimum: 1, maximum: 9007199254740991, description: Independent preference CAS revision; defaults to 1 for legacy accounts}
     AccountJevPreference:
       type: object
       additionalProperties: false
@@ -1332,7 +1405,7 @@ components:
           required: [projects, expenseRecords, writesPerMinute, writesPerMonth]
           properties:
             projects: {type: integer, minimum: 1}
-            expenseRecords: {type: integer, minimum: 1, description: Stored records including soft deletion}
+            expenseRecords: {type: integer, minimum: 1, description: Current undeleted expenses in Shared pool or nonremoved projects}
             writesPerMinute: {type: integer, minimum: 1, description: Fixed UTC minute bucket shared by the ledger owner's members and API keys}
             writesPerMonth: {type: integer, minimum: 1, description: UTC calendar month shared by the ledger owner's members and API keys}
         jev:

@@ -386,7 +386,12 @@ async def generate_occurrence(*, binding, maintenance_binding, gateway, row, now
         denied, evidence = await _validate_template(binding, gateway, user, authority["restrictions"], template)
         if denied:
             return await _maintenance(maintenance_binding, row, now=now, code=denied[1]["error"]["code"]), "blocked"
+        from .cloudflare_expense_retention import prepare_expense_retention
+        retirement = await prepare_expense_retention(binding, user, authority["restrictions"], now,
+            schedule_actor_id=row["id"] + ":" + row["actor_user_id"])
     except (PrincipalAuthError, GitHubFailure) as error:
+        return await _maintenance(maintenance_binding, row, now=now, code=error.code), "blocked"
+    except PlanLimitError as error:
         return await _maintenance(maintenance_binding, row, now=now, code=error.code), "blocked"
     stamp = _timestamp(now)
     record = {**template, "occurred_on": occurred.isoformat(), "id": "exp_" + uuid.uuid4().hex,
@@ -401,7 +406,8 @@ async def generate_occurrence(*, binding, maintenance_binding, gateway, row, now
     commands = [_schedule_guard(binding, row, authority, now), _category_guard(binding, row["owner_id"], template["category_id"])]
     if row["target_kind"] == "project":
         commands.append(_target_guard(binding, row["owner_id"], evidence))
-    commands.extend([binding.prepare("INSERT INTO expenses(" + ",".join(columns) + ") VALUES(" + ",".join("?" for _ in columns) + ")").bind(*(record[name] for name in columns)),
+    commands.extend([*retirement,
+        binding.prepare("INSERT INTO expenses(" + ",".join(columns) + ") VALUES(" + ",".join("?" for _ in columns) + ")").bind(*(record[name] for name in columns)),
         binding.prepare("""INSERT INTO expense_events(id,expense_id,owner_id,actor_kind,actor_id,
             action,before_json,after_json,created_at) VALUES(?,?,?,'schedule',?,'create',NULL,?,?)""").bind(
                 event_id, record["id"], row["owner_id"], row["id"] + ":" + row["actor_user_id"], _json(payload, 16384), stamp),

@@ -1,5 +1,52 @@
 # Current local acceptance
 
+## Optional oldest-expense replacement (2026-10-09)
+
+Owner account Settings offers two expense-capacity modes without overage billing.
+`autoRemoveOldestExpense` defaults to false on every plan. Cookie-only
+`GET/PATCH /api/v1/account/expense-retention` uses an independent revision and
+required `If-Match`; the personal account setting remains independent of selected
+workspace and governs its members, keys and recurring occurrences. Switching it
+alone removes nothing. At exactly full capacity, enabled creates atomically
+soft-remove one global oldest expense (`occurredOn`, `createdAt`, ID) and add the
+new expense. An unauthorized oldest target returns `RETENTION_TARGET_FORBIDDEN`
+without selecting a later permitted record. Already-over-limit ledgers return
+`RETENTION_CLEANUP_REQUIRED` and require manual cleanup, without bulk deletion.
+
+Expense capacity uses current undeleted shared/non-removed-project rows, including
+archived projects. Expense/project removal frees expense slots; project capacity
+stays cumulative. GET never repairs legacy counters; the next domain mutation
+reconciles active records in the same financial transaction. Replacement has
+zero net active growth and one commercial write. Current actor/key/member,
+Owner preference/plan, victim revision/ordinal, audit/activity, idempotency and
+occurrence fences cover the complete replacement. Failures and replays remove
+no extra records. Internal audit/replay identities and authorized 24-hour removal
+activity remain; ordinary expense reads, reports and CSV exclude removed records,
+with no restore action. Active capacity is not a physical storage ceiling.
+
+Python **3.10.12** passes the complete **2,069 tests in 44.17 seconds** and the
+focused **181 REST/SQLite checks**, including 23 ordinary cases and 22 independent
+authorization/concurrency cases. A finite fixture with 99,999 actual expenses
+accepts Max's 100,000th active slot and rejects another without removing history
+or blocking existing edits after downgrade. Source mirror/diff checks pass;
+no schema migration is needed. [Capacity evidence](plan-capacity-local-2026-10-09.json)
+includes active counting and the storage-sample limitations.
+
+[Native retention evidence](expense-retention-native-local-2026-10-09.json)
+passes its first fixed **39 local HTTP calls** through the frozen canonical
+Python Worker (including merged Jev), Native D1 and original-scope singleton
+SQLite journal. It verifies OFF/full denial, Owner preference isolation/CAS/Origin,
+active/archive/removed-project counting and legacy counter reconciliation, key
+target restrictions, exact replay, one oldest replacement and scheduled
+replacement without a second occurrence. Across **1,176 native statements** it
+measures **7,288 reads / 859 writes**, retaining **154,049 / 1,094** read/write
+reservations; separate read-only integrity probes use **5,332 reads**. Accounting
+matches raw native metadata and the journal remains healthy. Missing attempt
+metadata retains reservations. Runtime has stopped; no remote API/D1, real
+provider delivery, journal reset, schema change or retry was performed. This
+is finite local synthetic acceptance, not remote or large-capacity performance
+evidence; the older 48-call REST journey below remains a separate historical run.
+
 ## REST browser/key parity and plan capacity (2026-10-09)
 
 Cookie Web clients and external Bearer keys share the ledger REST implementation
@@ -14,17 +61,21 @@ that prevents user-record array bounds from inflating the read reservation.
 Default project/expense capacities are Free **3/100**, Pro **20/20,000**, Max
 **100/100,000**. Authenticated Billing reads report personal capacity; `/api/v1/me`
 reports selected-ledger capacity. Public catalog requests never disclose usage.
-Reads do not initialize counters; retained history still consumes capacity.
+Reads do not initialize counters. Retained projects, including archived and
+removed projects, still consume project capacity. Under the subsequent
+expense-retention update, expense capacity counts only undeleted shared-pool
+expenses and undeleted expenses in nonremoved projects, including archived
+projects. Expense removal or project removal frees expense slots while internal
+financial history remains retained.
 [Local capacity evidence](plan-capacity-local-2026-10-09.json) and the
 [price model](plan-capacity-price-model-2026-10-09.json) explain storage and the
 remaining product-wide COUNT/read-growth costs without claiming a production bill.
 
-The merged code preserves main's personal Jev preferences. The complete Python
-3.10.12 run passes **2,022 tests** with one newly merged OpenAPI formatting failure;
-after quoting its descriptions, all **five contract checks pass**. A further
-**96 contract/Jev integration checks pass**. S01, shell syntax, source mirrors and
-preview dry-run packaging pass. OpenAPI describes **42 paths / 57 operations**,
-including account bootstrap, key lifecycle, Billing and cookie-only Jev settings.
+The merged code preserves main's personal Jev preferences. The final Python
+3.10.12 run passes **2,069 tests**, including all OpenAPI, Jev and retention
+integration checks. OpenAPI describes **43 paths / 59 operations**, including
+account bootstrap, key lifecycle, Billing and cookie-only Jev/expense-retention
+settings. Source mirrors match the frozen canonical modules.
 
 [Native local evidence](rest-parity-native-local-2026-10-09.json) records the
 pre-Jev-merge canonical Worker, Native D1 and original singleton SQLite journal.

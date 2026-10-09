@@ -130,3 +130,28 @@ def test_billing_reads_describe_actual_account_catalog_and_cookie_only_personali
     assert CONTRACT["paths"]["/billing/plan"]["get"]["security"] == []
     assert "ledgerUsage" in SCHEMAS["BillingPage"]["required"]
     assert not {"account", "ledgerUsage"}.intersection(SCHEMAS["BillingCatalog"]["required"])
+
+
+def test_owner_retention_policy_is_cookie_only_and_uses_its_independent_revision():
+    from pullwise_server.cloudflare_expense_retention import expense_retention_preference
+
+    path = CONTRACT["paths"]["/api/v1/account/expense-retention"]
+    for method, operation_id in (("get", "getAccountExpenseRetentionPreference"),
+                                 ("patch", "updateAccountExpenseRetentionPreference")):
+        operation = path[method]
+        assert operation["operationId"] == operation_id
+        assert operation["security"] == [{"cookieSession": []}]
+        assert operation["x-pullwise-scope"] == "account:auth"
+        assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+            "$ref": "#/components/schemas/AccountExpenseRetentionPreference"}
+    assert {"$ref": "#/components/parameters/IfMatch"} in path["patch"]["parameters"]
+    body = path["patch"]["requestBody"]["content"]["application/json"]["schema"]
+    assert body == {"type": "object", "additionalProperties": False,
+        "required": ["autoRemoveOldestExpense"], "properties": {"autoRemoveOldestExpense": {"type": "boolean"}}}
+    payload = expense_retention_preference({})
+    schema = SCHEMAS["AccountExpenseRetentionPreference"]
+    assert set(schema["required"]) == set(schema["properties"]) == set(payload)
+    assert schema["properties"]["autoRemoveOldestExpense"]["default"] is payload["autoRemoveOldestExpense"] is False
+    assert schema["properties"]["revision"]["maximum"] == 9007199254740991
+    assert "soft-deleted" not in SCHEMAS["LedgerUsage"]["description"]
+    assert "getAccountJevPreference" == CONTRACT["paths"]["/api/v1/account/jev"]["get"]["operationId"]

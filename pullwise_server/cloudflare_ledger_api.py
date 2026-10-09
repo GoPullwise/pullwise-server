@@ -166,6 +166,10 @@ async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path
         from .cloudflare_jev_preferences import handle_jev_preference
         return await handle_jev_preference(binding=binding, method=method,
             headers=headers, body=body, now=now)
+    if path == "/api/v1/account/expense-retention":
+        from .cloudflare_expense_retention import handle_expense_retention_preference
+        return await handle_expense_retention_preference(binding=binding, method=method,
+            headers=headers, body=body, now=now)
     if path in {"/api/v1/workspaces", "/api/v1/workspace-invitation-requests"} or path.startswith(("/api/v1/workspaces/", "/api/v1/workspace-invitations/")):
         from .cloudflare_workspaces import handle_workspace_request
         return await handle_workspace_request(binding=binding, gateway=gateway,

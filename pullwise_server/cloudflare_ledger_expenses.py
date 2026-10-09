@@ -335,6 +335,11 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
         payload = _dto(record)
         if assistance is not None:
             payload["assistance"] = assistance
+        from .cloudflare_expense_retention import prepare_expense_retention
+        try:
+            retirement = await prepare_expense_retention(binding, user, restrictions, now, proof=proof)
+        except PlanLimitError as error:
+            return error.response()
         activity = await activity_commands(binding, user, "expense", expense_id, "create", None,
             payload, now, proof=proof, operation_id=event_id)
         values = [record[name] for name in ("id", "owner_id", "target_kind", "project_id", "category_id",
@@ -348,6 +353,7 @@ async def _write(binding, gateway, method, item_id, headers, data, now, suggesti
               ?='shared' OR EXISTS(SELECT 1 FROM ledger_projects WHERE owner_id=? AND id=?
                 AND status='active' AND deleted_at IS NULL) THEN 1 ELSE 0 END)""").bind(
                 data["target_kind"], user["id"], data["project_id"])),
+            *retirement,
             binding.prepare("""INSERT INTO expenses(id,owner_id,target_kind,project_id,category_id,
               occurred_on,amount_minor,currency,purpose,note,quantity_decimal,unit,revision,
               created_at,updated_at,deleted_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""").bind(*values),

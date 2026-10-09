@@ -23,19 +23,30 @@ class PlanLimitError(Exception):
         return self.status, {"error": {"code": self.code}}
 
 
+ACTIVE_EXPENSE_SQL = """expenses.deleted_at IS NULL AND (expenses.target_kind='shared'
+    OR EXISTS(SELECT 1 FROM ledger_projects active_project
+        WHERE active_project.owner_id=expenses.owner_id AND active_project.id=expenses.project_id
+            AND active_project.deleted_at IS NULL))"""
+
+
+def active_expense_count_statement(binding, owner_id):
+    return binding.prepare("SELECT COUNT(*) AS records FROM expenses WHERE owner_id=? AND " +
+        ACTIVE_EXPENSE_SQL).bind(owner_id)
+
+
 def capacity_usage_statement(binding, owner_id):
-    """Reuse committed cumulative capacity; reads never initialize its counter.
+    """Projects retain cumulative capacity; expenses count current visible rows.
 
     Before the first metered mutation, the bounded owner-indexed fallback has
     exactly the same stored-row semantics as the quota initialization itself.
-    Archived/removed projects and soft-deleted expenses retain their slots.
+    Reads never rewrite legacy cumulative expense counters. The next ordinary
+    mutation refreshes that counter from the same active predicate atomically.
     """
     return binding.prepare("""SELECT
         COALESCE((SELECT projects FROM ledger_plan_usage WHERE owner_id=?),
             (SELECT COUNT(*) FROM ledger_projects WHERE owner_id=?)) AS projects,
-        COALESCE((SELECT records FROM ledger_plan_usage WHERE owner_id=?),
-            (SELECT COUNT(*) FROM expenses WHERE owner_id=?)) AS records""").bind(
-                owner_id, owner_id, owner_id, owner_id)
+        (SELECT COUNT(*) FROM expenses WHERE owner_id=? AND """ + ACTIVE_EXPENSE_SQL + ") AS records").bind(
+                owner_id, owner_id, owner_id)
 
 
 def capacity_usage_payload(user, rows, *, now, policy=None):
@@ -86,13 +97,12 @@ _USAGE_SQL = """INSERT INTO ledger_plan_usage(owner_id,projects,records,month,wr
     project_delta,record_delta,jev_delta,previous_month,previous_minute)
     VALUES(?,
       CASE WHEN EXISTS(SELECT 1 FROM ledger_plan_usage WHERE owner_id=?) THEN 0
-        ELSE (SELECT COUNT(*) FROM ledger_projects WHERE owner_id=?) END + ?,
-      CASE WHEN EXISTS(SELECT 1 FROM ledger_plan_usage WHERE owner_id=?) THEN 0
-        ELSE (SELECT COUNT(*) FROM expenses WHERE owner_id=?) END + ?,
+        ELSE (SELECT COUNT(*) FROM ledger_projects WHERE owner_id=?) END,
+      (SELECT COUNT(*) FROM expenses WHERE owner_id=? AND """ + ACTIVE_EXPENSE_SQL + """),
       ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(owner_id) DO UPDATE SET
       projects=ledger_plan_usage.projects+excluded.project_delta,
-      records=ledger_plan_usage.records+excluded.record_delta,
+      records=excluded.records,
       writes=CASE WHEN ledger_plan_usage.month=excluded.month
         THEN ledger_plan_usage.writes+excluded.writes ELSE excluded.writes END,
       minute_writes=CASE WHEN ledger_plan_usage.minute=excluded.minute
@@ -168,8 +178,12 @@ class PlanLimitedD1:
         limits = self.plan_policy[plan]
         project_delta = sum(table == "ledger_projects" and item.sql.lstrip().upper().startswith("INSERT")
                             for item, table in mutations)
-        record_delta = sum(table == "expenses" and item.sql.lstrip().upper().startswith("INSERT")
-                           for item, table in mutations)
+        record_insertions = sum(table == "expenses" and item.sql.lstrip().upper().startswith("INSERT")
+                                for item, table in mutations)
+        record_removals = sum(table == "expenses" and re.match(
+            r"^\s*UPDATE\s+expenses\s+SET\s+deleted_at\s*=\s*\?", item.sql, re.I) is not None
+            for item, table in mutations)
+        record_delta = record_insertions - record_removals
         jev_delta = JEV_RESERVATION_MICROUSD if any(table == "expense_suggestion_budget" for _, table in mutations) else 0
         write_delta = int(any(table not in {"expense_suggestion_budget", "expense_suggestion_events"}
                               for _, table in mutations))
@@ -182,16 +196,15 @@ class PlanLimitedD1:
         if usage and (period < usage["month"] or minute < usage["minute"]):
             raise PlanLimitError(409, "QUOTA_WINDOW_CHANGED")
         if usage:
-            projects, records = usage["projects"], usage["records"]
-        elif project_delta or record_delta:
+            projects = usage["projects"]
+        elif project_delta:
             # Accounts created before the usage table retain their capacity
             # history, including archived projects and removed expenses.
-            counts = await self.binding.prepare("""SELECT
-                (SELECT COUNT(*) FROM ledger_projects WHERE owner_id=?) AS projects,
-                (SELECT COUNT(*) FROM expenses WHERE owner_id=?) AS records""").bind(owner, owner).first()
-            projects, records = counts["projects"], counts["records"]
+            counts = await self.binding.prepare("SELECT COUNT(*) AS projects FROM ledger_projects WHERE owner_id=?").bind(owner).first()
+            projects = counts["projects"]
         else:
-            projects = records = 0
+            projects = 0
+        records = (await active_expense_count_statement(self.binding, owner).first())["records"]
         month_writes = usage["writes"] if usage and usage["month"] == period else 0
         minute_writes = usage["minute_writes"] if usage and usage["minute"] == minute else 0
         # Expected business denials must not dispatch a failing native batch:
@@ -199,7 +212,7 @@ class PlanLimitedD1:
         # The original UPSERT remains the authority for concurrent requests.
         if project_delta and projects + project_delta > limits["projects"]:
             raise PlanLimitError(403, "PROJECT_LIMIT")
-        if record_delta and records + record_delta > limits["records"]:
+        if record_insertions and records + record_delta > limits["records"]:
             raise PlanLimitError(403, "RECORD_LIMIT")
         if write_delta and minute_writes + write_delta > limits["writesPerMinute"]:
             raise PlanLimitError(429, "WRITE_RATE_LIMIT")
@@ -213,16 +226,19 @@ class PlanLimitedD1:
                 # Deterministic optional exhaustion must not dispatch a failing
                 # D1 batch. The atomic UPSERT still fences concurrent admission.
                 raise PlanLimitError(429, "JEV_BUDGET_LIMIT")
-        counter = self.binding.prepare(_USAGE_SQL).bind(owner, owner, owner, project_delta,
-            owner, owner, record_delta, period, write_delta, minute, write_delta, jev_delta,
+        counter = self.binding.prepare(_USAGE_SQL).bind(owner, owner, owner, owner,
+            period, write_delta, minute, write_delta, jev_delta,
             limits["projects"], limits["records"],
             limits["writesPerMinute"] if write_delta else max(limits["writesPerMinute"], minute_writes),
             limits["writesPerMonth"] if write_delta else max(limits["writesPerMonth"], month_writes),
-            usd_micros(limits["jevMonthlyBudgetUsd"]), project_delta, record_delta, jev_delta, period, minute)
+            usd_micros(limits["jevMonthlyBudgetUsd"]), project_delta, record_insertions, jev_delta, period, minute)
         try:
             # Keep original result indexes; domain callers rely on batch offsets.
-            result = await self.binding.batch([raw[0], counter, *raw[1:]])
-            return [result[0], *result[2:]]
+            # Recount after all domain mutations in the same transaction.
+            # A later quota failure still rolls back every original guard and
+            # mutation. Appending never interrupts an adjacent changes() CAS.
+            result = await self.binding.batch([*raw, counter])
+            return result[:-1]
         except Exception as error:
             for constraint, (status, code) in _ERRORS.items():
                 if constraint in str(error):

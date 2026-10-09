@@ -85,7 +85,7 @@ def reserve_existing(preview, reserved, *, month=None):
     owner, limits = "usr_github_77", preview.policy["max"]
     month = month or datetime.fromtimestamp(preview.now, timezone.utc).strftime("%Y-%m")
     with preview.fixture.store.connect() as database:
-        database.execute(_USAGE_SQL, (owner, owner, owner, 0, owner, owner, 0,
+        database.execute(_USAGE_SQL, (owner, owner, owner, owner,
             month, 0, preview.now // 60, 0, reserved, limits["projects"], limits["records"],
             limits["writesPerMinute"], limits["writesPerMonth"], 5_000_000,
             0, 0, reserved, month, preview.now // 60))

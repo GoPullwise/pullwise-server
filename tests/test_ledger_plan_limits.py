@@ -83,9 +83,15 @@ def test_max_capacity_accepts_final_project_and_record_and_downgrade_keeps_histo
     write(limited, frozen, fixture, 1)
     with fixture.store._immediate() as db:
         db.execute("INSERT INTO expense_categories VALUES('category','owner','Hosting',NULL,NULL,1,'created','updated')")
-        # The committed cumulative counters are quota authority. Synthetic
-        # boundary values avoid seeding 100,000 financial rows for this test.
+        # Project capacity is cumulative; expense capacity follows active rows,
+        # so a legacy cumulative record counter cannot stand in for them.
         db.execute("UPDATE ledger_plan_usage SET projects=99,records=99999 WHERE owner_id='owner'")
+        db.execute("""WITH RECURSIVE numbers(n) AS (
+            SELECT 1 UNION ALL SELECT n+1 FROM numbers WHERE n<99999)
+            INSERT INTO expenses(id,owner_id,target_kind,category_id,occurred_on,
+                amount_minor,currency,purpose,created_at,updated_at)
+            SELECT 'seed_' || n,'owner','shared','category','2026-09-28',1,
+                'USD','boundary','local','local' FROM numbers""")
     write(limited, frozen, fixture, 2)
     calls = raw.batch_count
     with pytest.raises(PlanLimitError, match="PROJECT_LIMIT"):
@@ -103,7 +109,7 @@ def test_max_capacity_accepts_final_project_and_record_and_downgrade_keeps_histo
     with fixture.store._immediate() as db:
         assert db.execute("SELECT projects,records FROM ledger_plan_usage").fetchone()[:] == (100, 100000)
         assert db.execute("SELECT COUNT(*) FROM ledger_projects").fetchone()[0] == 2
-        assert db.execute("SELECT COUNT(*) FROM expenses").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM expenses").fetchone()[0] == 100000
         assert db.execute("SELECT description FROM ledger_projects WHERE id='p1'").fetchone()[0] == "6"
 
 
@@ -290,7 +296,7 @@ def test_failed_business_batch_does_not_refund_an_admitted_jev_attempt(setup, pl
         assert db.execute("SELECT COUNT(*) FROM d1_command_guard").fetchone()[0] == 0
 
 
-def test_deleted_records_count_and_failed_audit_rolls_back_quota(setup):
+def test_deleted_records_free_capacity_and_failed_audit_rolls_back_quota(setup):
     fixture, frozen = setup
     with fixture.store._immediate() as db:
         db.execute("INSERT INTO expense_categories(id,owner_id,name,created_at,updated_at) VALUES('category','owner','c','local','local')")
@@ -300,16 +306,17 @@ def test_deleted_records_count_and_failed_audit_rolls_back_quota(setup):
     write(limited, frozen, fixture, 1, kind="record")
     with fixture.store._immediate() as db:
         db.execute("UPDATE expenses SET deleted_at='local' WHERE id='e1'")
+    write(limited, frozen, fixture, 2, kind="record")
     with pytest.raises(PlanLimitError, match="RECORD_LIMIT"):
-        write(limited, frozen, fixture, 2, kind="record")
+        write(limited, frozen, fixture, 3, kind="record")
     with fixture.store.connect() as db:
-        assert db.execute("SELECT records,writes FROM ledger_plan_usage").fetchone()[:] == (1, 1)
+        assert db.execute("SELECT records,writes FROM ledger_plan_usage").fetchone()[:] == (1, 2)
 
     # Failed credential proof must roll back the quota and the mutation.
     with pytest.raises(Exception):
-        write(limited, frozen.replace('"owner"', '"intruder"'), fixture, 3)
+        write(limited, frozen.replace('"owner"', '"intruder"'), fixture, 4)
     with fixture.store.connect() as db:
-        assert db.execute("SELECT projects,records,writes FROM ledger_plan_usage").fetchone()[:] == (0, 1, 1)
+        assert db.execute("SELECT projects,records,writes FROM ledger_plan_usage").fetchone()[:] == (0, 1, 2)
 
 
 def test_paid_snapshot_cannot_authorize_a_different_user_record(setup):
@@ -362,7 +369,7 @@ def test_http_quota_errors_and_idempotent_replays_preserve_account_usage(setup):
     assert call("DELETE", "/api/v1/expenses/"+record["id"], **{"If-Match": '"1"'})[0] == 204
     assert call("DELETE", "/api/v1/expenses/"+record["id"], **{"If-Match": '"1"'})[0] == 204
     with fixture.store.connect() as db:
-        assert tuple(db.execute("SELECT records,writes FROM ledger_plan_usage").fetchone()) == (1, 3)
+        assert tuple(db.execute("SELECT records,writes FROM ledger_plan_usage").fetchone()) == (0, 3)
 
 
 def test_key_revocation_is_not_blocked_by_an_exhausted_write_allowance(setup):

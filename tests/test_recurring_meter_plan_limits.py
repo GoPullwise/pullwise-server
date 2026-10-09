@@ -96,6 +96,9 @@ def test_generated_record_capacity_denial_commits_no_partial_occurrence(recurrin
     create_rule(limited, frozen)
     with fixture.store.connect() as db:
         db.execute("UPDATE ledger_plan_usage SET records=1 WHERE owner_id='owner'")
+        db.execute("""INSERT INTO expenses(id,owner_id,target_kind,category_id,occurred_on,
+            amount_minor,currency,purpose,created_at,updated_at) VALUES(
+            'existing','owner','shared','category','2026-10-01',1,'USD','Existing','local','local')""")
     with pytest.raises(PlanLimitError, match="RECORD_LIMIT"):
         asyncio.run(limited.batch([fence(limited, frozen),
             limited.prepare("""INSERT INTO expenses(id,owner_id,target_kind,category_id,occurred_on,
@@ -105,7 +108,7 @@ def test_generated_record_capacity_denial_commits_no_partial_occurrence(recurrin
                             "'2026-10-08','expense',1,'local')"),
             limited.prepare("DELETE FROM d1_command_guard")]))
     with fixture.store.connect() as db:
-        assert db.execute("SELECT COUNT(*) FROM expenses").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM expenses").fetchone()[0] == 1
         assert db.execute("SELECT COUNT(*) FROM expense_recurring_occurrences").fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM d1_command_guard").fetchone()[0] == 0
     assert usage(fixture) == (0, 1, 1)

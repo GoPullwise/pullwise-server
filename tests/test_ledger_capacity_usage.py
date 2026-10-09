@@ -43,14 +43,14 @@ COOKIE = {"Cookie": "pw_session=session-local"}
 
 
 @pytest.mark.parametrize("reader", [read_billing, read_public_plan, read_ledger_me])
-def test_capacity_read_counts_all_retained_rows_without_initializing_usage(capacity, reader):
+def test_capacity_read_counts_active_expenses_without_initializing_usage(capacity, reader):
     fixture, _ = capacity
     binding = D1ShapedSQLite(fixture.store)
     status, payload = asyncio.run(reader(binding=binding, headers=COOKIE, now=fixture.now))
     assert status == 200
     assert payload["ledgerUsage"] == {"workspaceId": "owner",
         "projects": {"used": 3, "limit": 20, "remaining": 17},
-        "expenseRecords": {"used": 3, "limit": 20000, "remaining": 19997}}
+        "expenseRecords": {"used": 2, "limit": 20000, "remaining": 19998}}
     assert binding.batch_count == 1
     with closing(fixture.store.connect()) as db:
         assert db.execute("SELECT COUNT(*) FROM ledger_plan_usage").fetchone()[0] == 0
@@ -68,7 +68,7 @@ def test_me_bearer_capacity_is_same_owner_projection_and_scope_guard(capacity):
 
 
 @pytest.mark.parametrize("reader", [read_billing, read_public_plan, read_ledger_me])
-def test_capacity_uses_committed_counters_and_configured_limits_without_reset(capacity, reader):
+def test_capacity_ignores_legacy_record_counter_and_keeps_configured_limits(capacity, reader):
     fixture, frozen = capacity
     policy = default_policy()
     policy["pro"].update(projects=40, records=80)
@@ -80,7 +80,7 @@ def test_capacity_uses_committed_counters_and_configured_limits_without_reset(ca
     assert status == 200
     assert payload["ledgerUsage"] == {"workspaceId": "owner",
         "projects": {"used": 30, "limit": 40, "remaining": 10},
-        "expenseRecords": {"used": 90, "limit": 80, "remaining": 0}}
+        "expenseRecords": {"used": 2, "limit": 80, "remaining": 78}}
     with closing(fixture.store.connect()) as db:
         assert tuple(db.execute("SELECT projects,records FROM ledger_plan_usage").fetchone()) == (30, 90)
 
@@ -102,7 +102,7 @@ def test_personal_billing_stays_personal_while_me_uses_selected_workspace(capaci
     assert personal["ledgerUsage"]["expenseRecords"] == {"used": 0, "limit": 100, "remaining": 100}
     status, selected = asyncio.run(read_ledger_me(binding=binding, headers=headers, now=fixture.now))
     assert status == 200 and selected["ledgerUsage"]["workspaceId"] == "owner"
-    assert selected["ledgerUsage"]["expenseRecords"] == {"used": 3, "limit": 20000, "remaining": 19997}
+    assert selected["ledgerUsage"]["expenseRecords"] == {"used": 2, "limit": 20000, "remaining": 19998}
 
 
 @pytest.mark.parametrize("reader", [read_billing, read_public_plan, read_ledger_me])
@@ -137,4 +137,4 @@ def test_expired_paid_plan_reports_free_limits_without_truncating_existing_capac
         headers=COOKIE, now=fixture.now))
     assert status == 200
     assert payload["ledgerUsage"]["projects"] == {"used": 3, "limit": 3, "remaining": 0}
-    assert payload["ledgerUsage"]["expenseRecords"] == {"used": 3, "limit": 100, "remaining": 97}
+    assert payload["ledgerUsage"]["expenseRecords"] == {"used": 2, "limit": 100, "remaining": 98}

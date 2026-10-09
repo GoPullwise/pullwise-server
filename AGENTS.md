@@ -1,5 +1,28 @@
 # Pullwise Server
 
+## Optional oldest-expense replacement (2026-10-09)
+
+The user's latest requirement is two capacity modes without overage fees.
+Personal Owner Settings has autoRemoveOldestExpense, default false on all plans,
+with a cookie-only independent revision/CAS endpoint. The setting belongs to the
+actual account, independent of workspace selection, and governs its members,
+API keys and recurring occurrences. Switching it must not retire data itself.
+At exactly full capacity, enabled creates atomically remove one oldest visible
+expense (occurredOn, createdAt, ID) and insert the new record. Disabled full
+creates are denied; already-over-limit ledgers require manual cleanup before
+replacement. The actual oldest target must be permitted to the current actor/key;
+never silently select a later permitted record. Failed creates, model fallback,
+stale credentials/preferences and idempotent/occurrence replays do not retire data.
+
+Expense capacity is current undeleted shared and non-removed-project expenses,
+including archived projects. Manual removal and project removal free expense
+slots. Reconcile old cumulative usage in the original mutation transaction from
+the same active predicate; GET never initializes or repairs counters. Project
+capacity remains cumulative. Preserve original audits, replay and occurrence
+identities, authorized 24-hour activity, financial/owner/membership/key fences,
+commercial write budgets and native/global accounting. Active capacity is not a
+physical storage ceiling. This supersedes earlier retained expense-slot guidance.
+
 ## REST API and browser parity (2026-10-09)
 
 The user requires the Web ledger to use the REST API and external Bearer API

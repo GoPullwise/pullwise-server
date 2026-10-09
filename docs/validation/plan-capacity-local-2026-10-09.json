@@ -10,7 +10,18 @@
   "capacitySemantics": {
     "ownerScoped": true,
     "includesArchivedAndRemovedProjects": true,
-    "includesSoftDeletedAndSharedExpenses": true,
+    "includesSoftDeletedExpenses": false,
+    "includesSharedExpenses": true,
+    "includesArchivedProjectExpenses": true,
+    "includesRemovedProjectExpenses": false,
+    "manualExpenseAndProjectRemovalFreeExpenseSlots": true,
+    "activeCapacityIsPhysicalStorageCeiling": false,
+    "retentionPreference": {"default": false, "allPlans": true, "personalAccount": true,
+      "getPatchRoute": "/api/v1/account/expense-retention", "cookieOnly": true,
+      "fullEnabled": "Atomically soft-remove one global oldest by occurredOn,createdAt,id and insert one new expense",
+      "aboveLimitEnabled": "RETENTION_CLEANUP_REQUIRED; manual cleanup, no bulk deletion",
+      "unauthorizedOldest": "RETENTION_TARGET_FORBIDDEN; never pick a later permitted expense",
+      "replacementCommercialWrites": 1, "replacementNetActiveGrowth": 0, "overageCharges": false},
     "readsNeverInitializeUsage": true,
     "aboveLimitHistoryIsRetained": true,
     "lowerLimitsBlockNewCapacityButPreserveExistingEdits": true,
@@ -18,7 +29,7 @@
     "getProjection": "ledgerUsage: workspaceId, projects/expenseRecords {used, limit, remaining}; remaining is max(0, limit-used)",
     "getScope": "Billing uses personal owner; /api/v1/me uses selected workspace owner",
     "getAuthorization": "Capacity is read in the same credential/owner/membership snapshot batch. Public pricing and revoked authentication do not disclose personal usage.",
-    "getCounterSource": "Exact ledger_plan_usage row; before its first mutation initialization, owner-indexed stored-row COUNT fallback with no GET writes"
+    "getCounterSource": "Cumulative project usage row, owner-indexed COUNT fallback before initialization; expense records always exact active COUNT. GET never writes. Normal mutations atomically reconcile legacy cumulative expense counters using post-mutation active state."
   },
   "storageProbe": {
     "method": "100 ordinary Shared pool creates per case, 200 total, current migrations, real handle_ledger_request and PlanLimitedD1, explicit category, Pro policy, disabled Jev. Compare SQLite dbstat allocated pages and payload for expense tables and all their indexes before and after. Close all connections.",
@@ -65,7 +76,8 @@
       "Exclude subsequent edit/delete immutable audits, recurring rules/occurrences, account baseline, DO journal, Cloudflare infrastructure overhead, backups and WAL.",
       "Activity is retired after 24 hours; its measured peak must not be multiplied by all permanent historical records.",
       "Actual field lengths, UUID insertion fragmentation and 4096-byte page quantization change results.",
-      "Probe used existing Pro write allowances; the provisional Max capacity at sampling does not affect the 100-row storage cases. Final default Max is 100000."
+      "Probe used existing Pro write allowances; the provisional Max capacity at sampling does not affect the 100-row storage cases. Final default Max is 100000.",
+      "Storage probe preceded optional oldest replacement. Active-slot limits do not bound physical storage: removed financial rows/replays and every edit/removal audit remain retained. Replacement adds a removal audit and activity, which are not included in the ordinary-create sample."
     ]
   },
   "ordinaryCreateSql": {
@@ -92,7 +104,7 @@
       "pro20000": 200010000,
       "max100000": 5000050000
     },
-    "caveat": "Immutable audit and replay tables grow alongside expenses. Other owners' data also participates. These traversal estimates and reservation upper bounds are not native D1 rows_read measurements. Capacity storage cost alone does not establish request cost or latency."
+    "caveat": "Immutable audit and replay tables grow alongside expenses. Other owners' data also participates. These traversal estimates and reservation upper bounds are not native D1 rows_read measurements. Capacity storage cost alone does not establish request cost or latency. Active quota now adds owner-indexed COUNT reads for creates/transactions and capacity GET, scanning retained rows including tombstones; these additional scans are not included in the earlier first-fill refresh estimates."
   },
   "runtimeBounds": {
     "httpJsonIngressBytes": 8192,
@@ -108,7 +120,16 @@
       "command": "python -m pytest tests/test_ledger_plan_limits.py tests/test_ledger_capacity_usage.py tests/test_cloudflare_billing_read.py tests/test_creem_catalog_projection.py tests/test_jev_plan_entitlements.py -q",
       "passed": 73
     },
-    "maxBoundaryMethod": "Synthetic committed quota counters at projects=99 and records=99999; real guarded PlanLimitedD1 mutations accept the final slot, reject above-limit creation before native dispatch, and retain records and existing edits after downgrade.",
+    "retentionFocusedTests": {
+      "python": "3.10.12",
+      "command": "python -m pytest tests/test_expense_retention.py tests/test_expense_retention_adversarial.py tests/test_ledger_plan_limits.py tests/test_ledger_capacity_usage.py tests/test_ledger_recurring.py tests/test_jev_preview_admission.py tests/test_recurring_meter_plan_limits.py tests/test_openapi_integration_contract.py -q",
+      "passed": 181,
+      "scope": "Real local REST and SQLite transactions: all-plan cookie-only preference CAS, successful global-oldest replacement/ties, one commercial write, manual/project removal active accounting, legacy counter read/mutation reconciliation, recurring deletion replay, current authorization/ordinal races and atomic quota failure rollback"
+    },
+    "retentionFullSuite": {"python": "3.10.12", "command": "python -m pytest",
+      "passed": 2069, "wallTimeSeconds": 44.17},
+    "retentionNativeEvidence": "expense-retention-native-local-2026-10-09.json",
+    "maxBoundaryMethod": "Synthetic cumulative project counter=99 plus 99999 physical shared expenses seeded by one finite local recursive CTE; real guarded PlanLimitedD1 mutations accept project100/expense100000, reject above-limit creates before native dispatch, and retain history and existing edits after downgrade. Active expense quota ignores legacy cumulative counters.",
     "nativeLargeCapacityBenchmark": false,
     "schemaMigrationNeeded": false
   }
