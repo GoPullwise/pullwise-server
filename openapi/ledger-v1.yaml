@@ -586,6 +586,48 @@ paths:
         '204': {description: Removed or already removed within the same authorized ledger}
         '404': {$ref: '#/components/responses/NotFound'}
         '412': {$ref: '#/components/responses/PreconditionFailed'}
+  /api/v1/expenses/{id}/review:
+    parameters: [{$ref: '#/components/parameters/Id'}]
+    post:
+      operationId: reviewExpense
+      x-pullwise-scope: expenses:write
+      description: >-
+        Explicit advisory review of one current saved expense, bound to If-Match.
+        The request is an empty object; clients cannot replace saved purpose,
+        note, money, category or target. Requires the ledger Owner's current Pro
+        or Max plan and the actual actor's expense-write and target authority.
+        Jev selects and scores existing category/scope choices; it does not
+        generate explanations or reports. Only this saved record's purpose and
+        note and current active category names enter the model. Categories and
+        target kinds are advice only; no expense, financial audit, recent activity,
+        revision, record count or commercial write allowance is changed.
+        Model attempts share the existing 20 per UTC day and Pro USD 3 / Max USD 5
+        per UTC month reservation; admitted failures remain charged. With no active
+        categories the model can still check target kind. Disabled, failed or invalid
+        model context returns partial checks while the local duplicate rule remains
+        available. That bounded rule checks at most 30 other current records on the
+        same authorized target, with equal currency and amount, within seven dates,
+        and a case-insensitive matching purpose. It does not prove ledger-wide
+        uniqueness. Duplicate output contains only ID and revision, including for
+        write-only keys. Saved source, permissions, category and duplicate candidate
+        are freshly rechecked and atomically fenced before results are published;
+        a source changed during review returns 412. There is no automatic apply,
+        target move, money update, retry, batch endpoint or idempotent model replay.
+      parameters: [{$ref: '#/components/parameters/IfMatch'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, maxProperties: 0, additionalProperties: false}
+      responses:
+        '200': {description: Structured dimension checks for the unchanged saved revision, content: {application/json: {schema: {$ref: '#/components/schemas/ExpenseReview'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {description: JEV_PLAN_REQUIRED for a noncurrent paid Owner plan, or current actor/scope/target authority forbidden}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '412': {$ref: '#/components/responses/PreconditionFailed'}
+        '422': {$ref: '#/components/responses/InvalidInput'}
+        '428': {description: If-Match is required before model admission}
+        '429': {description: SUGGESTION_LIMIT at the existing daily attempt limit or JEV_BUDGET_LIMIT at the shared monthly reservation limit}
   /api/v1/expense-recurring-rules:
     get:
       operationId: listRecurringExpenseRules
@@ -1178,6 +1220,59 @@ components:
     ExpensePatchInput:
       allOf:
         - {$ref: '#/components/schemas/ExpenseInput'}
+    ExpenseReview:
+      type: object
+      additionalProperties: false
+      required: [expenseId, revision, questionVersion, modelVersion, checks]
+      properties:
+        expenseId: {type: string}
+        revision: {type: integer, minimum: 1, maximum: 9007199254740991}
+        questionVersion: {type: string, const: ledger-suggest-v2}
+        modelVersion: {type: [string, 'null']}
+        suggestionId: {type: string, description: Existing suggestion event when a model attempt was admitted; no saved-expense mutation}
+        checks:
+          type: object
+          additionalProperties: false
+          required: [category, target, duplicate]
+          properties:
+            category:
+              type: object
+              additionalProperties: false
+              required: [status, current]
+              properties:
+                status: {type: string, enum: [checked, issue, uncertain, unavailable]}
+                current: {type: string, description: Saved category ID, including historical archived categories}
+                suggested: {type: string, description: Confident currently active category; never automatically assigned}
+                confidence: {type: number, minimum: 0, maximum: 1, description: Validated choice confidence; uncertainty never establishes correctness}
+                reason: {type: string, enum: [disabled, provider_unavailable, invalid_context, no_categories]}
+            target:
+              type: object
+              additionalProperties: false
+              required: [status, current]
+              properties:
+                status: {type: string, enum: [checked, issue, uncertain, unavailable]}
+                current: {$ref: '#/components/schemas/Target'}
+                suggested:
+                  type: object
+                  additionalProperties: false
+                  required: [kind]
+                  properties:
+                    kind: {type: string, enum: [project, shared], description: Scope-kind advice only; no destination project or automatic move}
+                confidence: {type: number, minimum: 0, maximum: 1}
+                reason: {type: string, enum: [disabled, provider_unavailable, invalid_context]}
+            duplicate:
+              type: object
+              additionalProperties: false
+              required: [status]
+              properties:
+                status: {type: string, enum: [checked, issue], description: Bounded local same-target rule, independent of provider availability}
+                candidate:
+                  type: object
+                  additionalProperties: false
+                  required: [id, revision]
+                  properties:
+                    id: {type: string}
+                    revision: {type: integer, minimum: 1, maximum: 9007199254740991}
     ExpenseAssistance:
       type: object
       required: [status, suggestions, categorySource]

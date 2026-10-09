@@ -37,6 +37,7 @@ MODULES = (
     "cloudflare_ledger_expenses",
     "cloudflare_ledger_profile",
     "cloudflare_ledger_reports",
+    "cloudflare_ledger_review",
     "cloudflare_ledger_recurring",
     "ledger_recurrence_calendar",
     "cloudflare_ledger_suggestions",

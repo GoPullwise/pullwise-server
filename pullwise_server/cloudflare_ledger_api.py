@@ -227,6 +227,13 @@ async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path
         return await handle_activity_request(binding=binding, gateway=gateway, method=method,
             path=path, headers=headers, params=params, now=now)
     if path.startswith("/api/v1/expenses"):
+        expense_parts = path.strip("/").split("/")
+        if (len(expense_parts) == 5 and expense_parts[:3] == ["api", "v1", "expenses"]
+                and expense_parts[4] == "review"):
+            from .cloudflare_ledger_review import handle_expense_review
+            return await handle_expense_review(binding=binding, method=method,
+                item_id=expense_parts[3], headers=headers, body=body, now=now,
+                gateway=suggestion_gateway)
         from .cloudflare_ledger_expenses import handle_expense_request
         try:
             return await handle_expense_request(binding=binding, gateway=gateway,
