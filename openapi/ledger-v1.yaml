@@ -156,6 +156,64 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/account/jev:
+    get:
+      operationId: getAccountJevPreference
+      x-pullwise-scope: account:auth
+      security: [{cookieSession: []}]
+      tags: [Authentication]
+      description: |
+        Read the actual cookie account's persisted Jev preference. Ledger
+        selectors do not select another account for this endpoint. API keys and
+        mixed credentials are rejected. Missing legacy fields mean enabled true
+        and revision 1; malformed persisted preference fields fail closed.
+        Free accounts may read their retained preference, but available is false.
+        This read does not initialize state, call providers or change usage.
+      responses:
+        '200':
+          description: Stored preference and effective availability for the signed-in account
+          content: {application/json: {schema: {$ref: '#/components/schemas/AccountJevPreference'}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {description: JEV_PREFERENCE_UNAVAILABLE for malformed persisted preference state, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    patch:
+      operationId: updateAccountJevPreference
+      x-pullwise-scope: account:auth
+      security: [{cookieSession: []}]
+      tags: [Authentication]
+      parameters: [{$ref: '#/components/parameters/IfMatch'}, {$ref: '#/components/parameters/AuthOrigin'}]
+      description: |
+        Only the actual cookie account with a current Pro or Max plan may change
+        its preference. Requires a trusted app Origin or Referer and the current
+        independent preference revision, never a billing or workspace revision.
+        Save the complete canonical user record with session and raw-user CAS
+        guards, preserving identity, billing, membership and quota state.
+        A matching revision and unchanged enabled value returns 200 without writes.
+        The preference controls all model calls for this account's own ledger,
+        including its members and API keys. Turning it off prevents new model
+        admissions, reservations and events. In-flight calls retain admitted
+        fees but cannot publish hints or financial writes from the old authority.
+        Manual expenses and the paid inspection's local duplicate check remain
+        available. Turning it on does not bypass runtime flags or reset limits.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enabled]
+              properties: {enabled: {type: boolean}}
+      responses:
+        '200':
+          description: Confirmed preference, with an incremented revision only after an actual change
+          content: {application/json: {schema: {$ref: '#/components/schemas/AccountJevPreference'}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {description: JEV_PLAN_REQUIRED for Free or expired account plans; or UNTRUSTED_ORIGIN, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '409': {description: AUTHORIZATION_CHANGED or PREFERENCE_REVISION_EXHAUSTED; do not retry automatically, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '412': {description: PRECONDITION_FAILED for a stale preference revision; reload before choosing again, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '422': {description: INVALID_INPUT for an invalid body or revision, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '428': {description: PRECONDITION_REQUIRED when If-Match is absent, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '503': {description: JEV_PREFERENCE_UNAVAILABLE for malformed persisted preference state, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /auth/session:
     get:
       operationId: getAccountSession
@@ -1254,6 +1312,16 @@ components:
         used: {type: integer, minimum: 0}
         limit: {type: integer, minimum: 1}
         remaining: {type: integer, minimum: 0, description: max(0; limit minus used)}
+    AccountJevPreference:
+      type: object
+      additionalProperties: false
+      required: [enabled, revision, eligible, available, monthlyBudgetUsd]
+      properties:
+        enabled: {type: boolean, description: Persisted preference; true for a legacy account without preference fields. Free retains this value while effective availability stays false}
+        revision: {type: integer, minimum: 1, maximum: 9007199254740991, description: Independent preference CAS revision}
+        eligible: {type: boolean, description: The actual signed-in account currently has Pro or Max}
+        available: {type: boolean, description: Current paid entitlement, persisted preference and runtime activation gates all passed}
+        monthlyBudgetUsd: {type: string, pattern: '^[0-9]+(\.[0-9]{1,6})?$'}
     Entitlements:
       type: object
       required: [plan, limits, jev]
@@ -1272,7 +1340,8 @@ components:
           required: [eligible, available, monthlyBudgetUsd, period, rollover]
           properties:
             eligible: {type: boolean, description: Current ledger owner's Pro or Max entitlement; actor's personal plan does not grant eligibility}
-            available: {type: boolean, description: Eligibility and current activation gates both passed}
+            enabled: {type: boolean, description: Private account entitlements include the ledger owner's persisted model preference; malformed state fails closed. Public plan templates have no user preference}
+            available: {type: boolean, description: Eligibility, current activation gates and the ledger owner's preference all passed for private entitlements}
             monthlyBudgetUsd: {type: string, pattern: '^[0-9]+(\.[0-9]{1,6})?$'}
             period: {type: string, enum: [utc-calendar-month]}
             rollover: {type: boolean, const: false}

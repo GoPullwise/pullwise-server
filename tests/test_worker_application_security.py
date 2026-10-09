@@ -76,6 +76,7 @@ def request(path="/api/v1/expenses", *, method="POST", headers=None, raw=b"{}"):
 @pytest.mark.parametrize("authorization", [None, "Basic invalid", "Bearer"])
 @pytest.mark.parametrize("path,method", [
     ("/api/v1/expenses", "POST"),
+    ("/api/v1/account/jev", "PATCH"),
     ("/api/v1/expense-recurring-rules", "POST"),
     ("/api/v1/expense-recurring-rules/rule_1", "PATCH"),
     ("/api/v1/expense-recurring-rules/rule_1", "DELETE"),
@@ -107,6 +108,19 @@ def test_trusted_recurring_cookie_writes_reach_the_ledger_handler(path, method):
         headers={"cookie": "pw_session=synthetic", "origin": "https://app.example.test"})))
     assert response.status == 204 and calls == ["ledger"]
     assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_account_preference_cookie_write_rejects_too_many_sessions_before_body_or_handler():
+    app, calls = application()
+    incoming = request("/api/v1/account/jev", method="PATCH", headers={
+        "cookie": "; ".join("pw_session=synthetic" + str(value) for value in range(9)),
+        "origin": "https://app.example.test"})
+    async def forbidden_body():
+        raise AssertionError("Ambiguous credential write read its body")
+    incoming.bytes = forbidden_body
+    response = asyncio.run(app.fetch(incoming))
+    assert response.status == 400 and response.payload == {"error": {"code": "AMBIGUOUS_AUTH"}}
+    assert calls == []
 
 
 @pytest.mark.parametrize("path,method", [

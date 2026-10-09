@@ -13,6 +13,7 @@ from .cloudflare_ledger_expenses import _amount
 from .typesafe_client import DEFAULT_JEV_MODEL, build_request, validate_response
 from .account_cycle_rules import PAID_PLAN_IDS, effective_user_plan
 from .cloudflare_plan_limits import PlanLimitError
+from .cloudflare_jev_preferences import ensure_current_jev_authority, jev_enabled
 
 
 QUESTION_VERSION = "ledger-suggest-v2"
@@ -90,7 +91,8 @@ async def handle_suggestion_request(*, binding, method, headers, body, now, gate
         user, _, auth, validate = await ledger_principal(binding=binding, headers=headers,
             scope=scope, now=now, target_kind=target_kind, project_id=project_id,
             proof=proof)
-        if gateway is not None and gateway.enabled and effective_user_plan(user, timestamp=now) not in PAID_PLAN_IDS:
+        enabled = gateway is not None and gateway.enabled and jev_enabled(user)
+        if enabled and effective_user_plan(user, timestamp=now) not in PAID_PLAN_IDS:
             return _error(403, "JEV_PLAN_REQUIRED")
         commands = [binding.prepare("""SELECT id,name FROM expense_categories
             WHERE owner_id=? AND archived_at IS NULL ORDER BY name,id LIMIT 30""").bind(user["id"]),
@@ -101,7 +103,7 @@ async def handle_suggestion_request(*, binding, method, headers, body, now, gate
                 user["id"], target_kind, project_id, project_id, start, end, minor, currency,
                 exclude_expense_id or "")]
         daily = []
-        if gateway is not None and gateway.enabled:
+        if enabled:
             day = datetime.fromtimestamp(now, timezone.utc).date().isoformat()
             # Keep the daily bound within the canonical attempts<=20 constraint.
             limit = max(1, min(20, int(getattr(gateway, "daily_limit", 20))))
@@ -113,13 +115,13 @@ async def handle_suggestion_request(*, binding, method, headers, body, now, gate
         rows = await binding.batch([*auth, *commands])
         validate([part.results for part in rows[:len(auth)]])
         categories, recent = rows[len(auth)].results, rows[len(auth) + 1].results
-        if gateway is not None and gateway.enabled:
+        if enabled:
             daily = rows[len(auth) + 2].results
         if project_id and not rows[-1].results:
             return _error(404, "NOT_FOUND")
     except PrincipalAuthError as exc:
         return _error(exc.status, exc.code)
-    if gateway is None or not gateway.enabled:
+    if not enabled:
         return 200, {"status": "unavailable", "reason": "disabled", "suggestions": {}}
     if not categories:
         return 200, {"status": "unavailable", "reason": "no_categories", "suggestions": {}}
@@ -170,6 +172,13 @@ async def handle_suggestion_request(*, binding, method, headers, body, now, gate
         # Provider transport, timeout, malformed output and FFI errors all leave
         # the manual draft usable. No provider exception is returned to clients.
         outcome = "unavailable"
+    try:
+        await ensure_current_jev_authority(binding, headers, now, proof, scope=scope,
+            target_kind=target_kind, project_id=project_id)
+    except PrincipalAuthError as error:
+        return _error(error.status, error.code)
+    # Unknown metered outcomes from the fresh read must reach the HTTP boundary,
+    # rather than being classified as an ordinary optional-hint conflict.
     stamp = datetime.fromtimestamp(now, timezone.utc).isoformat().replace("+00:00", "Z")
     event_id = "sg_" + uuid.uuid4().hex
     try:

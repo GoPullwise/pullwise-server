@@ -5,6 +5,7 @@ import json
 from decimal import Decimal, InvalidOperation
 
 from .account_cycle_rules import PAID_PLAN_IDS, effective_user_plan
+from .cloudflare_jev_preferences import jev_enabled
 
 
 _DEFAULT = {
@@ -67,7 +68,10 @@ def parse_policy(raw=None):
 
 def entitlements(user, *, now, policy=None, jev_available=False):
     plan = effective_user_plan(user, timestamp=now)
-    return plan_entitlements(plan, policy=policy, jev_available=jev_available)
+    enabled = jev_enabled(user)
+    result = plan_entitlements(plan, policy=policy, jev_available=jev_available and enabled)
+    result["jev"]["enabled"] = enabled
+    return result
 
 
 def plan_entitlements(plan, *, policy=None, jev_available=False):

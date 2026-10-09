@@ -196,11 +196,17 @@ class _Application:
                 status, payload = 503, {"error": {"code": "SERVER_UNAVAILABLE"}}
             return Response.json(payload, status=status, headers={"Cache-Control": "no-store"})
         if path.startswith(("/api/v1/projects", "/api/v1/categories",
+                            "/api/v1/account/",
                             "/api/v1/expenses", "/api/v1/reports/",
                             "/api/v1/expense-suggestions", "/api/v1/expense-recurring-rules", "/api/v1/workspaces",
                             "/api/v1/workspace-invitations", "/api/v1/workspace-invitation-requests", "/api/v1/repositories", "/api/v1/activity")):
-            from pullwise_server.cloudflare_principal import _cookie_sessions
-            if request.method in {"POST", "PATCH", "DELETE"} and _cookie_sessions(headers):
+            from pullwise_server.cloudflare_principal import _cookie_sessions, PrincipalAuthError
+            try:
+                cookie_write = request.method in {"POST", "PATCH", "DELETE"} and _cookie_sessions(headers)
+            except PrincipalAuthError as error:
+                return Response.json({"error": {"code": error.code}}, status=error.status,
+                    headers={"Cache-Control": "no-store"})
+            if cookie_write:
                 from urllib.parse import urlsplit as split_origin
                 origin = split_origin(headers["Origin"] or headers["Referer"])
                 if f"{origin.scheme}://{origin.netloc}" not in trusted_origins:

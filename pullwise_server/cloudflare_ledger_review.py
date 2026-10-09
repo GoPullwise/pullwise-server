@@ -16,6 +16,7 @@ from .cloudflare_ledger_suggestions import (
 from .cloudflare_plan_limits import PlanLimitError
 from .cloudflare_principal import PrincipalAuthError
 from .typesafe_client import DEFAULT_JEV_MODEL, build_request, validate_response
+from .cloudflare_jev_preferences import jev_enabled
 
 
 def _source_guard(binding, source):
@@ -165,7 +166,7 @@ async def _review(binding, headers, item_id, expected, now, gateway):
         return _error(412, "PRECONDITION_FAILED")
     if effective_user_plan(user, timestamp=now) not in PAID_PLAN_IDS:
         return _error(403, "JEV_PLAN_REQUIRED")
-    enabled = gateway is not None and gateway.enabled
+    enabled = gateway is not None and gateway.enabled and jev_enabled(user)
     day = datetime.fromtimestamp(now, timezone.utc).date().isoformat()
     context_queries = [binding.prepare("""SELECT id,name FROM expense_categories
         WHERE owner_id=? AND archived_at IS NULL ORDER BY name,id LIMIT 30""").bind(user["id"])]
