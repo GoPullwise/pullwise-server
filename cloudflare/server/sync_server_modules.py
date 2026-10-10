@@ -29,6 +29,7 @@ MODULES = (
     "cloudflare_email_gateway",
     "cloudflare_github_gateway",
     "cloudflare_github_identity_http",
+    "cloudflare_github_refresh",
     "cloudflare_http_contract",
     "cloudflare_jev_gateway",
     "cloudflare_jev_preferences",

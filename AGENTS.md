@@ -1,5 +1,25 @@
 # Pullwise Server
 
+## Automatic GitHub credential renewal (2026-10-10)
+
+The user explicitly requests automatic renewal of expiring GitHub authorization.
+Persist encrypted access/refresh credentials and their provider lifetimes during
+OAuth. A separate cookie-session/trusted-Origin POST refreshes only the actual
+account's credential; ordinary reads and repository sync never write tokens.
+Read responses may signal githubRefreshRequired for one Web refresh/re-read.
+Preserve financial history, repository/Organization bindings, account identity,
+membership and the existing seven-day Pullwise session. Legacy accounts without
+a refresh token require one explicit reconnection. Never extend provider TTLs
+locally, expose credentials, automatically redirect OAuth or replay business writes.
+
+Rotation requires a durable claim and atomic session/token-generation fences,
+including production where the preview singleton lock does not apply. Known
+non-rotating provider failures retain their distinct recovery; unknown outcomes
+must not consume the old refresh token again. Complete local/native verification
+and the established main/preview publication workflow with the original DB and
+journal, existing schedules and production D1 pause. This supersedes earlier
+explicit-OAuth-only renewal guidance, without introducing GET writes or polling.
+
 ## Optional oldest-expense replacement (2026-10-09)
 
 The user's latest requirement is two capacity modes without overage fees.

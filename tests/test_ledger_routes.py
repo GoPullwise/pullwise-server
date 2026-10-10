@@ -260,7 +260,8 @@ class LedgerRoutesTests(unittest.TestCase):
         class Renewed(GitHubStub):
             async def exchange(self, code, redirect_uri, verifier):
                 await super().exchange(code, redirect_uri, verifier)
-                return "synthetic-renewed-token"
+                from pullwise_server.cloudflare_github_gateway import GitHubTokenBundle
+                return GitHubTokenBundle("synthetic-renewed-token")
 
             async def profile(self, token):
                 assert token == "synthetic-renewed-token"

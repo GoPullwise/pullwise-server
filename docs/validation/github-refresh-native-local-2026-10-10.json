@@ -1,0 +1,2680 @@
+{
+  "passed": true,
+  "date": "2026-10-10",
+  "localOnly": true,
+  "expectedSchemaVersion": 11,
+  "nativePythonFFI": true,
+  "nativeDurableObjectSQLite": true,
+  "nativeWebCryptoAesGcm": true,
+  "canonicalDefaultAndValidationBudget": true,
+  "singletonScope": "pullwise-s17-s18-2026-09-28",
+  "canonicalApplicationEntrySha256": "6733295cea83c06e7660eaa101d810cfcf8a76c0abc7b166751d59edd4c161e8",
+  "sourceSha256": {
+    "pullwise_server/__init__.py": "7d9d0b0ef2d8bc885aec331e6917279945ef9cad3f7647c50f965b584996c5e0",
+    "pullwise_server/account_cycle_rules.py": "f0cc61223ce05a3075461a81bff1469eca656fa003bdee121031cd9258ad8e7c",
+    "pullwise_server/api_key_dto_rules.py": "d0bceb8ddda53ec5712f0a7c2ace38fd734248692da23345e2973a87dda6748d",
+    "pullwise_server/billing_account_rules.py": "50e1b5ca2a9e397b66721f0c155ebf5cfdd3e8e211c1fd236c8871bd194df2a2",
+    "pullwise_server/billing_catalog_rules.py": "2f76f539a6a5b34ba8c2a40006a6cbfbb27e670d8902f6b03c1db962b360bc33",
+    "pullwise_server/billing_projection.py": "e4e59d349edc2f52574d599eb4769690d7f0b4cb5dfb5a365eaedcca2dd268a9",
+    "pullwise_server/cloudflare_account_adapter.py": "c7c0378da2982510671bea8fa027954194662c17201c663424cebee3fd086e46",
+    "pullwise_server/cloudflare_api_key_read.py": "e488f8592a4ddad934a58b68d9822e73018c5f5509809c880c4e80458ab7707d",
+    "pullwise_server/cloudflare_api_key_write.py": "5db6510615ec56d2aeb6327603b453168e5e3490fcd25fdd3aeff6c76688a25d",
+    "pullwise_server/cloudflare_billing_catalog.py": "39c5b3b3c6c968550f58cda07ec8007385c27c4d85c8d3cab95a39cd27abfee3",
+    "pullwise_server/cloudflare_billing_catalog_refresh.py": "42acec5860e4bfe11eb4e4b8b5f1e456cf2a785f2a6a875ef0408b0cdf715aee",
+    "pullwise_server/cloudflare_billing_catalog_write.py": "145ec58d410b47ba0f92a891db3aa8b6cf53a97ac0cfe8d51f8c6c45cb97f486",
+    "pullwise_server/cloudflare_billing_mutations.py": "199549cd6cf1fd675676aa8110ba282a70bc019fc4d4abdb50782602720f0378",
+    "pullwise_server/cloudflare_billing_read.py": "7ae58fb9cd0bffff3174c31135461196427215b4b930a3a47c02366f6251230f",
+    "pullwise_server/cloudflare_creem_gateway.py": "c844912d033226d7721a48d22a15e0ad1763c0461dc4966dd147d6c880bf71fe",
+    "pullwise_server/cloudflare_creem_handler.py": "4af4c9917c59b450a2e593af6c88639589d1fef79b078158eb745a0470fddc0e",
+    "pullwise_server/cloudflare_d1_batch.py": "f3e3e4df4f9d8892683b061cbac8a90c6ba33b5903216e8dc600a5dd3008ca9c",
+    "pullwise_server/cloudflare_d1_mapping.py": "30a9bbc39b5e4e695d3c17aeb7a9b53eb2ed86c6faf12ac8e57e7c59ef61ba1c",
+    "pullwise_server/cloudflare_email_auth.py": "e34f2df3603e34d15af1f4c590e28fb17f9cf2e67d871987e93513fbffa655a8",
+    "pullwise_server/cloudflare_email_gateway.py": "0ba5edff3a986216744f31874bc5982cab8fea69e796fe2de6e35ec99626de83",
+    "pullwise_server/cloudflare_expense_retention.py": "858b4de7ef4f7aad87048e39f212d96b2c13e78dcd337b85cf902be4693fdb9b",
+    "pullwise_server/cloudflare_github_gateway.py": "39bbf035e1247fb8bbfdb748874d720dc130f7065786dc0ace84b7d4eb3837a8",
+    "pullwise_server/cloudflare_github_identity_http.py": "44a85d1a7c4e0b76b8627dfae3595869c735627fb7aa5875d07878b0653a4751",
+    "pullwise_server/cloudflare_github_refresh.py": "44fb113c1a9e65795ae7f6832cd1f5b57568bf891a098ecfaabf8c399d1741d7",
+    "pullwise_server/cloudflare_http_contract.py": "989f55c97cd680dfdcd5c23a901ced1b2f5972f359b32a9989711167a67109a1",
+    "pullwise_server/cloudflare_jev_gateway.py": "5233cff0ab7bdfff2e2ca941c0ddb4c3c54a68b3ae6de202c7482243903ceffc",
+    "pullwise_server/cloudflare_jev_preferences.py": "0ae8780db2dec9757ced98609ff07a284279a4ccc90e4c51318e786705ac67c3",
+    "pullwise_server/cloudflare_ledger_activity.py": "4d7594c2f0ef646ac82130f7abee46628ee4bcc86417d4581250404d0e754683",
+    "pullwise_server/cloudflare_ledger_api.py": "158badc60fb5fa56fc1fc6ef4adfe7442073dd96cc3c059deb244cfe651942b1",
+    "pullwise_server/cloudflare_ledger_auth.py": "7afcbc716e448053e7b2adb14e6dbf3d7d8ea23e757c3509645cccd131a3686e",
+    "pullwise_server/cloudflare_ledger_categories.py": "3b768281db66faf909a24e51495db62ca9df3fe8c8947025f6df41f3c76e5019",
+    "pullwise_server/cloudflare_ledger_expenses.py": "e29ac29c936cd7ee0415f3a602167c721080fdae437d33980adfe0c3a89f4e8d",
+    "pullwise_server/cloudflare_ledger_profile.py": "f3a38f56746431bed7050f2c589d8de78f446fba5aac68bfc080bbccf5b81db7",
+    "pullwise_server/cloudflare_ledger_recurring.py": "a39d059d0a9ba5d2e6b0eea712a2e2fd254e73d10571c69d99d0f9a2be5f1c94",
+    "pullwise_server/cloudflare_ledger_reports.py": "ae7119ce1754c938b5685083f85deab9206f8593c0acbf942fa848d66bcc3890",
+    "pullwise_server/cloudflare_ledger_review.py": "42b4f2dbaaba1e58c6a924e154eb01e1d8ae3a7ceddc662481aef1aebcb8c701",
+    "pullwise_server/cloudflare_ledger_suggestions.py": "8d8d4e2b2eed47b6e2071754fbf103db3d4ce4e47fbf5e313b0ae668c0d5516b",
+    "pullwise_server/cloudflare_native_d1.py": "5408b843e5e2d02cf153b89457210fd60d47ff20150a35fbf280593df466eaa0",
+    "pullwise_server/cloudflare_oauth_state_adapter.py": "7586855d9deca10c0763d5d0ac24ad9c335c574fb98ef207b90a74c5cabe56bd",
+    "pullwise_server/cloudflare_plan_limits.py": "23de505e8b089553fe2d655d7569c0c33ff0c610dd059e2105b96a27229bf297",
+    "pullwise_server/cloudflare_preview_budget.py": "c53955fc52fc6abbf93736a19af865e1f1168bdeec7fe103a4501513e3bc7cb0",
+    "pullwise_server/cloudflare_preview_business_clear.py": "49218971a065755296f695b23538a6211948529e11b15ac397d5d4363807bfa8",
+    "pullwise_server/cloudflare_preview_rate.py": "ced46bb3b3c7f1bbacf0236223cac604fe99ef12ae22353aa1a808a4f60b2664",
+    "pullwise_server/cloudflare_preview_schema.py": "e21db594b1b160cf3de78b84015abdfd7506b555cd4557b6ce21202628dc612c",
+    "pullwise_server/cloudflare_principal.py": "d1a8c4c985c11b83f10b3493a07ba9bdd52e637a904a43f7b94db1fae93033fb",
+    "pullwise_server/cloudflare_project_erasure.py": "c0ccb5ca180aff609c9133ca9542c1e8f7402044ad14647615c1a6da6db1cd64",
+    "pullwise_server/cloudflare_project_repositories.py": "a7310b6721e6976d8424b904a1f0d90c8e52c0ba6ddbf3f1b3e1fd4601cfbf78",
+    "pullwise_server/cloudflare_session_adapter.py": "0043a42082eb45f280782adea7d52a5a85eda597c6cf16af62277a54db3ca79d",
+    "pullwise_server/cloudflare_state_records.py": "0cc2860e8d9773eafa824d2bf62047551f61782fe74ecdc8ef4bf9ba07a8f01d",
+    "pullwise_server/cloudflare_validation_budget.py": "48deb528340ba172c56052b7dd7fa2a56792863ea0a7f2315c9b015b594e500d",
+    "pullwise_server/cloudflare_webhook_receipts.py": "71d4cdddba613b68f58c8dcd685bcc3fe7a176ff85eee0a36d09fabc9d1ff3e3",
+    "pullwise_server/cloudflare_workspaces.py": "9adb7e75ceb634f9355a29f6d15525ef0ed623362e3ff9b5ac4b469045c2523d",
+    "pullwise_server/creem_event_rules.py": "7f1054d8bf4d04009a48385ed3d393ed983d9e33f940e260d5f757fcbcca1614",
+    "pullwise_server/creem_public_catalog_rules.py": "570f31ef15b5091d6e48494c3d6227e754bf08a33e90becb06416ba890cafd5b",
+    "pullwise_server/creem_signature.py": "3cb105e50952a79365d64f8946db39f7647f5b5da1b52b3e1c4d70cab11787cc",
+    "pullwise_server/json_input.py": "3f5699b1eef9ef6a6119edaf735eadb3cee40fbc863982262c5dede1fbc704b8",
+    "pullwise_server/ledger_money_totals.py": "552c26b9c14343336f9e858488552e05ce1bd90345e3d2f10422c14634124de1",
+    "pullwise_server/ledger_plan_policy.py": "1e515b756600c917e27cf3a7a7ba8a51d2d6ce0cdc689bb1bdfbe95d7b7c3e38",
+    "pullwise_server/ledger_recurrence_calendar.py": "53b5b86a5bbe466482fcc55b1636c386b85f35d646b97d0b9fc909b5add52311",
+    "pullwise_server/preview_plan_grants.py": "b6afbdbb860ffdba7a3b71732a8ba1376ad9a62b36ba4684974ac2ec895859db",
+    "pullwise_server/typesafe_client.py": "7a18ee3bd21267e6e18b751902ea55561e6074c7c6d9968fff7d173015e7d903"
+  },
+  "canonicalSourceTreeSha256": "8a4b189b44560e3057e9840d6f02aa4668c0c04bedab694990dab72c5460078b",
+  "fixtureEntrySha256": "573fe64ceb62ee09d14543b88fe6387a6c985bf0a8fede7d0cc05ae7ddccd575",
+  "dependencySha256": {
+    "pyproject.toml": "56d0701742d5cef95b710dbb3a31acf3b630eaaa8d84b49dd1ae035e84d24917",
+    "uv.lock": "aea70025439004f1a9f620893451948e49ba15a61d86df800c2c451bdedc05bb",
+    "pylock.toml": "d7a3bb80dc3055b5abd8b0bc2414b38c5cd6929f5c19434260a1b5c6654fa54e",
+    "package.json": "e05670dd516ab014e0504f36969200f7edfdba8900b0ef75d6697124214e046b",
+    "package-lock.json": "0dda8adc25430a835cf489c62c0298905eb0f29cdde08cc2373ea3e31a57dbc1"
+  },
+  "runtimeProvenance": {
+    "workerdSha256": "eb449c84ddd55ea357dc73e6c1b50bd255ccdc5d1875544c162435b7bd6168b6",
+    "runtimeBundleSha256": "3c3fd5a4179230e21e018e28b0e735e7c4abd8fe8e4ff39d2fd6bb2ea3a2e260",
+    "miniflareD1SourceSha256": "eb213ff08bfc9f2992253e8ff01fe31229a069728431df54a3f44c9c4c191ee7"
+  },
+  "nativeAttemptsFabricated": false,
+  "realProviderRequests": 0,
+  "remoteD1Operations": 0,
+  "remoteApplicationRequests": 0,
+  "clientRetries": 0,
+  "localHttpCap": 24,
+  "localReservedRowCaps": {
+    "read": 40000,
+    "written": 1000
+  },
+  "localIntegrityProbeReadCap": 2000,
+  "scope": "Local synthetic GitHub transport; real provider and browser acceptance separate",
+  "localHttpRequestsAttempted": 21,
+  "localHttpRequestsCompleted": 21,
+  "cases": [
+    {
+      "name": "setup",
+      "method": "POST",
+      "path": "/_fixture/setup",
+      "status": 200,
+      "result": {
+        "passed": true,
+        "schemaVersion": 11
+      }
+    },
+    {
+      "name": "authorize_link",
+      "method": "GET",
+      "path": "/auth/github/authorize",
+      "status": 200,
+      "result": null
+    },
+    {
+      "name": "callback_saves_encrypted_pair",
+      "method": "GET",
+      "path": "/auth/github/callback",
+      "status": 302,
+      "result": null
+    },
+    {
+      "name": "read_before_expiry",
+      "method": "GET",
+      "path": "/api/v1/repositories",
+      "status": 200,
+      "result": {
+        "items": [
+          {
+            "id": "810004",
+            "githubRepoId": 810004,
+            "fullName": "SyntheticOrg/native",
+            "installationId": "810002",
+            "account": {
+              "id": 810003,
+              "login": "SyntheticOrg",
+              "type": "Organization"
+            },
+            "isBound": true
+          }
+        ],
+        "nextCursor": null,
+        "githubAccess": "authorized",
+        "organizations": [
+          {
+            "id": 810003,
+            "login": "SyntheticOrg",
+            "type": "Organization"
+          }
+        ]
+      }
+    },
+    {
+      "name": "advance_to_expiry",
+      "method": "POST",
+      "path": "/_fixture/advance-clock",
+      "status": 200,
+      "result": {
+        "advanced": true
+      }
+    },
+    {
+      "name": "expired_read_signals_refresh",
+      "method": "GET",
+      "path": "/api/v1/repositories",
+      "status": 200,
+      "result": {
+        "items": [],
+        "nextCursor": null,
+        "githubAccess": "reauthorization_required",
+        "organizations": [],
+        "githubRefreshRequired": true
+      }
+    },
+    {
+      "name": "untrusted_origin",
+      "method": "POST",
+      "path": "/integrations/github/refresh",
+      "status": 403,
+      "result": {
+        "error": {
+          "code": "UNTRUSTED_ORIGIN"
+        }
+      }
+    },
+    {
+      "name": "cookie_with_bearer_rejected",
+      "method": "POST",
+      "path": "/integrations/github/refresh",
+      "status": 401,
+      "result": {
+        "error": {
+          "code": "UNAUTHENTICATED"
+        }
+      }
+    },
+    {
+      "name": "anonymous_rejected",
+      "method": "POST",
+      "path": "/integrations/github/refresh",
+      "status": 401,
+      "result": {
+        "error": {
+          "code": "UNAUTHENTICATED"
+        }
+      }
+    },
+    {
+      "name": "rotate_once",
+      "method": "POST",
+      "path": "/integrations/github/refresh",
+      "status": 200,
+      "result": {
+        "ok": true,
+        "refreshed": true
+      }
+    },
+    {
+      "name": "repeat_refresh_no_rotation",
+      "method": "POST",
+      "path": "/integrations/github/refresh",
+      "status": 200,
+      "result": {
+        "ok": true,
+        "refreshed": false
+      }
+    },
+    {
+      "name": "read_after_rotation",
+      "method": "GET",
+      "path": "/api/v1/repositories",
+      "status": 200,
+      "result": {
+        "items": [
+          {
+            "id": "810004",
+            "githubRepoId": 810004,
+            "fullName": "SyntheticOrg/native",
+            "installationId": "810002",
+            "account": {
+              "id": 810003,
+              "login": "SyntheticOrg",
+              "type": "Organization"
+            },
+            "isBound": true
+          }
+        ],
+        "nextCursor": null,
+        "githubAccess": "authorized",
+        "organizations": [
+          {
+            "id": 810003,
+            "login": "SyntheticOrg",
+            "type": "Organization"
+          }
+        ]
+      }
+    },
+    {
+      "name": "stale_session_snapshot_cas",
+      "method": "POST",
+      "path": "/_fixture/rejected-cas",
+      "status": 200,
+      "result": {
+        "fenced": true
+      }
+    },
+    {
+      "name": "stale_user_snapshot_cas",
+      "method": "POST",
+      "path": "/_fixture/rejected-cas",
+      "status": 200,
+      "result": {
+        "fenced": true
+      }
+    },
+    {
+      "name": "restart_reads_rotated_pair",
+      "method": "GET",
+      "path": "/api/v1/repositories",
+      "status": 200,
+      "result": {
+        "items": [
+          {
+            "id": "810004",
+            "githubRepoId": 810004,
+            "fullName": "SyntheticOrg/native",
+            "installationId": "810002",
+            "account": {
+              "id": 810003,
+              "login": "SyntheticOrg",
+              "type": "Organization"
+            },
+            "isBound": true
+          }
+        ],
+        "nextCursor": null,
+        "githubAccess": "authorized",
+        "organizations": [
+          {
+            "id": 810003,
+            "login": "SyntheticOrg",
+            "type": "Organization"
+          }
+        ]
+      }
+    },
+    {
+      "name": "advance_rotated_token_to_expiry",
+      "method": "POST",
+      "path": "/_fixture/advance-clock",
+      "status": 200,
+      "result": {
+        "advanced": true
+      }
+    },
+    {
+      "name": "persist_interrupted_claim",
+      "method": "POST",
+      "path": "/_fixture/pending-claim",
+      "status": 200,
+      "result": {
+        "simulatedInterruptedClaim": true
+      }
+    },
+    {
+      "name": "pending_claim_denied",
+      "method": "POST",
+      "path": "/integrations/github/refresh",
+      "status": 409,
+      "result": {
+        "error": {
+          "code": "GITHUB_REFRESH_PENDING"
+        }
+      }
+    },
+    {
+      "name": "advance_claim_beyond_ambiguity_window",
+      "method": "POST",
+      "path": "/_fixture/advance-clock",
+      "status": 200,
+      "result": {
+        "advanced": true
+      }
+    },
+    {
+      "name": "unknown_claim_after_restart_denied",
+      "method": "POST",
+      "path": "/integrations/github/refresh",
+      "status": 403,
+      "result": {
+        "error": {
+          "code": "GITHUB_REAUTHORIZATION_REQUIRED"
+        }
+      }
+    },
+    {
+      "name": "final_journal",
+      "method": "GET",
+      "path": "/_fixture/final",
+      "status": 200,
+      "result": {
+        "passed": true,
+        "scope": "pullwise-s17-s18-2026-09-28",
+        "schemaVersion": 11,
+        "stateStorageVersion": 1,
+        "rotations": 1,
+        "counters": {
+          "requests": 18,
+          "reserved_read": 10796,
+          "reserved_written": 320,
+          "actual_read": 835,
+          "actual_written": 183
+        }
+      }
+    }
+  ],
+  "nativeRequests": [
+    {
+      "call": 1,
+      "path": "/_fixture/setup",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 48,
+          "rowsRead": 566,
+          "rowsWritten": 134,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 10,
+          "rowsRead": 3,
+          "rowsWritten": 28,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 18,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "account_entitlement_authority": {
+            "rows": 1,
+            "sha256": "6917d5ca72cc22e1954ceff4118dcb4adc3ebc9844df6dbf5f6130e634132e99"
+          },
+          "ledger_projects": {
+            "rows": 1,
+            "sha256": "d13f8e29a934bfaea44f6299f9c02f608fafa3bd43342656f9852d15aa953acd"
+          },
+          "ledger_project_repositories": {
+            "rows": 1,
+            "sha256": "d3d53729d7d546c95b017f994f0670b60eb075c45f72d5a02157bce5a921e7bd"
+          },
+          "expense_categories": {
+            "rows": 1,
+            "sha256": "628407124c8e6c379d16eacf16be016bbbaa3ce1aec738559b8274bef448fb85"
+          },
+          "expenses": {
+            "rows": 1,
+            "sha256": "a05dad2598dd0c5af52236309fd2a2d6c7a5bf7bb2d1a3f4634b98473781cf9e"
+          },
+          "expense_events": {
+            "rows": 1,
+            "sha256": "3e2c362c9b13577d8d5306380fd5cd277edf0bf722632bdce4dedf844f6cd051"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_rules": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_occurrences": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "app_state": {
+            "rows": 6,
+            "sha256": "3ec6094bb0ce283dc9b1ba2d0b60ca565889717164c1215b5d5d2f5504d25e7b"
+          }
+        },
+        "encryptedPair": false,
+        "nativeAesGcmRoundTrip": false,
+        "accessExpiresAt": null,
+        "refreshExpiresAt": null,
+        "durableRefreshClaim": false,
+        "cardinalityVerified": true
+      },
+      "syntheticTransportCalls": [],
+      "rotations": 0,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 2,
+      "path": "/auth/github/authorize",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 1,
+          "rowsWritten": 4,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 20,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "account_entitlement_authority": {
+            "rows": 1,
+            "sha256": "6917d5ca72cc22e1954ceff4118dcb4adc3ebc9844df6dbf5f6130e634132e99"
+          },
+          "ledger_projects": {
+            "rows": 1,
+            "sha256": "d13f8e29a934bfaea44f6299f9c02f608fafa3bd43342656f9852d15aa953acd"
+          },
+          "ledger_project_repositories": {
+            "rows": 1,
+            "sha256": "d3d53729d7d546c95b017f994f0670b60eb075c45f72d5a02157bce5a921e7bd"
+          },
+          "expense_categories": {
+            "rows": 1,
+            "sha256": "628407124c8e6c379d16eacf16be016bbbaa3ce1aec738559b8274bef448fb85"
+          },
+          "expenses": {
+            "rows": 1,
+            "sha256": "a05dad2598dd0c5af52236309fd2a2d6c7a5bf7bb2d1a3f4634b98473781cf9e"
+          },
+          "expense_events": {
+            "rows": 1,
+            "sha256": "3e2c362c9b13577d8d5306380fd5cd277edf0bf722632bdce4dedf844f6cd051"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_rules": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_occurrences": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "app_state": {
+            "rows": 7,
+            "sha256": "86a91ad7740edbaab37c8db97d3e66a4c3d820a10a0a0f3efac5bb3e7050cf73"
+          }
+        },
+        "encryptedPair": false,
+        "nativeAesGcmRoundTrip": false,
+        "accessExpiresAt": null,
+        "refreshExpiresAt": null,
+        "durableRefreshClaim": false,
+        "cardinalityVerified": true
+      },
+      "syntheticTransportCalls": [],
+      "rotations": 0,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 3,
+      "path": "/auth/github/callback",
+      "status": 302,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 1,
+          "rowsWritten": 3,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 18,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 6,
+          "rowsRead": 3,
+          "rowsWritten": 9,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 20,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "account_entitlement_authority": {
+            "rows": 1,
+            "sha256": "6917d5ca72cc22e1954ceff4118dcb4adc3ebc9844df6dbf5f6130e634132e99"
+          },
+          "ledger_projects": {
+            "rows": 1,
+            "sha256": "d13f8e29a934bfaea44f6299f9c02f608fafa3bd43342656f9852d15aa953acd"
+          },
+          "ledger_project_repositories": {
+            "rows": 1,
+            "sha256": "d3d53729d7d546c95b017f994f0670b60eb075c45f72d5a02157bce5a921e7bd"
+          },
+          "expense_categories": {
+            "rows": 1,
+            "sha256": "628407124c8e6c379d16eacf16be016bbbaa3ce1aec738559b8274bef448fb85"
+          },
+          "expenses": {
+            "rows": 1,
+            "sha256": "a05dad2598dd0c5af52236309fd2a2d6c7a5bf7bb2d1a3f4634b98473781cf9e"
+          },
+          "expense_events": {
+            "rows": 1,
+            "sha256": "3e2c362c9b13577d8d5306380fd5cd277edf0bf722632bdce4dedf844f6cd051"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_rules": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_occurrences": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "app_state": {
+            "rows": 7,
+            "sha256": "6af626822a19046e84b703141d8f7e2e8c1b10a763e3c5bdabe08cad24048e6a"
+          }
+        },
+        "encryptedPair": true,
+        "nativeAesGcmRoundTrip": true,
+        "accessExpiresAt": 1791662400,
+        "refreshExpiresAt": 1807531200,
+        "durableRefreshClaim": false,
+        "cardinalityVerified": true
+      },
+      "syntheticTransportCalls": [
+        "exchange",
+        "profile"
+      ],
+      "rotations": 0,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 4,
+      "path": "/api/v1/repositories",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "account_entitlement_authority": {
+            "rows": 1,
+            "sha256": "6917d5ca72cc22e1954ceff4118dcb4adc3ebc9844df6dbf5f6130e634132e99"
+          },
+          "ledger_projects": {
+            "rows": 1,
+            "sha256": "d13f8e29a934bfaea44f6299f9c02f608fafa3bd43342656f9852d15aa953acd"
+          },
+          "ledger_project_repositories": {
+            "rows": 1,
+            "sha256": "d3d53729d7d546c95b017f994f0670b60eb075c45f72d5a02157bce5a921e7bd"
+          },
+          "expense_categories": {
+            "rows": 1,
+            "sha256": "628407124c8e6c379d16eacf16be016bbbaa3ce1aec738559b8274bef448fb85"
+          },
+          "expenses": {
+            "rows": 1,
+            "sha256": "a05dad2598dd0c5af52236309fd2a2d6c7a5bf7bb2d1a3f4634b98473781cf9e"
+          },
+          "expense_events": {
+            "rows": 1,
+            "sha256": "3e2c362c9b13577d8d5306380fd5cd277edf0bf722632bdce4dedf844f6cd051"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_rules": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_occurrences": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "app_state": {
+            "rows": 7,
+            "sha256": "6af626822a19046e84b703141d8f7e2e8c1b10a763e3c5bdabe08cad24048e6a"
+          }
+        },
+        "encryptedPair": true,
+        "nativeAesGcmRoundTrip": true,
+        "accessExpiresAt": 1791662400,
+        "refreshExpiresAt": 1807531200,
+        "durableRefreshClaim": false,
+        "cardinalityVerified": true
+      },
+      "syntheticTransportCalls": [
+        "installations",
+        "repositories"
+      ],
+      "rotations": 0,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 5,
+      "path": "/_fixture/advance-clock",
+      "status": 200,
+      "meteredGroups": [],
+      "integrity": {
+        "tables": {
+          "account_entitlement_authority": {
+            "rows": 1,
+            "sha256": "6917d5ca72cc22e1954ceff4118dcb4adc3ebc9844df6dbf5f6130e634132e99"
+          },
+          "ledger_projects": {
+            "rows": 1,
+            "sha256": "d13f8e29a934bfaea44f6299f9c02f608fafa3bd43342656f9852d15aa953acd"
+          },
+          "ledger_project_repositories": {
+            "rows": 1,
+            "sha256": "d3d53729d7d546c95b017f994f0670b60eb075c45f72d5a02157bce5a921e7bd"
+          },
+          "expense_categories": {
+            "rows": 1,
+            "sha256": "628407124c8e6c379d16eacf16be016bbbaa3ce1aec738559b8274bef448fb85"
+          },
+          "expenses": {
+            "rows": 1,
+            "sha256": "a05dad2598dd0c5af52236309fd2a2d6c7a5bf7bb2d1a3f4634b98473781cf9e"
+          },
+          "expense_events": {
+            "rows": 1,
+            "sha256": "3e2c362c9b13577d8d5306380fd5cd277edf0bf722632bdce4dedf844f6cd051"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_rules": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_occurrences": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "app_state": {
+            "rows": 7,
+            "sha256": "6af626822a19046e84b703141d8f7e2e8c1b10a763e3c5bdabe08cad24048e6a"
+          }
+        },
+        "encryptedPair": true,
+        "nativeAesGcmRoundTrip": true,
+        "accessExpiresAt": 1791662400,
+        "refreshExpiresAt": 1807531200,
+        "durableRefreshClaim": false,
+        "cardinalityVerified": true
+      },
+      "syntheticTransportCalls": [],
+      "rotations": 0,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 6,
+      "path": "/api/v1/repositories",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "account_entitlement_authority": {
+            "rows": 1,
+            "sha256": "6917d5ca72cc22e1954ceff4118dcb4adc3ebc9844df6dbf5f6130e634132e99"
+          },
+          "ledger_projects": {
+            "rows": 1,
+            "sha256": "d13f8e29a934bfaea44f6299f9c02f608fafa3bd43342656f9852d15aa953acd"
+          },
+          "ledger_project_repositories": {
+            "rows": 1,
+            "sha256": "d3d53729d7d546c95b017f994f0670b60eb075c45f72d5a02157bce5a921e7bd"
+          },
+          "expense_categories": {
+            "rows": 1,
+            "sha256": "628407124c8e6c379d16eacf16be016bbbaa3ce1aec738559b8274bef448fb85"
+          },
+          "expenses": {
+            "rows": 1,
+            "sha256": "a05dad2598dd0c5af52236309fd2a2d6c7a5bf7bb2d1a3f4634b98473781cf9e"
+          },
+          "expense_events": {
+            "rows": 1,
+            "sha256": "3e2c362c9b13577d8d5306380fd5cd277edf0bf722632bdce4dedf844f6cd051"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_rules": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_occurrences": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "app_state": {
+            "rows": 7,
+            "sha256": "6af626822a19046e84b703141d8f7e2e8c1b10a763e3c5bdabe08cad24048e6a"
+          }
+        },
+        "encryptedPair": true,
+        "nativeAesGcmRoundTrip": true,
+        "accessExpiresAt": 1791662400,
+        "refreshExpiresAt": 1807531200,
+        "durableRefreshClaim": false,
+        "cardinalityVerified": true
+      },
+      "syntheticTransportCalls": [],
+      "rotations": 0,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 7,
+      "path": "/integrations/github/refresh",
+      "status": 403,
+      "meteredGroups": [],
+      "integrity": {
+        "tables": {
+          "account_entitlement_authority": {
+            "rows": 1,
+            "sha256": "6917d5ca72cc22e1954ceff4118dcb4adc3ebc9844df6dbf5f6130e634132e99"
+          },
+          "ledger_projects": {
+            "rows": 1,
+            "sha256": "d13f8e29a934bfaea44f6299f9c02f608fafa3bd43342656f9852d15aa953acd"
+          },
+          "ledger_project_repositories": {
+            "rows": 1,
+            "sha256": "d3d53729d7d546c95b017f994f0670b60eb075c45f72d5a02157bce5a921e7bd"
+          },
+          "expense_categories": {
+            "rows": 1,
+            "sha256": "628407124c8e6c379d16eacf16be016bbbaa3ce1aec738559b8274bef448fb85"
+          },
+          "expenses": {
+            "rows": 1,
+            "sha256": "a05dad2598dd0c5af52236309fd2a2d6c7a5bf7bb2d1a3f4634b98473781cf9e"
+          },
+          "expense_events": {
+            "rows": 1,
+            "sha256": "3e2c362c9b13577d8d5306380fd5cd277edf0bf722632bdce4dedf844f6cd051"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_rules": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_occurrences": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "app_state": {
+            "rows": 7,
+            "sha256": "6af626822a19046e84b703141d8f7e2e8c1b10a763e3c5bdabe08cad24048e6a"
+          }
+        },
+        "encryptedPair": true,
+        "nativeAesGcmRoundTrip": true,
+        "accessExpiresAt": 1791662400,
+        "refreshExpiresAt": 1807531200,
+        "durableRefreshClaim": false,
+        "cardinalityVerified": true
+      },
+      "syntheticTransportCalls": [],
+      "rotations": 0,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 8,
+      "path": "/integrations/github/refresh",
+      "status": 401,
+      "meteredGroups": [],
+      "integrity": {
+        "tables": {
+          "account_entitlement_authority": {
+            "rows": 1,
+            "sha256": "6917d5ca72cc22e1954ceff4118dcb4adc3ebc9844df6dbf5f6130e634132e99"
+          },
+          "ledger_projects": {
+            "rows": 1,
+            "sha256": "d13f8e29a934bfaea44f6299f9c02f608fafa3bd43342656f9852d15aa953acd"
+          },
+          "ledger_project_repositories": {
+            "rows": 1,
+            "sha256": "d3d53729d7d546c95b017f994f0670b60eb075c45f72d5a02157bce5a921e7bd"
+          },
+          "expense_categories": {
+            "rows": 1,
+            "sha256": "628407124c8e6c379d16eacf16be016bbbaa3ce1aec738559b8274bef448fb85"
+          },
+          "expenses": {
+            "rows": 1,
+            "sha256": "a05dad2598dd0c5af52236309fd2a2d6c7a5bf7bb2d1a3f4634b98473781cf9e"
+          },
+          "expense_events": {
+            "rows": 1,
+            "sha256": "3e2c362c9b13577d8d5306380fd5cd277edf0bf722632bdce4dedf844f6cd051"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_rules": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_occurrences": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "app_state": {
+            "rows": 7,
+            "sha256": "6af626822a19046e84b703141d8f7e2e8c1b10a763e3c5bdabe08cad24048e6a"
+          }
+        },
+        "encryptedPair": true,
+        "nativeAesGcmRoundTrip": true,
+        "accessExpiresAt": 1791662400,
+        "refreshExpiresAt": 1807531200,
+        "durableRefreshClaim": false,
+        "cardinalityVerified": true
+      },
+      "syntheticTransportCalls": [],
+      "rotations": 0,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 9,
+      "path": "/integrations/github/refresh",
+      "status": 401,
+      "meteredGroups": [],
+      "integrity": {
+        "tables": {
+          "account_entitlement_authority": {
+            "rows": 1,
+            "sha256": "6917d5ca72cc22e1954ceff4118dcb4adc3ebc9844df6dbf5f6130e634132e99"
+          },
+          "ledger_projects": {
+            "rows": 1,
+            "sha256": "d13f8e29a934bfaea44f6299f9c02f608fafa3bd43342656f9852d15aa953acd"
+          },
+          "ledger_project_repositories": {
+            "rows": 1,
+            "sha256": "d3d53729d7d546c95b017f994f0670b60eb075c45f72d5a02157bce5a921e7bd"
+          },
+          "expense_categories": {
+            "rows": 1,
+            "sha256": "628407124c8e6c379d16eacf16be016bbbaa3ce1aec738559b8274bef448fb85"
+          },
+          "expenses": {
+            "rows": 1,
+            "sha256": "a05dad2598dd0c5af52236309fd2a2d6c7a5bf7bb2d1a3f4634b98473781cf9e"
+          },
+          "expense_events": {
+            "rows": 1,
+            "sha256": "3e2c362c9b13577d8d5306380fd5cd277edf0bf722632bdce4dedf844f6cd051"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_rules": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_occurrences": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "app_state": {
+            "rows": 7,
+            "sha256": "6af626822a19046e84b703141d8f7e2e8c1b10a763e3c5bdabe08cad24048e6a"
+          }
+        },
+        "encryptedPair": true,
+        "nativeAesGcmRoundTrip": true,
+        "accessExpiresAt": 1791662400,
+        "refreshExpiresAt": 1807531200,
+        "durableRefreshClaim": false,
+        "cardinalityVerified": true
+      },
+      "syntheticTransportCalls": [],
+      "rotations": 0,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 10,
+      "path": "/integrations/github/refresh",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 3,
+          "rowsWritten": 1,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 20,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 3,
+          "rowsWritten": 1,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 20,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "account_entitlement_authority": {
+            "rows": 1,
+            "sha256": "6917d5ca72cc22e1954ceff4118dcb4adc3ebc9844df6dbf5f6130e634132e99"
+          },
+          "ledger_projects": {
+            "rows": 1,
+            "sha256": "d13f8e29a934bfaea44f6299f9c02f608fafa3bd43342656f9852d15aa953acd"
+          },
+          "ledger_project_repositories": {
+            "rows": 1,
+            "sha256": "d3d53729d7d546c95b017f994f0670b60eb075c45f72d5a02157bce5a921e7bd"
+          },
+          "expense_categories": {
+            "rows": 1,
+            "sha256": "628407124c8e6c379d16eacf16be016bbbaa3ce1aec738559b8274bef448fb85"
+          },
+          "expenses": {
+            "rows": 1,
+            "sha256": "a05dad2598dd0c5af52236309fd2a2d6c7a5bf7bb2d1a3f4634b98473781cf9e"
+          },
+          "expense_events": {
+            "rows": 1,
+            "sha256": "3e2c362c9b13577d8d5306380fd5cd277edf0bf722632bdce4dedf844f6cd051"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_rules": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_occurrences": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "app_state": {
+            "rows": 7,
+            "sha256": "f41ab507c4a907cddaf604e4bd6ec742d114a8737afaba807a20254963c2b22f"
+          }
+        },
+        "encryptedPair": true,
+        "nativeAesGcmRoundTrip": true,
+        "accessExpiresAt": 1791691201,
+        "refreshExpiresAt": 1807560001,
+        "durableRefreshClaim": false,
+        "cardinalityVerified": true
+      },
+      "syntheticTransportCalls": [
+        "refresh"
+      ],
+      "rotations": 1,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 11,
+      "path": "/integrations/github/refresh",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "account_entitlement_authority": {
+            "rows": 1,
+            "sha256": "6917d5ca72cc22e1954ceff4118dcb4adc3ebc9844df6dbf5f6130e634132e99"
+          },
+          "ledger_projects": {
+            "rows": 1,
+            "sha256": "d13f8e29a934bfaea44f6299f9c02f608fafa3bd43342656f9852d15aa953acd"
+          },
+          "ledger_project_repositories": {
+            "rows": 1,
+            "sha256": "d3d53729d7d546c95b017f994f0670b60eb075c45f72d5a02157bce5a921e7bd"
+          },
+          "expense_categories": {
+            "rows": 1,
+            "sha256": "628407124c8e6c379d16eacf16be016bbbaa3ce1aec738559b8274bef448fb85"
+          },
+          "expenses": {
+            "rows": 1,
+            "sha256": "a05dad2598dd0c5af52236309fd2a2d6c7a5bf7bb2d1a3f4634b98473781cf9e"
+          },
+          "expense_events": {
+            "rows": 1,
+            "sha256": "3e2c362c9b13577d8d5306380fd5cd277edf0bf722632bdce4dedf844f6cd051"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_rules": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_occurrences": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "app_state": {
+            "rows": 7,
+            "sha256": "f41ab507c4a907cddaf604e4bd6ec742d114a8737afaba807a20254963c2b22f"
+          }
+        },
+        "encryptedPair": true,
+        "nativeAesGcmRoundTrip": true,
+        "accessExpiresAt": 1791691201,
+        "refreshExpiresAt": 1807560001,
+        "durableRefreshClaim": false,
+        "cardinalityVerified": true
+      },
+      "syntheticTransportCalls": [],
+      "rotations": 1,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 12,
+      "path": "/api/v1/repositories",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "account_entitlement_authority": {
+            "rows": 1,
+            "sha256": "6917d5ca72cc22e1954ceff4118dcb4adc3ebc9844df6dbf5f6130e634132e99"
+          },
+          "ledger_projects": {
+            "rows": 1,
+            "sha256": "d13f8e29a934bfaea44f6299f9c02f608fafa3bd43342656f9852d15aa953acd"
+          },
+          "ledger_project_repositories": {
+            "rows": 1,
+            "sha256": "d3d53729d7d546c95b017f994f0670b60eb075c45f72d5a02157bce5a921e7bd"
+          },
+          "expense_categories": {
+            "rows": 1,
+            "sha256": "628407124c8e6c379d16eacf16be016bbbaa3ce1aec738559b8274bef448fb85"
+          },
+          "expenses": {
+            "rows": 1,
+            "sha256": "a05dad2598dd0c5af52236309fd2a2d6c7a5bf7bb2d1a3f4634b98473781cf9e"
+          },
+          "expense_events": {
+            "rows": 1,
+            "sha256": "3e2c362c9b13577d8d5306380fd5cd277edf0bf722632bdce4dedf844f6cd051"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_rules": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_occurrences": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "app_state": {
+            "rows": 7,
+            "sha256": "f41ab507c4a907cddaf604e4bd6ec742d114a8737afaba807a20254963c2b22f"
+          }
+        },
+        "encryptedPair": true,
+        "nativeAesGcmRoundTrip": true,
+        "accessExpiresAt": 1791691201,
+        "refreshExpiresAt": 1807560001,
+        "durableRefreshClaim": false,
+        "cardinalityVerified": true
+      },
+      "syntheticTransportCalls": [
+        "installations",
+        "repositories"
+      ],
+      "rotations": 1,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 13,
+      "path": "/_fixture/rejected-cas",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 20,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "account_entitlement_authority": {
+            "rows": 1,
+            "sha256": "6917d5ca72cc22e1954ceff4118dcb4adc3ebc9844df6dbf5f6130e634132e99"
+          },
+          "ledger_projects": {
+            "rows": 1,
+            "sha256": "d13f8e29a934bfaea44f6299f9c02f608fafa3bd43342656f9852d15aa953acd"
+          },
+          "ledger_project_repositories": {
+            "rows": 1,
+            "sha256": "d3d53729d7d546c95b017f994f0670b60eb075c45f72d5a02157bce5a921e7bd"
+          },
+          "expense_categories": {
+            "rows": 1,
+            "sha256": "628407124c8e6c379d16eacf16be016bbbaa3ce1aec738559b8274bef448fb85"
+          },
+          "expenses": {
+            "rows": 1,
+            "sha256": "a05dad2598dd0c5af52236309fd2a2d6c7a5bf7bb2d1a3f4634b98473781cf9e"
+          },
+          "expense_events": {
+            "rows": 1,
+            "sha256": "3e2c362c9b13577d8d5306380fd5cd277edf0bf722632bdce4dedf844f6cd051"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_rules": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_occurrences": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "app_state": {
+            "rows": 7,
+            "sha256": "f41ab507c4a907cddaf604e4bd6ec742d114a8737afaba807a20254963c2b22f"
+          }
+        },
+        "encryptedPair": true,
+        "nativeAesGcmRoundTrip": true,
+        "accessExpiresAt": 1791691201,
+        "refreshExpiresAt": 1807560001,
+        "durableRefreshClaim": false,
+        "cardinalityVerified": true
+      },
+      "syntheticTransportCalls": [],
+      "rotations": 1,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 14,
+      "path": "/_fixture/rejected-cas",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 20,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "account_entitlement_authority": {
+            "rows": 1,
+            "sha256": "6917d5ca72cc22e1954ceff4118dcb4adc3ebc9844df6dbf5f6130e634132e99"
+          },
+          "ledger_projects": {
+            "rows": 1,
+            "sha256": "d13f8e29a934bfaea44f6299f9c02f608fafa3bd43342656f9852d15aa953acd"
+          },
+          "ledger_project_repositories": {
+            "rows": 1,
+            "sha256": "d3d53729d7d546c95b017f994f0670b60eb075c45f72d5a02157bce5a921e7bd"
+          },
+          "expense_categories": {
+            "rows": 1,
+            "sha256": "628407124c8e6c379d16eacf16be016bbbaa3ce1aec738559b8274bef448fb85"
+          },
+          "expenses": {
+            "rows": 1,
+            "sha256": "a05dad2598dd0c5af52236309fd2a2d6c7a5bf7bb2d1a3f4634b98473781cf9e"
+          },
+          "expense_events": {
+            "rows": 1,
+            "sha256": "3e2c362c9b13577d8d5306380fd5cd277edf0bf722632bdce4dedf844f6cd051"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_rules": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_occurrences": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "app_state": {
+            "rows": 7,
+            "sha256": "f41ab507c4a907cddaf604e4bd6ec742d114a8737afaba807a20254963c2b22f"
+          }
+        },
+        "encryptedPair": true,
+        "nativeAesGcmRoundTrip": true,
+        "accessExpiresAt": 1791691201,
+        "refreshExpiresAt": 1807560001,
+        "durableRefreshClaim": false,
+        "cardinalityVerified": true
+      },
+      "syntheticTransportCalls": [],
+      "rotations": 1,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 15,
+      "path": "/api/v1/repositories",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "account_entitlement_authority": {
+            "rows": 1,
+            "sha256": "6917d5ca72cc22e1954ceff4118dcb4adc3ebc9844df6dbf5f6130e634132e99"
+          },
+          "ledger_projects": {
+            "rows": 1,
+            "sha256": "d13f8e29a934bfaea44f6299f9c02f608fafa3bd43342656f9852d15aa953acd"
+          },
+          "ledger_project_repositories": {
+            "rows": 1,
+            "sha256": "d3d53729d7d546c95b017f994f0670b60eb075c45f72d5a02157bce5a921e7bd"
+          },
+          "expense_categories": {
+            "rows": 1,
+            "sha256": "628407124c8e6c379d16eacf16be016bbbaa3ce1aec738559b8274bef448fb85"
+          },
+          "expenses": {
+            "rows": 1,
+            "sha256": "a05dad2598dd0c5af52236309fd2a2d6c7a5bf7bb2d1a3f4634b98473781cf9e"
+          },
+          "expense_events": {
+            "rows": 1,
+            "sha256": "3e2c362c9b13577d8d5306380fd5cd277edf0bf722632bdce4dedf844f6cd051"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_rules": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_occurrences": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "app_state": {
+            "rows": 7,
+            "sha256": "f41ab507c4a907cddaf604e4bd6ec742d114a8737afaba807a20254963c2b22f"
+          }
+        },
+        "encryptedPair": true,
+        "nativeAesGcmRoundTrip": true,
+        "accessExpiresAt": 1791691201,
+        "refreshExpiresAt": 1807560001,
+        "durableRefreshClaim": false,
+        "cardinalityVerified": true
+      },
+      "syntheticTransportCalls": [
+        "installations",
+        "repositories"
+      ],
+      "rotations": 1,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 16,
+      "path": "/_fixture/advance-clock",
+      "status": 200,
+      "meteredGroups": [],
+      "integrity": {
+        "tables": {
+          "account_entitlement_authority": {
+            "rows": 1,
+            "sha256": "6917d5ca72cc22e1954ceff4118dcb4adc3ebc9844df6dbf5f6130e634132e99"
+          },
+          "ledger_projects": {
+            "rows": 1,
+            "sha256": "d13f8e29a934bfaea44f6299f9c02f608fafa3bd43342656f9852d15aa953acd"
+          },
+          "ledger_project_repositories": {
+            "rows": 1,
+            "sha256": "d3d53729d7d546c95b017f994f0670b60eb075c45f72d5a02157bce5a921e7bd"
+          },
+          "expense_categories": {
+            "rows": 1,
+            "sha256": "628407124c8e6c379d16eacf16be016bbbaa3ce1aec738559b8274bef448fb85"
+          },
+          "expenses": {
+            "rows": 1,
+            "sha256": "a05dad2598dd0c5af52236309fd2a2d6c7a5bf7bb2d1a3f4634b98473781cf9e"
+          },
+          "expense_events": {
+            "rows": 1,
+            "sha256": "3e2c362c9b13577d8d5306380fd5cd277edf0bf722632bdce4dedf844f6cd051"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_rules": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_occurrences": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "app_state": {
+            "rows": 7,
+            "sha256": "f41ab507c4a907cddaf604e4bd6ec742d114a8737afaba807a20254963c2b22f"
+          }
+        },
+        "encryptedPair": true,
+        "nativeAesGcmRoundTrip": true,
+        "accessExpiresAt": 1791691201,
+        "refreshExpiresAt": 1807560001,
+        "durableRefreshClaim": false,
+        "cardinalityVerified": true
+      },
+      "syntheticTransportCalls": [],
+      "rotations": 1,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 17,
+      "path": "/_fixture/pending-claim",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 1,
+          "rowsWritten": 3,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 20,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "account_entitlement_authority": {
+            "rows": 1,
+            "sha256": "6917d5ca72cc22e1954ceff4118dcb4adc3ebc9844df6dbf5f6130e634132e99"
+          },
+          "ledger_projects": {
+            "rows": 1,
+            "sha256": "d13f8e29a934bfaea44f6299f9c02f608fafa3bd43342656f9852d15aa953acd"
+          },
+          "ledger_project_repositories": {
+            "rows": 1,
+            "sha256": "d3d53729d7d546c95b017f994f0670b60eb075c45f72d5a02157bce5a921e7bd"
+          },
+          "expense_categories": {
+            "rows": 1,
+            "sha256": "628407124c8e6c379d16eacf16be016bbbaa3ce1aec738559b8274bef448fb85"
+          },
+          "expenses": {
+            "rows": 1,
+            "sha256": "a05dad2598dd0c5af52236309fd2a2d6c7a5bf7bb2d1a3f4634b98473781cf9e"
+          },
+          "expense_events": {
+            "rows": 1,
+            "sha256": "3e2c362c9b13577d8d5306380fd5cd277edf0bf722632bdce4dedf844f6cd051"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_rules": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_occurrences": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "app_state": {
+            "rows": 7,
+            "sha256": "123dca8b09f73dd24c2f2addd1bd39785ea544269cfe3030e843c307f73c0a02"
+          }
+        },
+        "encryptedPair": true,
+        "nativeAesGcmRoundTrip": true,
+        "accessExpiresAt": 1791691201,
+        "refreshExpiresAt": 1807560001,
+        "durableRefreshClaim": true,
+        "cardinalityVerified": true
+      },
+      "syntheticTransportCalls": [],
+      "rotations": 1,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 18,
+      "path": "/integrations/github/refresh",
+      "status": 409,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "account_entitlement_authority": {
+            "rows": 1,
+            "sha256": "6917d5ca72cc22e1954ceff4118dcb4adc3ebc9844df6dbf5f6130e634132e99"
+          },
+          "ledger_projects": {
+            "rows": 1,
+            "sha256": "d13f8e29a934bfaea44f6299f9c02f608fafa3bd43342656f9852d15aa953acd"
+          },
+          "ledger_project_repositories": {
+            "rows": 1,
+            "sha256": "d3d53729d7d546c95b017f994f0670b60eb075c45f72d5a02157bce5a921e7bd"
+          },
+          "expense_categories": {
+            "rows": 1,
+            "sha256": "628407124c8e6c379d16eacf16be016bbbaa3ce1aec738559b8274bef448fb85"
+          },
+          "expenses": {
+            "rows": 1,
+            "sha256": "a05dad2598dd0c5af52236309fd2a2d6c7a5bf7bb2d1a3f4634b98473781cf9e"
+          },
+          "expense_events": {
+            "rows": 1,
+            "sha256": "3e2c362c9b13577d8d5306380fd5cd277edf0bf722632bdce4dedf844f6cd051"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_rules": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_occurrences": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "app_state": {
+            "rows": 7,
+            "sha256": "123dca8b09f73dd24c2f2addd1bd39785ea544269cfe3030e843c307f73c0a02"
+          }
+        },
+        "encryptedPair": true,
+        "nativeAesGcmRoundTrip": true,
+        "accessExpiresAt": 1791691201,
+        "refreshExpiresAt": 1807560001,
+        "durableRefreshClaim": true,
+        "cardinalityVerified": true
+      },
+      "syntheticTransportCalls": [],
+      "rotations": 1,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 19,
+      "path": "/_fixture/advance-clock",
+      "status": 200,
+      "meteredGroups": [],
+      "integrity": {
+        "tables": {
+          "account_entitlement_authority": {
+            "rows": 1,
+            "sha256": "6917d5ca72cc22e1954ceff4118dcb4adc3ebc9844df6dbf5f6130e634132e99"
+          },
+          "ledger_projects": {
+            "rows": 1,
+            "sha256": "d13f8e29a934bfaea44f6299f9c02f608fafa3bd43342656f9852d15aa953acd"
+          },
+          "ledger_project_repositories": {
+            "rows": 1,
+            "sha256": "d3d53729d7d546c95b017f994f0670b60eb075c45f72d5a02157bce5a921e7bd"
+          },
+          "expense_categories": {
+            "rows": 1,
+            "sha256": "628407124c8e6c379d16eacf16be016bbbaa3ce1aec738559b8274bef448fb85"
+          },
+          "expenses": {
+            "rows": 1,
+            "sha256": "a05dad2598dd0c5af52236309fd2a2d6c7a5bf7bb2d1a3f4634b98473781cf9e"
+          },
+          "expense_events": {
+            "rows": 1,
+            "sha256": "3e2c362c9b13577d8d5306380fd5cd277edf0bf722632bdce4dedf844f6cd051"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_rules": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_occurrences": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "app_state": {
+            "rows": 7,
+            "sha256": "123dca8b09f73dd24c2f2addd1bd39785ea544269cfe3030e843c307f73c0a02"
+          }
+        },
+        "encryptedPair": true,
+        "nativeAesGcmRoundTrip": true,
+        "accessExpiresAt": 1791691201,
+        "refreshExpiresAt": 1807560001,
+        "durableRefreshClaim": true,
+        "cardinalityVerified": true
+      },
+      "syntheticTransportCalls": [],
+      "rotations": 1,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 20,
+      "path": "/integrations/github/refresh",
+      "status": 403,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "account_entitlement_authority": {
+            "rows": 1,
+            "sha256": "6917d5ca72cc22e1954ceff4118dcb4adc3ebc9844df6dbf5f6130e634132e99"
+          },
+          "ledger_projects": {
+            "rows": 1,
+            "sha256": "d13f8e29a934bfaea44f6299f9c02f608fafa3bd43342656f9852d15aa953acd"
+          },
+          "ledger_project_repositories": {
+            "rows": 1,
+            "sha256": "d3d53729d7d546c95b017f994f0670b60eb075c45f72d5a02157bce5a921e7bd"
+          },
+          "expense_categories": {
+            "rows": 1,
+            "sha256": "628407124c8e6c379d16eacf16be016bbbaa3ce1aec738559b8274bef448fb85"
+          },
+          "expenses": {
+            "rows": 1,
+            "sha256": "a05dad2598dd0c5af52236309fd2a2d6c7a5bf7bb2d1a3f4634b98473781cf9e"
+          },
+          "expense_events": {
+            "rows": 1,
+            "sha256": "3e2c362c9b13577d8d5306380fd5cd277edf0bf722632bdce4dedf844f6cd051"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_rules": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_occurrences": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "app_state": {
+            "rows": 7,
+            "sha256": "123dca8b09f73dd24c2f2addd1bd39785ea544269cfe3030e843c307f73c0a02"
+          }
+        },
+        "encryptedPair": true,
+        "nativeAesGcmRoundTrip": true,
+        "accessExpiresAt": 1791691201,
+        "refreshExpiresAt": 1807560001,
+        "durableRefreshClaim": true,
+        "cardinalityVerified": true
+      },
+      "syntheticTransportCalls": [],
+      "rotations": 1,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 21,
+      "path": "/_fixture/final",
+      "status": 200,
+      "meteredGroups": [],
+      "integrity": {
+        "tables": {
+          "account_entitlement_authority": {
+            "rows": 1,
+            "sha256": "6917d5ca72cc22e1954ceff4118dcb4adc3ebc9844df6dbf5f6130e634132e99"
+          },
+          "ledger_projects": {
+            "rows": 1,
+            "sha256": "d13f8e29a934bfaea44f6299f9c02f608fafa3bd43342656f9852d15aa953acd"
+          },
+          "ledger_project_repositories": {
+            "rows": 1,
+            "sha256": "d3d53729d7d546c95b017f994f0670b60eb075c45f72d5a02157bce5a921e7bd"
+          },
+          "expense_categories": {
+            "rows": 1,
+            "sha256": "628407124c8e6c379d16eacf16be016bbbaa3ce1aec738559b8274bef448fb85"
+          },
+          "expenses": {
+            "rows": 1,
+            "sha256": "a05dad2598dd0c5af52236309fd2a2d6c7a5bf7bb2d1a3f4634b98473781cf9e"
+          },
+          "expense_events": {
+            "rows": 1,
+            "sha256": "3e2c362c9b13577d8d5306380fd5cd277edf0bf722632bdce4dedf844f6cd051"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_rules": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_recurring_occurrences": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "app_state": {
+            "rows": 7,
+            "sha256": "123dca8b09f73dd24c2f2addd1bd39785ea544269cfe3030e843c307f73c0a02"
+          }
+        },
+        "encryptedPair": true,
+        "nativeAesGcmRoundTrip": true,
+        "accessExpiresAt": 1791691201,
+        "refreshExpiresAt": 1807560001,
+        "durableRefreshClaim": true,
+        "cardinalityVerified": true
+      },
+      "syntheticTransportCalls": [],
+      "rotations": 1,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    }
+  ],
+  "nativeStatements": 439,
+  "meteredNativeRowsRead": 835,
+  "meteredNativeRowsWritten": 183,
+  "integrityProbeNativeRowsRead": 398,
+  "nativeAttemptsObserved": [
+    null
+  ],
+  "runtimeStopped": true,
+  "integrityProbesReadOnlyAndOutsideJournal": true,
+  "nativeAesGcmEncryptedPairPersistence": true,
+  "callbackStoresExpiryAndRefresh": true,
+  "expiredReadsSignalWithoutWritesOrProvider": true,
+  "cookieAndOriginFencesNative": true,
+  "singleUseRotationAndNoopNative": true,
+  "restartRetainsRotatedPair": true,
+  "staleUserAndSessionCasNative": true,
+  "interruptedClaimNeverRedispatchedAfterRestart": true,
+  "financialAndBindingRowsPreserved": true,
+  "allJournalDeltasMatchNativeMeta": true,
+  "nativeAttemptMetadataMissing": true
+}

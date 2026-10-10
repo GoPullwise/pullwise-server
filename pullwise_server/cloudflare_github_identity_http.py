@@ -272,20 +272,22 @@ def _repo_items(rows: object, installation_id: int, account: dict | None = None)
     return items
 
 
-async def read_repository_access(user: dict, gateway: Any) -> dict:
+async def read_repository_access(user: dict, gateway: Any, now: int | None = None) -> dict:
     from .cloudflare_github_gateway import GitHubFailure
+    from .cloudflare_github_refresh import refresh_required
     user = user.get("_actor", user)
     try:
-        return await _read_repository_access(user, gateway)
+        return await _read_repository_access(user, gateway, now)
     except GitHubFailure as error:
         if error.code == "GITHUB_REAUTHORIZATION_REQUIRED":
-            return {"items": [], "githubAccess": "reauthorization_required"}
+            return {"items": [], "githubAccess": "reauthorization_required",
+                    **({"githubRefreshRequired": True} if refresh_required(user, now) else {})}
         if error.code == "GITHUB_PERMISSION_DENIED":
             return {"items": [], "githubAccess": "lost"}
         raise
 
 
-async def _read_repository_access(user: dict, gateway: Any) -> dict:
+async def _read_repository_access(user: dict, gateway: Any, now: int | None = None) -> dict:
     """Read current App grants without relying on a prior Setup callback.
 
     The App user token is the authority. GET/sync never write cached grants or
@@ -296,6 +298,18 @@ async def _read_repository_access(user: dict, gateway: Any) -> dict:
     missing = "lost" if isinstance(access, dict) and access.get("status") == "authorized" else "not_connected"
     if not user.get("githubAccessToken"):
         return {"items": [], "githubAccess": missing}
+    from .cloudflare_github_refresh import CLAIM_SECONDS, REFRESH_MARGIN, refresh_required
+    expiry = user.get("githubAccessTokenExpiresAt")
+    if (type(now) is int and type(expiry) is int and expiry <= now + REFRESH_MARGIN
+            and "githubTokenRefresh" in user):
+        from .cloudflare_github_gateway import GitHubFailure
+        claim = user["githubTokenRefresh"]
+        started = claim.get("startedAt") if isinstance(claim, dict) else None
+        if type(started) is int and started <= now < started + CLAIM_SECONDS:
+            raise GitHubFailure("GITHUB_UNAVAILABLE")
+        return {"items": [], "githubAccess": "reauthorization_required"}
+    if refresh_required(user, now):
+        return {"items": [], "githubAccess": "reauthorization_required", "githubRefreshRequired": True}
     token = await gateway.unseal(user["githubAccessToken"])
     installations = await gateway.installations(token)
     if not isinstance(installations, list) or len(installations) > 10:
@@ -330,10 +344,21 @@ async def handle_identity_request(*, binding: Any, gateway: Any, now: int,
     """Return (status, payload, headers), or None for another HTTP domain."""
     paths = {"/auth/session", "/auth/sign-out", "/auth/github/authorize",
              "/auth/github/callback", "/integrations", "/integrations/github/authorize",
-             "/integrations/github/callback", "/repositories", "/repositories/sync", "/api/v1/repositories"}
+             "/integrations/github/callback", "/integrations/github/refresh", "/repositories", "/repositories/sync", "/api/v1/repositories"}
     if path not in paths:
         return None
     no_store = {"Cache-Control": "no-store"}
+    if path == "/integrations/github/refresh":
+        if method != "POST":
+            return 405, {"error": {"code": "METHOD_NOT_ALLOWED"}}, no_store
+        origin = urlsplit(_header(headers, "Origin") or _header(headers, "Referer"))
+        if f"{origin.scheme}://{origin.netloc}" not in trusted_origins:
+            return 403, {"error": {"code": "UNTRUSTED_ORIGIN"}}, no_store
+        session, user = await _session_user(binding, headers, now)
+        if not session:
+            return 401, {"error": {"code": "UNAUTHENTICATED"}}, no_store
+        from .cloudflare_github_refresh import handle_github_refresh
+        return await handle_github_refresh(binding=binding, gateway=gateway, session=session, user=user, now=now)
     if method == "GET" and path == "/auth/session":
         session, user = await _session_user(binding, headers, now)
         return 200, session_payload(user if session else None), no_store
@@ -390,8 +415,8 @@ async def handle_identity_request(*, binding: Any, gateway: Any, now: int,
             error_query = urlencode({"github_error": _param(params, "error") or "missing_oauth_code"})
             query = parsed.query + ("&" if parsed.query else "") + error_query
             return _redirect_result(urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, parsed.fragment)))
-        token = await gateway.exchange(_param(params, "code"), callback_url, record["codeVerifier"])
-        profile = await gateway.profile(token)
+        bundle = await gateway.exchange(_param(params, "code"), callback_url, record["codeVerifier"])
+        profile = await gateway.profile(bundle.access_token)
         github_id, login = profile.get("id"), profile.get("login")
         if type(github_id) is not int or not 1 <= github_id <= 9007199254740991 or not isinstance(login, str) or not login:
             return 502, {"error": {"code": "GITHUB_PROFILE_INVALID"}}, no_store
@@ -409,12 +434,12 @@ async def handle_identity_request(*, binding: Any, gateway: Any, now: int,
         _observe_authenticated_actor(binding, owner_id)
         name = (existing.get("name") if has_verified_email_identity(existing) and existing.get("name")
                 else str(profile.get("name") or login)[:200])
-        user = {**existing, "id": owner_id, "name": name,
+        from .cloudflare_github_refresh import TOKEN_FIELDS, sealed_token_fields
+        fields = await sealed_token_fields(bundle, gateway, now)
+        user = {**{key: value for key, value in existing.items() if key not in TOKEN_FIELDS}, "id": owner_id, "name": name,
                 "avatarUrl": str(profile.get("avatar_url") or "")[:500],
                 "createdAt": existing.get("createdAt", now), "providers": _provider_union(existing, "github"),
-                "githubId": str(github_id), "githubLogin": login[:100],
-                "githubAccessToken": await gateway.seal(token),
-                "githubAccessTokenUpdatedAt": now}
+                "githubId": str(github_id), "githubLogin": login[:100], **fields}
         if linking:
             try:
                 await _write_linked_user(binding, user=user, expected_user=existing,
@@ -511,18 +536,22 @@ async def handle_identity_request(*, binding: Any, gateway: Any, now: int,
         if not user:
             return 401, {"error": {"code": "UNAUTHENTICATED"}}, no_store
         access = user.get("githubRepositoryAccess")
-        result = await read_repository_access(user, gateway)
+        result = await read_repository_access(user, gateway, now)
+        if _header(headers, "Authorization") or _header(headers, "X-Pullwise-Api-Key"):
+            result.pop("githubRefreshRequired", None)
         if path == "/repositories/sync":
             result = {**result, "needsAuthorization": result["githubAccess"] != "authorized"}
         if path == "/api/v1/repositories":
             result = {"items": result["items"], "nextCursor": None,
                       "githubAccess": result["githubAccess"],
-                      "organizations": result.get("organizations", [])}
+                      "organizations": result.get("organizations", []),
+                      **({"githubRefreshRequired": True} if result.get("githubRefreshRequired") else {})}
         if path == "/integrations":
+            refresh = result.get("githubRefreshRequired") is True
             result = {"github": {"connected": result["githubAccess"] == "authorized",
                                  "authorizationPending": False, "mode": "github-app" if access else None,
                                  "repositories": [item["fullName"] for item in result["items"]]},
-                      "items": []}
+                      "items": [], **({"githubRefreshRequired": True} if refresh else {})}
             result["items"] = [result["github"]]
         return 200, result, no_store
     return 404, {"error": {"code": "NOT_FOUND"}}, no_store
