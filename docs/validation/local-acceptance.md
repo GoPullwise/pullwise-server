@@ -8,6 +8,10 @@ by this publication check. Local fixture acceptance is recorded separately below
 
 ## Automatic GitHub credential renewal (2026-10-10)
 
+[Preview publication receipt](github-refresh-preview-release-2026-10-10.json) records
+the two released versions, matching static assets and preserved database/coordinator,
+schedules and production D1 pause. No remote business/provider workflow was invoked.
+
 OAuth now retains an AES-GCM-encrypted access/refresh token pair and the provider's
 lifetimes. A cookie-session/trusted-Origin `POST /integrations/github/refresh`
 rotates only the actual account's pair. Expiring repository/project reads signal
