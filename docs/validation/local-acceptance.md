@@ -1,5 +1,15 @@
 # Current local acceptance
 
+[Jev/overview preview publication](jev-overview-preview-release-2026-10-10.json)
+records both main runtime commits and 100%-active preview versions. The original
+Server database, coordinator namespace, inherited bindings, hourly schedule and
+production D1 pause remain. No migration or remote synthetic/provider/business
+acceptance is performed. The bounded static check attempts one homepage plus
+three exact built assets once; all are blocked with HTTP 403 / Cloudflare 1010
+in the current environment. This is recorded as a failed static readback, not
+as successful byte verification. Deployment success is independently confirmed
+through Cloudflare management metadata. Subsequent receipt commits are docs-only.
+
 ## Jev monthly allowance, exact duplicates and Billing usage (2026-10-10)
 
 The current merged Server passes **2,546 Python 3.10.12 tests and 62 subtests**.

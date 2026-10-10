@@ -1,0 +1,124 @@
+{
+  "date": "2026-10-10",
+  "homepage": {
+    "url": "https://preview.pull-wise.com/",
+    "status": 403,
+    "responseBodyNotRetained": true
+  },
+  "homepageRequests": 1,
+  "hashedAssetRequests": 3,
+  "clientRetries": 0,
+  "javascriptExecuted": false,
+  "businessAPIRequests": 0,
+  "realProviderCalls": 0,
+  "remoteD1Operations": 0,
+  "assets": [
+    {
+      "url": "https://preview.pull-wise.com/assets/index-CBXvA44M.js",
+      "status": 403,
+      "bytes": 17,
+      "robots": null,
+      "sha256": "2938e9f1284180959e33ab1718d0793a72ff6e4cdb8108c34dcd14e69446de5c",
+      "matchesBuiltBytes": false,
+      "errorContentType": "text/plain; charset=UTF-8",
+      "errorBodyExcerpt": "error code: 1010\n",
+      "server": "envoy"
+    },
+    {
+      "url": "https://preview.pull-wise.com/assets/ledger-overview-BujJU6T8.js",
+      "status": 403,
+      "bytes": 17,
+      "robots": null,
+      "sha256": "2938e9f1284180959e33ab1718d0793a72ff6e4cdb8108c34dcd14e69446de5c",
+      "matchesBuiltBytes": false,
+      "errorContentType": "text/plain; charset=UTF-8",
+      "errorBodyExcerpt": "error code: 1010\n",
+      "server": "envoy"
+    },
+    {
+      "url": "https://preview.pull-wise.com/assets/billing-1LMzWKqk.js",
+      "status": 403,
+      "bytes": 17,
+      "robots": null,
+      "sha256": "2938e9f1284180959e33ab1718d0793a72ff6e4cdb8108c34dcd14e69446de5c",
+      "matchesBuiltBytes": false,
+      "errorContentType": "text/plain; charset=UTF-8",
+      "errorBodyExcerpt": "error code: 1010\n",
+      "server": "envoy"
+    }
+  ],
+  "passed": false,
+  "serverVersion": "05058325-1c4c-44da-9312-0a9ec16de6c0",
+  "serverDatabase": "e9dc3b89-f81f-4fce-87ef-d8797d879fb4",
+  "coordinatorNamespace": "0e0ce4946c5e4d5f81c606273ba94b5d",
+  "compatibilityDate": "2026-09-23",
+  "serverFlags": [
+    {
+      "name": "PULLWISE_D1_ACCESS_ENABLED",
+      "value": "1"
+    },
+    {
+      "name": "PULLWISE_JEV_SUGGESTIONS_ENABLED",
+      "value": "1"
+    },
+    {
+      "name": "PULLWISE_JEV_SUGGESTIONS_EVALUATED",
+      "value": "1"
+    },
+    {
+      "name": "PULLWISE_MODE",
+      "value": "preview"
+    },
+    {
+      "name": "PULLWISE_PREVIEW_PRODUCT_ENABLED",
+      "value": "1"
+    },
+    {
+      "name": "PULLWISE_RECURRING_EXPENSES_ENABLED",
+      "value": "1"
+    }
+  ],
+  "schedules": [
+    "0 * * * *"
+  ],
+  "serverBindingNamesPreserved": true,
+  "productionD1Paused": true,
+  "managementReadsDoNotUseD1": true,
+  "noSchemaMigration": true,
+  "scope": "Jev monthly allowance, exact duplicates, 100-record review, spending overview and Billing preview publication",
+  "publicationPassed": true,
+  "staticReadbackPassed": false,
+  "readbackLimitation": "Cloudflare error 1010 blocks the current environment static client. One homepage and three exact asset GETs were attempted once; no redirects, retries, JavaScript or business/provider/D1 validation ran remotely.",
+  "serverSourceCommit": "b8b43e97d579838259659ef8d023a0bbf41bb404",
+  "webSourceCommit": "3eb4a9f31f302c2cf1b4ec954cc91c9cd1a6c3b3",
+  "webVersion": "ef66b7b7-03b0-4862-bf4b-f7e4acfb0506",
+  "versionsConfirmedAt100PercentByManagementAPI": true,
+  "checks": {
+    "serverTests": 2546,
+    "serverSubtests": 62,
+    "webTests": 1493,
+    "webTestFiles": 72,
+    "lint": true,
+    "build": true,
+    "workerConfig": true,
+    "apiContractMirrors": true,
+    "serverPreviewDryRun": true,
+    "webPreviewDryRun": true,
+    "nativeLocalHttpRequests": 23,
+    "nativeLocalStatements": 820,
+    "chromiumBillingContexts": 24,
+    "chromiumBillingSectionStates": 72,
+    "webkitBillingDesktopContexts": 8,
+    "webkitBillingDesktopSectionStates": 16,
+    "chromiumOverviewLayoutContexts": 14,
+    "chromiumOverviewLayoutStates": 465,
+    "chromiumFinalOverviewCaptures": 3
+  },
+  "noRemoteSyntheticAccountsOrRealProviderAcceptance": true,
+  "noProductionDeployment": true,
+  "localEvidenceSha256": {
+    "jev-monthly-allowance-native-local-2026-10-10.json": "8c46d847f8edbd513b2b787ee33c2bdf217b9a104a3eeb3310b4b408b80601f2",
+    "jev-billing-layout-local-2026-10-10.json": "fa0c00cc45bee6094b3a52a589304481c6cd083d20ce2449ae878d1d7e5067c7",
+    "jev-overview-layout-local-2026-10-10.json": "0783c413715ec9b00e1bdb20353e2febe9939cc298cde8b7f89a214177980fda"
+  }
+}
