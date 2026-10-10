@@ -1,0 +1,94 @@
+{
+  "date": "2026-10-10",
+  "passed": true,
+  "scope": "Local mobile-email transport diagnosis with user-reported HTTPS recovery; no Server runtime behavior change or independent real-device delivery acceptance",
+  "serverBaseCommit": "f05ee905f5f2cfd097a848bd514a2aef30168c52",
+  "sourceSha256": {
+    "pullwise_server/cloudflare_email_auth.py": "e34f2df3603e34d15af1f4c590e28fb17f9cf2e67d871987e93513fbffa655a8",
+    "cloudflare/server/src/entry.py": "e260ad128e52cffc9524bbc37591e806ccfed984fd9e6f5d29cb6d2578c9bb4e",
+    "tests/test_worker_email_auth.py": "3a30dae0e4af18e51f6d6f0a2d3ba2e1f366d7e936903d752ead596fa325f6ca"
+  },
+  "workerRouteRegression": {
+    "command": ".venv/bin/python -m pytest tests/test_worker_email_auth.py tests/test_cloudflare_email_auth.py -q --tb=short",
+    "pythonVersion": "3.10.12",
+    "passedTests": 74,
+    "deviceUserAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1",
+    "cases": [
+      {
+        "pageOrigin": "http://preview.pull-wise.com",
+        "status": 403,
+        "code": "UNTRUSTED_ORIGIN",
+        "d1Reads": 0,
+        "d1WriteGroups": 0,
+        "rateAdmissions": 0,
+        "mockMailDeliveries": 0
+      },
+      {
+        "pageOrigin": "https://preview.pull-wise.com",
+        "status": 202,
+        "secureChallengeCookie": true,
+        "challengeExpiresIn": 600,
+        "rateAdmissions": 1,
+        "mockMailDeliveries": 1
+      }
+    ],
+    "strictOriginContractUnchanged": true,
+    "trustedRefererDoesNotReplaceOrigin": true
+  },
+  "browserObservation": {
+    "kind": "finite-intercepted-browser-origin-observation",
+    "date": "2026-10-10",
+    "engine": "chromium",
+    "profile": "iPhone 13 Safari user agent emulation",
+    "networkRequests": 0,
+    "emailDeliveries": 0,
+    "cases": [
+      {
+        "pageOrigin": "http://preview.pull-wise.com",
+        "requestOrigin": "http://preview.pull-wise.com",
+        "referer": "http://preview.pull-wise.com/sign-in",
+        "fetchSite": null,
+        "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
+      },
+      {
+        "pageOrigin": "https://preview.pull-wise.com",
+        "requestOrigin": "https://preview.pull-wise.com",
+        "referer": "https://preview.pull-wise.com/sign-in",
+        "fetchSite": null,
+        "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
+      }
+    ],
+    "engineVersion": "151.0.7922.173",
+    "limitations": "All requests intercepted locally; Chromium emulates an iPhone Safari user agent, not a physical iPhone or the WebKit engine. Auth HTTP403/HTTPS202 behavior is separately proved with the real Worker route and a local-only mail stub."
+  },
+  "externalEvidenceReportedByRoot": {
+    "previewHttpGet": {
+      "url": "http://preview.pull-wise.com/",
+      "status": 200,
+      "content": "HTML",
+      "redirectedToHttps": false
+    },
+    "zoneAlwaysUseHttps": "off",
+    "boundedFirewallQuery": {
+      "host": "preview.pull-wise.com",
+      "path": "/api/auth/email/request-code",
+      "from": "2026-10-10T00:00:00Z",
+      "to": "2026-10-10T04:31:00Z",
+      "limit": 20,
+      "matchingEvents": 0
+    },
+    "limitations": "A sampled firewall query is not a complete request log. The original failing iPhone request was not captured. The user subsequently confirmed that explicitly adding https:// restored login on the physical device."
+  },
+  "realEmailDeliveries": 0,
+  "remoteBusinessPosts": 0,
+  "providerCalls": 0,
+  "limitations": "Browser evidence uses fully intercepted Chromium iPhone Safari user-agent emulation, not physical Safari or WebKit. Worker acceptance uses local SQLite and mock email. Physical-device recovery with an explicit HTTPS URL is user-reported; the original request was not captured and no independent WebKit or real-email delivery acceptance was performed. Web HTTPS-entry repair is owned by the parent agent and is recorded separately.",
+  "userReportedRecovery": {
+    "date": "2026-10-10",
+    "device": "iPhone Safari",
+    "message": "现在可以了 加上https://就好了",
+    "confirmedBehavior": "Explicit HTTPS URL restores email login on the user's physical device",
+    "originalFailingRequestCaptured": false,
+    "independentWebKitAcceptance": false
+  }
+}

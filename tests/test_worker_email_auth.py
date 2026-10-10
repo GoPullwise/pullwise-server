@@ -151,3 +151,28 @@ def test_paused_email_rate_rpc_does_not_touch_coordinator_sql():
         SimpleNamespace(PULLWISE_D1_ACCESS_ENABLED="0", PULLWISE_EMAIL_AUTH_ENABLED="1"))
     result = asyncio.run(coordinator.admitEmail("send", "a" * 64, "b" * 64))
     assert not result["ok"] and coordinator.journal is None
+
+
+@pytest.mark.parametrize("scheme,expected", [("http", 403), ("https", 202)])
+def test_iphone_safari_email_send_requires_configured_https_page_origin(runtime, scheme, expected):
+    preview_origin = "https://preview.pull-wise.com"
+    runtime.app.env.PULLWISE_APP_URL = preview_origin
+    request = incoming("/auth/email/request-code", body={"email": EMAIL, "purpose": "login"},
+                       origin=scheme + "://preview.pull-wise.com")
+    request.headers.update({
+        "referer": scheme + "://preview.pull-wise.com/sign-in",
+        "sec-fetch-site": "same-origin",
+        "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1",
+    })
+    payload, options = asyncio.run(runtime.app.fetch(request))
+    assert options["status"] == expected
+    if scheme == "http":
+        assert payload["error"]["code"] == "UNTRUSTED_ORIGIN"
+        assert not runtime.admitted and not runtime.gateway.sent
+        assert runtime.binding.reads == 0 and runtime.binding.groups == []
+    else:
+        assert len(runtime.admitted) == len(runtime.gateway.sent) == 1
+        assert "challengeId" in payload and payload["expiresIn"] == 600
+        assert options["headers"]["Set-Cookie"].startswith("pw_email_challenge=")
+        assert "Secure" in options["headers"]["Set-Cookie"]

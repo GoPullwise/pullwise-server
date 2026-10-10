@@ -1,5 +1,30 @@
 # Current local acceptance
 
+## Mobile email login transport (2026-10-10)
+
+[Local transport evidence](mobile-email-login-local-2026-10-10.json) records two
+fully intercepted browser cases and the real Worker email route's local mock-mail
+regression. An HTTP page sends an HTTP Origin; the configured HTTPS-only email
+endpoint returns `403 UNTRUSTED_ORIGIN` before D1 reads/writes, rate admission or
+mail delivery. The matching HTTPS Origin returns 202 with a Secure challenge
+cookie and one mocked delivery. The email-auth suites pass **74 tests**.
+
+A bounded preview HTTP GET returned 200 HTML and the zone's Always Use HTTPS
+setting was off. The user subsequently confirmed that explicitly adding
+`https://` restored email login on the physical iPhone. This confirms the
+transport workaround on that device; the original failing request was not
+captured. A bounded WAF query for the exact preview code-request path returned no
+matching events; sampled firewall evidence is not a complete request log. Web owns the HTTPS-entry
+repair. Server's required trusted Origin, no-Referer-substitution, financial CSRF,
+challenge/session/cookie, rate and identity contracts remain unchanged; there is
+no Server runtime change or required Server deployment for this diagnosis.
+
+The browser observation uses Chromium with an iPhone Safari user agent, not a
+physical iPhone or the WebKit engine. All four browser requests were fulfilled
+locally. These checks send no real verification email, make no provider call or
+remote business POST, and do not establish independent WebKit or real-email
+delivery acceptance. The physical-device recovery above is user-reported.
+
 [Recurring preview publication](recurring-expenses-preview-release-2026-10-10.json)
 records both main source commits and deployed versions, healthy schema v12/storage1,
 the unchanged database/coordinator/hourly schedule, production pause, and exact
