@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pullwise_server.cloudflare_ledger_api import handle_ledger_request
 from pullwise_server.cloudflare_ledger_suggestions import _draft
+from pullwise_server.ledger_plan_policy import JEV_RESERVATION_MICROUSD
 from pullwise_server.cloudflare_state_records import encode_record, record_name
 from pullwise_server.cloudflare_preview_schema import UPGRADE_V6_SQL, UPGRADE_V7_SQL, UPGRADE_V8_SQL, UPGRADE_V9_SQL, UPGRADE_V10_SQL, UPGRADE_V11_SQL, UPGRADE_V12_SQL
 from test_cloudflare_github_identity_http import D1ShapedSQLite, GitHubStub, login, seed
@@ -30,6 +31,8 @@ class LedgerSuggestionTests(unittest.TestCase):
                 "cloudflare/server/migrations/0001_ledger.sql").read_text())
             db.executescript((Path(__file__).resolve().parents[1] /
                 "cloudflare/server/migrations/0003_ledger_suggestions.sql").read_text())
+            db.executescript((Path(__file__).resolve().parents[1] /
+                "cloudflare/server/migrations/0004_ledger_plan_usage.sql").read_text())
             db.execute("""CREATE TABLE api_keys(id TEXT PRIMARY KEY,user_id TEXT,name TEXT,
                 key_prefix TEXT,key_hash TEXT UNIQUE,scopes TEXT,expires_at INTEGER,
                 restrictions TEXT,created_at INTEGER,last_used_at INTEGER,revoked_at INTEGER)""")
@@ -87,16 +90,16 @@ class LedgerSuggestionTests(unittest.TestCase):
         self.assertEqual((status, payload["status"]), (200, "unavailable"))
         with self.store.connect() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM expenses").fetchone()[0], 0)
-            self.assertEqual(db.execute("SELECT attempts FROM expense_suggestion_budget").fetchone()[0], 1)
+            self.assertEqual(db.execute("SELECT count(*) FROM expense_suggestion_budget").fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT jev_reserved_microusd FROM ledger_plan_usage").fetchone()[0], JEV_RESERVATION_MICROUSD)
 
-    def test_suggestion_is_confirmable_and_daily_budget_is_atomic(self):
+    def test_suggestion_is_confirmable_and_uses_only_the_monthly_budget(self):
         status, category = asyncio.run(handle_ledger_request(binding=self.binding, gateway=GitHubStub(),
             method="POST", path="/api/v1/categories", headers=self.headers, params={},
             body={"name": "Hosting"}, now=self.now + 3))
         self.assertEqual(status, 201)
         class Provider:
             enabled = True
-            daily_limit = 1
             calls = 0
             async def evaluate(self, request):
                 self.calls += 1
@@ -122,10 +125,12 @@ class LedgerSuggestionTests(unittest.TestCase):
             decision = db.execute("SELECT accepted_category_id,accepted_target_kind FROM expense_suggestion_events").fetchone()
             self.assertEqual(tuple(decision), (category["id"], "shared"))
         status, payload = self.call(draft, provider)
-        self.assertEqual((status, payload["error"]["code"]), (429, "SUGGESTION_LIMIT"))
-        self.assertEqual(provider.calls, 1)
+        self.assertEqual((status, payload["status"]), (200, "available"))
+        self.assertEqual(provider.calls, 2)
         with self.store.connect() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM expenses").fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT count(*) FROM expense_suggestion_budget").fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT jev_reserved_microusd FROM ledger_plan_usage").fetchone()[0], 2 * JEV_RESERVATION_MICROUSD)
 
 
 if __name__ == "__main__":

@@ -44,7 +44,6 @@ class WorkerJevGateway:
     def __init__(self, env):
         api_key = getattr(env, "TYPESAFE_API_KEY", "")
         self.api_key = str(api_key).strip() if api_key is not None else ""
-        self.daily_limit = 20
         self.enabled = (str(getattr(env, "PULLWISE_JEV_SUGGESTIONS_ENABLED", "")) == "1"
             and str(getattr(env, "PULLWISE_JEV_SUGGESTIONS_EVALUATED", "")) == "1"
             and bool(self.api_key))

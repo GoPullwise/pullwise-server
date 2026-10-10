@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import date, datetime, timezone
 
 from .account_cycle_rules import PAID_PLAN_IDS, effective_user_plan
 from .cloudflare_ledger_api import _error, _revision, _timestamp, _valid_resource_id, _write_guard
@@ -11,9 +10,10 @@ from .cloudflare_ledger_auth import ledger_principal, target_allowed
 from .cloudflare_ledger_expenses import _snapshot
 from .cloudflare_ledger_reports import VISIBLE_EXPENSE_TARGET_SQL
 from .cloudflare_ledger_suggestions import (
-    CONFIDENCE_THRESHOLD, QUESTION_VERSION, _project_visibility_guards, suggestion_questions,
+    CONFIDENCE_THRESHOLD, QUESTION_VERSION, _duplicate_guard, _duplicate_query,
+    _project_visibility_guards, suggestion_questions,
 )
-from .cloudflare_plan_limits import PlanLimitError
+from .cloudflare_plan_limits import PlanLimitError, reserve_jev_batch
 from .cloudflare_principal import PrincipalAuthError
 from .typesafe_client import DEFAULT_JEV_MODEL, build_request, validate_response
 from .cloudflare_jev_preferences import jev_enabled
@@ -56,15 +56,8 @@ async def _fresh_snapshot(binding, headers, now, source, proof, queries):
 
 
 def _recent_query(binding, source):
-    occurred = date.fromisoformat(source["occurred_on"])
-    start = date.fromordinal(max(date.min.toordinal(), occurred.toordinal() - 7)).isoformat()
-    end = date.fromordinal(min(date.max.toordinal(), occurred.toordinal() + 7)).isoformat()
-    return binding.prepare("""SELECT id,revision,purpose FROM expenses
-        WHERE owner_id=? AND deleted_at IS NULL AND target_kind=? AND project_id IS ?
-            AND occurred_on BETWEEN ? AND ? AND amount_minor=? AND currency=? AND id!=?
-        """ + VISIBLE_EXPENSE_TARGET_SQL + " ORDER BY occurred_on DESC,id DESC LIMIT 30").bind(
-            source["owner_id"], source["target_kind"], source["project_id"], start, end,
-            source["amount_minor"], source["currency"], source["id"])
+    return _duplicate_query(binding, source["owner_id"], source["target_kind"], source["project_id"],
+        source["occurred_on"], source["amount_minor"], source["currency"], source["id"])
 
 
 def _model_checks(source, answer, categories, reason, *, category_requested):
@@ -97,10 +90,7 @@ def _model_checks(source, answer, categories, reason, *, category_requested):
     return category, target, chosen_category, chosen_target
 
 
-async def _evaluate(binding, source, user, proof, now, gateway, categories, daily, day):
-    limit = max(1, min(20, int(getattr(gateway, "daily_limit", 20))))
-    if daily and daily[0]["attempts"] >= limit:
-        return None, None, _error(429, "SUGGESTION_LIMIT"), None
+async def _evaluate(binding, source, user, proof, now, gateway, categories):
     questions = suggestion_questions(categories)
     try:
         request = build_request(state={"purpose": source["purpose"], "note": source["note"] or ""},
@@ -109,18 +99,13 @@ async def _evaluate(binding, source, user, proof, now, gateway, categories, dail
         return None, None, None, "invalid_context"
     commands = [_write_guard(binding, proof, user["id"], now), _source_guard(binding, source),
         *_project_visibility_guards(binding, user["id"], source["project_id"]),
-        binding.prepare("""INSERT INTO expense_suggestion_budget(owner_id,day,attempts)
-            VALUES(?,?,1) ON CONFLICT(owner_id,day) DO UPDATE SET attempts=attempts+1
-            WHERE attempts<? RETURNING attempts""").bind(user["id"], day, limit),
         binding.prepare("DELETE FROM d1_command_guard")]
     try:
-        admitted = await binding.batch(commands)
+        await reserve_jev_batch(binding, commands, now=now)
     except PlanLimitError as error:
         return None, None, error.response(), None
     except Exception:
         return None, None, _error(412, "PRECONDITION_FAILED"), None
-    if not admitted[-2].results:
-        return None, None, _error(429, "SUGGESTION_LIMIT"), None
     answer = None
     try:
         raw = await gateway.evaluate(request)
@@ -167,12 +152,8 @@ async def _review(binding, headers, item_id, expected, now, gateway):
     if effective_user_plan(user, timestamp=now) not in PAID_PLAN_IDS:
         return _error(403, "JEV_PLAN_REQUIRED")
     enabled = gateway is not None and gateway.enabled and jev_enabled(user)
-    day = datetime.fromtimestamp(now, timezone.utc).date().isoformat()
     context_queries = [binding.prepare("""SELECT id,name FROM expense_categories
         WHERE owner_id=? AND archived_at IS NULL ORDER BY name,id LIMIT 30""").bind(user["id"])]
-    if enabled:
-        context_queries.append(binding.prepare("""SELECT attempts FROM expense_suggestion_budget
-            WHERE owner_id=? AND day=?""").bind(user["id"], day))
     context = await _fresh_snapshot(binding, headers, now, source, proof, context_queries)
     if context is None:
         return _error(412, "PRECONDITION_FAILED")
@@ -182,11 +163,11 @@ async def _review(binding, headers, item_id, expected, now, gateway):
     event_id = None
     if enabled:
         answer, event_id, error, reason = await _evaluate(binding, source, user, proof, now, gateway,
-            categories, context[1], day)
+            categories)
         if error is not None:
             return error
 
-    # The model cannot observe these candidate texts. Recompute the local rule
+    # The model cannot observe candidate records. Recompute the local rule
     # after inference so archived categories and deleted/moved duplicates cannot
     # be published from an earlier snapshot.
     chosen = answer["answers"].get("category", {}).get("choice") if answer else None
@@ -196,8 +177,7 @@ async def _review(binding, headers, item_id, expected, now, gateway):
     final = await _fresh_snapshot(binding, headers, now, source, proof, final_queries)
     if final is None:
         return _error(412, "PRECONDITION_FAILED")
-    duplicate = next((item for item in final[0]
-        if item["purpose"].casefold() == source["purpose"].casefold()), None)
+    duplicate = next(iter(final[0]), None)
     category_check, target_check, chosen_category, chosen_target = _model_checks(
         source, answer, {row["id"] for row in final[1]}, reason, category_requested=bool(categories))
     duplicate_check = {"status": "checked"}
@@ -209,7 +189,8 @@ async def _review(binding, headers, item_id, expected, now, gateway):
     commands = [_write_guard(binding, proof, user["id"], now), _source_guard(binding, source),
         *_project_visibility_guards(binding, user["id"], source["project_id"])]
     if duplicate is not None:
-        commands.append(_source_guard(binding, {**source, "id": duplicate["id"], "revision": duplicate["revision"]}))
+        commands.append(_duplicate_guard(binding, user["id"], source["target_kind"], source["project_id"],
+            source["occurred_on"], source["amount_minor"], source["currency"], duplicate))
     if chosen_category:
         commands.append(binding.prepare("""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN EXISTS(
             SELECT 1 FROM expense_categories WHERE owner_id=? AND id=? AND archived_at IS NULL)

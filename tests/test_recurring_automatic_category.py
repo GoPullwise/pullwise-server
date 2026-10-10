@@ -8,6 +8,7 @@ import pytest
 from pullwise_server.cloudflare_ledger_api import handle_ledger_request
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1
 from pullwise_server.cloudflare_state_records import encode_record, record_name
+from pullwise_server.ledger_plan_policy import JEV_RESERVATION_MICROUSD
 from test_ledger_automatic_assistance import Provider
 from test_ledger_recurring import app, draft, NOW, NoGitHub
 
@@ -51,7 +52,16 @@ def change_user(app, identity="owner", **changes):
 @pytest.mark.parametrize("plan", ["pro", "max"])
 def test_plan_save_infers_once_and_exact_replay_and_get_spend_nothing(app, project, plan):
     change_user(app, plan=plan)
-    provider = Provider()
+    with closing(app.store.connect()) as db:
+        db.execute("INSERT INTO expense_suggestion_budget VALUES('owner','2026-10-08',20)")
+        db.commit()
+    daily = app.rows("expense_suggestion_budget")
+    def reserved_before_provider():
+        usage = app.rows("ledger_plan_usage")[0]
+        assert usage["jev_reserved_microusd"] == JEV_RESERVATION_MICROUSD
+        assert usage["writes"] == usage["minute_writes"] == 0
+        assert app.rows("expense_suggestion_budget") == daily
+    provider = Provider(on_call=reserved_before_provider)
     body = automatic(project=project)
     status, saved = call(app, body, provider)
     assert status == 201, saved
@@ -62,16 +72,46 @@ def test_plan_save_infers_once_and_exact_replay_and_get_spend_nothing(app, proje
     assert call(app, body, provider) == (201, saved)
     assert call(app, None, provider, method="GET", identifier=saved["id"])[0] == 200
     assert len(provider.calls) == 1
-    assert app.rows("expense_suggestion_budget")[0]["attempts"] == 1
+    assert app.rows("expense_suggestion_budget") == daily
+    usage = app.rows("ledger_plan_usage")[0]
+    assert usage["jev_reserved_microusd"] == JEV_RESERVATION_MICROUSD
+    assert usage["writes"] == usage["minute_writes"] == 1
     assert app.rows("expenses") == []
     assert call(app, {**body, "amount": "99.00"}, provider)[0] == 409
     assert len(provider.calls) == 1
 
 
+@pytest.mark.parametrize("plan,cap", [("pro", 3_000_000), ("max", 5_000_000)])
+def test_exhausted_recurring_monthly_allowance_keeps_manual_creation_without_another_reservation(app, plan, cap):
+    change_user(app, plan=plan)
+    provider = Provider()
+    assert call(app, automatic(), provider)[0] == 201
+    with closing(app.store.connect()) as db:
+        db.execute("UPDATE ledger_plan_usage SET jev_reserved_microusd=? WHERE owner_id='owner'", (cap,))
+        db.commit()
+    before = app.rows("ledger_plan_usage")
+    status, failure = call(app, automatic(), provider, key="exhausted-recurring")
+    assert status == 422 and failure["error"]["code"] == "CATEGORY_REQUIRED"
+    assert failure["assistance"]["reason"] == "JEV_BUDGET_LIMIT"
+    assert len(provider.calls) == 1 and app.rows("ledger_plan_usage") == before
+    assert len(app.rows("expense_recurring_rules")) == 1
+    status, manual = call(app, draft(start="2026-11-01"), provider, key="manual-after-monthly-exhaustion")
+    assert status == 201 and manual["categoryId"] == "cat_1"
+    assert len(provider.calls) == 1
+    usage = app.rows("ledger_plan_usage")[0]
+    assert usage["jev_reserved_microusd"] == cap
+    assert usage["writes"] == usage["minute_writes"] == 2
+    assert app.rows("expense_suggestion_budget") == app.rows("expenses") == []
+
+
 def test_edit_can_request_automatic_category_and_keeps_submitted_fields(app):
     status, saved = app.call("POST", body=draft(start="2026-11-01"))
     assert status == 201
-    provider = Provider()
+    def reserved_before_provider():
+        usage = app.rows("ledger_plan_usage")[0]
+        assert usage["jev_reserved_microusd"] == JEV_RESERVATION_MICROUSD
+        assert usage["writes"] == usage["minute_writes"] == 1
+    provider = Provider(on_call=reserved_before_provider)
     body = automatic(amount="88.99", note="User note")
     status, edited = call(app, body, provider, method="PATCH", identifier=saved["id"],
                           revision=saved["revision"])
@@ -79,6 +119,10 @@ def test_edit_can_request_automatic_category_and_keeps_submitted_fields(app):
     assert edited["categoryId"] == "cat_1" and edited["amount"] == "88.99"
     assert edited["note"] == "User note" and edited["revision"] == saved["revision"] + 1
     assert len(provider.calls) == 1
+    usage = app.rows("ledger_plan_usage")[0]
+    assert usage["jev_reserved_microusd"] == JEV_RESERVATION_MICROUSD
+    assert usage["writes"] == usage["minute_writes"] == 2
+    assert app.rows("expense_suggestion_budget") == []
 
 
 @pytest.mark.parametrize("provider", [None, Provider(confidence=0.6), Provider(failure=TimeoutError())])

@@ -1,5 +1,42 @@
 # Current local acceptance
 
+## Jev monthly allowance, exact duplicates and Billing usage (2026-10-10)
+
+The current merged Server passes **2,546 Python 3.10.12 tests and 62 subtests**.
+The application no longer reads or writes the historical daily-attempt table.
+Expense assistance, recurring categorization, advanced drafts and record review
+reserve only the existing Owner UTC-month USD allowance before calling the model.
+An atomic reservation retains current actor/key/member, plan, target, category
+and capacity guards; the subsequent financial batch charges each business write
+once. An exhausted month never calls the provider, and manual expense entry stays
+available. Existing daily rows remain intact; no schema migration or reset is
+required. Possible duplicates require the same authorized project/shared target,
+expense date, currency and integer minor-unit amount, independent of purpose text.
+Candidates are queried directly and rechecked after inference; publication fences
+the current identity, revision and matching fields.
+
+The existing Billing GET adds paid-plan Jev month, used reservation and total
+allowance. It describes the actual account's personal ledger even when another
+ledger is selected. Old-month usage projects to zero without resetting storage;
+invalid stored usage fails visibly. Reservations are conservative model allowance
+accounting, not provider invoices. Free has no paid Jev usage projection. The
+OpenAPI contract and generated Web mirrors match this final source.
+
+[Native local evidence](jev-monthly-allowance-native-local-2026-10-10.json) passes
+**23 finite HTTP requests / 820 native statements** through the canonical Worker,
+NativeD1 and original-scope ProductMeteredD1 journal at schema 12. Historical
+20-attempt Pro/Max fixtures successfully save, draft and review while leaving
+the old daily rows unchanged. Date/currency/amount mismatches do not create a
+duplicate warning. Exhausted monthly usage performs no provider call or financial
+write; manual saves work and idempotent replays do not add USD or business charges.
+Eight Billing GETs are read-only and correctly show current/older UTC months.
+The journal observes **2,839 reads / 466 writes**, retains **48,548 read / 612
+write reservations**, and remains healthy; separate integrity probes read 748
+rows without writes. Native attempt metadata is absent and remains null rather
+than fabricated. Ten provider responses are synthetic; remote D1, remote
+application requests and real provider calls are all zero. This is local native
+acceptance, not real-account/provider acceptance.
+
 ## Mobile email login transport (2026-10-10)
 
 [Local transport evidence](mobile-email-login-local-2026-10-10.json) records two

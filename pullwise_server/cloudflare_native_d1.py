@@ -22,7 +22,7 @@ class NativeD1:
         self.binding = binding
 
     def prepare(self, sql):
-        return _Statement(self, self.binding.prepare(sql))
+        return _Statement(self, self.binding.prepare(sql), sql)
 
     async def batch(self, statements):
         statements = list(statements)
@@ -33,11 +33,14 @@ class NativeD1:
 
 
 class _Statement:
-    def __init__(self, owner, native):
+    def __init__(self, owner, native, sql, params=()):
         self.owner, self.native = owner, native
+        self.sql, self.params = sql, params
 
     def bind(self, *params):
-        return _Statement(self.owner, self.native.bind(*map(_native_value, params)))
+        # Retain logical Python values for upstream quota/SQL adapters. Only
+        # this final bind converts safe integers for the JavaScript boundary.
+        return _Statement(self.owner, self.native.bind(*map(_native_value, params)), self.sql, params)
 
     async def first(self, column=None):
         return await self.native.first() if column is None else await self.native.first(column)

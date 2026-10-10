@@ -111,7 +111,8 @@ def test_write_only_key_receives_minimal_candidate_and_model_observes_only_saved
     assert automatic.call(ledger, method="GET", path=f"/api/v1/expenses/{candidate['id']}", headers=headers)[0] == 403
 
 
-@pytest.mark.parametrize("changed", ["source_move", "source_delete", "source_edit", "candidate_move", "candidate_edit"])
+@pytest.mark.parametrize("changed", ["source_move", "source_delete", "source_edit", "candidate_move",
+    "candidate_delete", "candidate_date", "candidate_amount", "candidate_currency"])
 def test_provider_time_source_and_candidate_changes_never_publish_old_target_evidence(ledger, changed):
     category = automatic.category(ledger)
     source = saved_record(ledger, category)
@@ -130,6 +131,12 @@ def test_provider_time_source_and_candidate_changes_never_publish_old_target_evi
             elif changed.endswith("delete"):
                 db.execute("UPDATE expenses SET deleted_at='2026-10-09T00:00:00Z',revision=revision+1 WHERE id=?",
                            (identity,))
+            elif changed.endswith("date"):
+                db.execute("UPDATE expenses SET occurred_on='2026-09-28',revision=revision+1 WHERE id=?", (identity,))
+            elif changed.endswith("amount"):
+                db.execute("UPDATE expenses SET amount_minor=amount_minor+1,revision=revision+1 WHERE id=?", (identity,))
+            elif changed.endswith("currency"):
+                db.execute("UPDATE expenses SET currency='EUR',revision=revision+1 WHERE id=?", (identity,))
             else:
                 db.execute("UPDATE expenses SET purpose='Changed description',revision=revision+1 WHERE id=?",
                            (identity,))
@@ -141,7 +148,7 @@ def test_provider_time_source_and_candidate_changes_never_publish_old_target_evi
     assert len(provider.calls) == 1 and financial_rows(ledger) == changed_rows[0]
     assert_no_financial_charge(before_usage, usage(ledger))
     with ledger.store.connect() as db:
-        assert db.execute("SELECT attempts FROM expense_suggestion_budget").fetchone()[0] == 1
+        assert db.execute("SELECT count(*) FROM expense_suggestion_budget").fetchone()[0] == 0
         assert db.execute("SELECT count(*) FROM d1_command_guard").fetchone()[0] == 0
         events = db.execute("SELECT count(*) FROM expense_suggestion_events").fetchone()[0]
     if changed.startswith("source"):

@@ -2,6 +2,7 @@
 import asyncio
 import json
 from contextlib import closing
+from datetime import datetime, timezone
 
 import pytest
 
@@ -50,7 +51,9 @@ def test_capacity_read_counts_active_expenses_without_initializing_usage(capacit
     assert status == 200
     assert payload["ledgerUsage"] == {"workspaceId": "owner",
         "projects": {"used": 3, "limit": 20, "remaining": 17},
-        "expenseRecords": {"used": 2, "limit": 20000, "remaining": 19998}}
+        "expenseRecords": {"used": 2, "limit": 20000, "remaining": 19998},
+        "jev": {"month": datetime.fromtimestamp(fixture.now, timezone.utc).strftime("%Y-%m"),
+                "currency": "USD", "usedMicrousd": 0, "limitMicrousd": 3000000}}
     assert binding.batch_count == 1
     with closing(fixture.store.connect()) as db:
         assert db.execute("SELECT COUNT(*) FROM ledger_plan_usage").fetchone()[0] == 0
@@ -80,7 +83,9 @@ def test_capacity_ignores_legacy_record_counter_and_keeps_configured_limits(capa
     assert status == 200
     assert payload["ledgerUsage"] == {"workspaceId": "owner",
         "projects": {"used": 30, "limit": 40, "remaining": 10},
-        "expenseRecords": {"used": 2, "limit": 80, "remaining": 78}}
+        "expenseRecords": {"used": 2, "limit": 80, "remaining": 78},
+        "jev": {"month": datetime.fromtimestamp(fixture.now, timezone.utc).strftime("%Y-%m"),
+                "currency": "USD", "usedMicrousd": 0, "limitMicrousd": 3000000}}
     with closing(fixture.store.connect()) as db:
         assert tuple(db.execute("SELECT projects,records FROM ledger_plan_usage").fetchone()) == (30, 90)
 
@@ -100,6 +105,7 @@ def test_personal_billing_stays_personal_while_me_uses_selected_workspace(capaci
     status, personal = asyncio.run(read_public_plan(binding=binding, headers=headers, now=fixture.now))
     assert status == 200 and personal["ledgerUsage"]["workspaceId"] == "member"
     assert personal["ledgerUsage"]["expenseRecords"] == {"used": 0, "limit": 100, "remaining": 100}
+    assert personal["ledgerUsage"]["jev"] is None
     status, selected = asyncio.run(read_ledger_me(binding=binding, headers=headers, now=fixture.now))
     assert status == 200 and selected["ledgerUsage"]["workspaceId"] == "owner"
     assert selected["ledgerUsage"]["expenseRecords"] == {"used": 2, "limit": 20000, "remaining": 19998}
@@ -138,3 +144,4 @@ def test_expired_paid_plan_reports_free_limits_without_truncating_existing_capac
     assert status == 200
     assert payload["ledgerUsage"]["projects"] == {"used": 3, "limit": 3, "remaining": 0}
     assert payload["ledgerUsage"]["expenseRecords"] == {"used": 2, "limit": 100, "remaining": 98}
+    assert payload["ledgerUsage"]["jev"] is None

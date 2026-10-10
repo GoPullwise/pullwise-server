@@ -154,7 +154,7 @@ def test_exact_remaining_or_new_month_reserves_atomically_before_provider(previe
         with preview.fixture.store.connect() as database:
             usage = database.execute("SELECT writes,records,jev_reserved_microusd FROM ledger_plan_usage").fetchone()
             assert tuple(usage) == (0, 0, JEV_RESERVATION_MICROUSD if prior_month else 5_000_000)
-            assert database.execute("SELECT attempts FROM expense_suggestion_budget").fetchone()[0] == 1
+            assert database.execute("SELECT count(*) FROM expense_suggestion_budget").fetchone()[0] == 0
 
     provider = Provider(on_call=verify_reservation)
     status, result = save(preview, provider, category=False)
@@ -172,12 +172,12 @@ def test_failed_or_uncertain_model_keeps_reservation_without_stopping_preview(pr
     with preview.fixture.store.connect() as database:
         usage = database.execute("SELECT writes,records,jev_reserved_microusd FROM ledger_plan_usage").fetchone()
         assert tuple(usage) == (int(category), int(category), JEV_RESERVATION_MICROUSD)
-        assert database.execute("SELECT attempts FROM expense_suggestion_budget").fetchone()[0] == 1
+        assert database.execute("SELECT count(*) FROM expense_suggestion_budget").fetchone()[0] == 0
         assert database.execute("SELECT count(*) FROM expense_suggestion_events").fetchone()[0] == 1
 
 
 @pytest.mark.parametrize("category", [True, False])
-def test_daily_cap_keeps_preview_open_without_another_usd_reservation(preview, category):
+def test_legacy_daily_cap_does_not_limit_admission_or_change_historical_attempts(preview, category):
     reserved = 20 * JEV_RESERVATION_MICROUSD
     reserve_existing(preview, reserved)
     day = datetime.fromtimestamp(preview.now, timezone.utc).date().isoformat()
@@ -186,11 +186,11 @@ def test_daily_cap_keeps_preview_open_without_another_usd_reservation(preview, c
             ("usr_github_77", day))
     provider = Provider()
     status, result = save(preview, provider, category=category)
-    assert status == (201 if category else 422)
-    assert result["assistance"]["reason"] == "SUGGESTION_LIMIT"
-    assert provider.calls == []
+    assert status == 201
+    assert result["assistance"]["status"] == "available"
+    assert len(provider.calls) == 1
     with preview.fixture.store.connect() as database:
         usage = database.execute("SELECT writes,records,jev_reserved_microusd FROM ledger_plan_usage").fetchone()
-        assert tuple(usage) == (int(category), int(category), reserved)
+        assert tuple(usage) == (1, 1, reserved + JEV_RESERVATION_MICROUSD)
         assert database.execute("SELECT attempts FROM expense_suggestion_budget").fetchone()[0] == 20
-        assert database.execute("SELECT count(*) FROM expense_suggestion_events").fetchone()[0] == 0
+        assert database.execute("SELECT count(*) FROM expense_suggestion_events").fetchone()[0] == 1

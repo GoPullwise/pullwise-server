@@ -102,6 +102,15 @@ def test_non_integer_parameters_are_forwarded_without_reinterpretation(raw):
     assert all(type(actual) is type(expected) for actual, expected in zip(raw.bound[0], values))
 
 
+def test_native_statements_preserve_logical_sql_and_integer_parameters_for_quota_adapters(raw):
+    binding = NativeD1(raw)
+    unbound = binding.prepare("SELECT ?")
+    bound = unbound.bind(MAX_SAFE)
+    assert unbound.sql == bound.sql == "SELECT ?"
+    assert unbound.params == () and bound.params == (MAX_SAFE,)
+    assert type(bound.params[0]) is int and type(bound.native.params[0]) is float
+
+
 @pytest.mark.parametrize("value", [MAX_SAFE + 1, -MAX_SAFE - 1])
 def test_unsafe_integer_is_rejected_before_native_bind_without_rounding(raw, value):
     with pytest.raises(ValueError, match="safe integer"):

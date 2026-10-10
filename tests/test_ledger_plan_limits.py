@@ -8,7 +8,7 @@ import pytest
 
 from ledger_d1_fixture import D1ShapedSQLite, seed, seed_auth
 from pullwise_server.ledger_plan_policy import default_policy, parse_policy, entitlements, JEV_RESERVATION_MICROUSD
-from pullwise_server.cloudflare_plan_limits import PlanLimitedD1, PlanLimitError
+from pullwise_server.cloudflare_plan_limits import PlanLimitedD1, PlanLimitError, reserve_jev_batch
 from pullwise_server.cloudflare_state_records import record_name
 
 
@@ -67,8 +67,8 @@ def write(binding, frozen, fixture, number, *, kind="project", now=None):
             VALUES(?,?,'shared','category','2026-09-28',1,'USD','test','local','local')""").bind(
                 "e" + str(number), "owner")
     elif kind == "jev":
-        change = binding.prepare("INSERT INTO expense_suggestion_budget(owner_id,day,attempts) VALUES(?,?,1)").bind(
-            "owner", str(number))
+        binding.now = fixture.now if now is None else now
+        return asyncio.run(binding.reserve_jev([fence, binding.prepare("DELETE FROM d1_command_guard")]))
     else:
         change = binding.prepare("UPDATE ledger_projects SET description=? WHERE id=?").bind(str(number), "p1")
     binding.now = fixture.now if now is None else now
@@ -190,7 +190,7 @@ def test_paid_jev_exact_monthly_boundary_preserves_business_usage_and_denies_bef
     assert raw.batch_count == batches
     with fixture.store.connect() as db:
         assert tuple(db.execute("SELECT projects,records,writes,minute_writes,jev_reserved_microusd,jev_cap FROM ledger_plan_usage").fetchone()) == (1, 0, 1, 1, cap, cap)
-        assert db.execute("SELECT COUNT(*) FROM expense_suggestion_budget").fetchone()[0] == 2
+        assert db.execute("SELECT COUNT(*) FROM expense_suggestion_budget").fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM d1_command_guard").fetchone()[0] == 0
 
 
@@ -212,7 +212,7 @@ def test_concurrent_paid_jev_attempts_cannot_overfill_budget(setup, plan):
         assert sorted(pool.map(attempt, [1, 2])) == [False, True]
     with fixture.store.connect() as db:
         assert tuple(db.execute("SELECT writes,jev_reserved_microusd FROM ledger_plan_usage").fetchone()) == (0, JEV_RESERVATION_MICROUSD)
-        assert db.execute("SELECT COUNT(*) FROM expense_suggestion_budget").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM expense_suggestion_budget").fetchone()[0] == 0
 
 
 @pytest.mark.parametrize("plan", ["pro", "max"])
@@ -291,7 +291,7 @@ def test_failed_business_batch_does_not_refund_an_admitted_jev_attempt(setup, pl
             limited.prepare("DELETE FROM d1_command_guard")]))
     with fixture.store.connect() as db:
         assert tuple(db.execute("SELECT projects,records,writes,jev_reserved_microusd FROM ledger_plan_usage").fetchone()) == (0, 0, 0, JEV_RESERVATION_MICROUSD)
-        assert db.execute("SELECT COUNT(*) FROM expense_suggestion_budget").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM expense_suggestion_budget").fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM ledger_projects").fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM d1_command_guard").fetchone()[0] == 0
 
@@ -444,3 +444,76 @@ def test_internal_jev_reservation_survives_lowered_business_write_caps(setup):
     with pytest.raises(PlanLimitError, match="WRITE_RATE_LIMIT"):
         write(limited, frozen, fixture, 4)
     assert raw.batch_count == batches
+
+
+def test_monthly_reservations_continue_past_twenty_calls_on_one_day_without_touching_history(setup):
+    fixture, _ = setup
+    frozen = account_plan(fixture, "max")
+    with fixture.store._immediate() as db:
+        db.execute("INSERT INTO expense_suggestion_budget VALUES('owner','2026-09-28',20)")
+    limited = PlanLimitedD1(D1ShapedSQLite(fixture.store), now=fixture.now)
+    for number in range(25):
+        write(limited, frozen, fixture, number, kind="jev")
+    with fixture.store.connect() as db:
+        assert tuple(db.execute("SELECT writes,minute_writes,jev_reserved_microusd FROM ledger_plan_usage").fetchone()) == (
+            0, 0, 25 * JEV_RESERVATION_MICROUSD)
+        assert tuple(db.execute("SELECT owner_id,day,attempts FROM expense_suggestion_budget").fetchone()) == (
+            "owner", "2026-09-28", 20)
+        assert db.execute("SELECT COUNT(*) FROM d1_command_guard").fetchone()[0] == 0
+
+
+def test_jev_reservation_requires_current_owner_fence_and_rolls_back_on_failed_guard(setup):
+    fixture, _ = setup
+    frozen = account_plan(fixture, "max")
+    raw = D1ShapedSQLite(fixture.store)
+    limited = PlanLimitedD1(raw, now=fixture.now)
+    with pytest.raises(PlanLimitError, match="USAGE_GUARD_UNAVAILABLE"):
+        asyncio.run(limited.reserve_jev([limited.prepare("DELETE FROM d1_command_guard")]))
+    assert raw.batch_count == 0
+    write(limited, frozen, fixture, 1, kind="jev")
+    with pytest.raises(sqlite3.IntegrityError):
+        write(limited, frozen.replace('"max"', '"pro"'), fixture, 2, kind="jev")
+    with fixture.store.connect() as db:
+        assert tuple(db.execute("SELECT writes,jev_reserved_microusd FROM ledger_plan_usage").fetchone()) == (
+            0, JEV_RESERVATION_MICROUSD)
+        assert db.execute("SELECT COUNT(*) FROM d1_command_guard").fetchone()[0] == 0
+
+
+def test_late_jev_request_cannot_roll_its_reserved_budget_to_an_old_window(setup):
+    fixture, _ = setup
+    frozen = account_plan(fixture, "max")
+    raw = D1ShapedSQLite(fixture.store)
+    limited = PlanLimitedD1(raw, now=fixture.now)
+    write(limited, frozen, fixture, 1, kind="jev", now=fixture.now + 60)
+    batches = raw.batch_count
+    with pytest.raises(PlanLimitError, match="QUOTA_WINDOW_CHANGED"):
+        write(limited, frozen, fixture, 2, kind="jev", now=fixture.now)
+    assert raw.batch_count == batches
+    with fixture.store.connect() as db:
+        assert tuple(db.execute("SELECT minute,jev_reserved_microusd FROM ledger_plan_usage").fetchone()) == (
+            (fixture.now + 60) // 60, JEV_RESERVATION_MICROUSD)
+
+
+def test_raw_native_adapter_also_reserves_monthly_budget_before_dispatch(setup):
+    from pullwise_server.cloudflare_native_d1 import NativeD1
+    from test_cloudflare_native_d1 import NativeBinding
+
+    fixture, _ = setup
+    frozen = account_plan(fixture, "max")
+    with fixture.store.connect() as db:
+        native = NativeBinding(db)
+        binding = NativeD1(native)
+        guard = binding.prepare("""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN
+            EXISTS(SELECT 1 FROM app_state u WHERE u.name=? AND u.payload=?)
+            THEN 1 ELSE 0 END)""").bind(record_name("users", "owner"), frozen)
+        commands = [guard, binding.prepare("DELETE FROM d1_command_guard")]
+        asyncio.run(reserve_jev_batch(binding, commands, now=fixture.now))
+        assert tuple(db.execute("SELECT writes,jev_reserved_microusd FROM ledger_plan_usage").fetchone()) == (
+            0, JEV_RESERVATION_MICROUSD)
+        db.execute("UPDATE ledger_plan_usage SET jev_reserved_microusd=5000000")
+        calls = len(native.batches)
+        with pytest.raises(PlanLimitError, match="JEV_BUDGET_LIMIT"):
+            asyncio.run(reserve_jev_batch(binding, commands, now=fixture.now))
+        assert len(native.batches) == calls
+        assert db.execute("SELECT COUNT(*) FROM expense_suggestion_budget").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM d1_command_guard").fetchone()[0] == 0

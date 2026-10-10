@@ -45,21 +45,42 @@ def capacity_usage_statement(binding, owner_id):
     return binding.prepare("""SELECT
         COALESCE((SELECT projects FROM ledger_plan_usage WHERE owner_id=?),
             (SELECT COUNT(*) FROM ledger_projects WHERE owner_id=?)) AS projects,
-        (SELECT COUNT(*) FROM expenses WHERE owner_id=? AND """ + ACTIVE_EXPENSE_SQL + ") AS records").bind(
-                owner_id, owner_id, owner_id)
+        (SELECT COUNT(*) FROM expenses WHERE owner_id=? AND """ + ACTIVE_EXPENSE_SQL + """ ) AS records,
+        (SELECT month FROM ledger_plan_usage WHERE owner_id=?) AS jev_month,
+        (SELECT jev_reserved_microusd FROM ledger_plan_usage WHERE owner_id=?) AS jev_reserved_microusd""").bind(
+                owner_id, owner_id, owner_id, owner_id, owner_id)
 
 
 def capacity_usage_payload(user, rows, *, now, policy=None):
     if len(rows) != 1:
         raise PlanLimitError(503, "USAGE_GUARD_UNAVAILABLE")
-    limits = entitlements(user, now=now, policy=policy)["limits"]
-    payload = {"workspaceId": user["id"]}
+    entitlement = entitlements(user, now=now, policy=policy)
+    limits = entitlement["limits"]
+    payload = {"workspaceId": user["id"], "jev": None}
     for field, column in (("projects", "projects"), ("expenseRecords", "records")):
         used = rows[0][column]
         if type(used) is not int or not 0 <= used <= 1000000:
             raise PlanLimitError(503, "USAGE_GUARD_UNAVAILABLE")
         limit = limits[field]
         payload[field] = {"used": used, "limit": limit, "remaining": max(0, limit - used)}
+    if entitlement["jev"]["eligible"]:
+        # The existing reservation counter is a conservative allowance meter,
+        # not a provider invoice. A GET projects the current UTC month without
+        # initializing/resetting usage or carrying a previous month's balance.
+        month = datetime.fromtimestamp(now, timezone.utc).strftime("%Y-%m")
+        saved_month = rows[0]["jev_month"]
+        reserved = rows[0]["jev_reserved_microusd"]
+        if saved_month is None and reserved is None:
+            used = 0
+        else:
+            if (not isinstance(saved_month, str)
+                    or not re.fullmatch(r"[0-9]{4}-(?:0[1-9]|1[0-2])", saved_month)
+                    or saved_month > month or type(reserved) is not int
+                    or not 0 <= reserved <= 9007199254740991):
+                raise PlanLimitError(503, "USAGE_GUARD_UNAVAILABLE")
+            used = reserved if saved_month == month else 0
+        payload["jev"] = {"month": month, "currency": "USD", "usedMicrousd": used,
+                          "limitMicrousd": usd_micros(entitlement["jev"]["monthlyBudgetUsd"])}
     return payload
 
 
@@ -124,7 +145,18 @@ class PlanLimitedD1:
         return _Prepared(self, sql)
 
     async def batch(self, statements):
+        return await self._batch(statements, reserve_jev=False)
+
+    async def reserve_jev(self, statements):
+        """Reserve one model call atomically with its current authority guards."""
+        return await self._batch(statements, reserve_jev=True)
+
+    async def _batch(self, statements, *, reserve_jev):
         statements = list(statements)
+        if reserve_jev and any(_MUTATION.match(item.sql) for item in statements):
+            # Reservations are a separate guarded admission step before the
+            # provider call, never a business mutation or an event append.
+            raise PlanLimitError(503, "USAGE_GUARD_UNAVAILABLE")
         # A closed Owner erasure carries its own exact capacity/one-write
         # counter in the guarded batch. Validate the entire canonical recipe;
         # never infer negative capacity from an arbitrary DELETE statement.
@@ -176,7 +208,7 @@ class PlanLimitedD1:
         # but neither a usage UPSERT nor a business write charge is needed.
         if mutations and all(table == "expense_suggestion_events" for _, table in mutations):
             return await self.binding.batch(raw)
-        if not mutations:
+        if not mutations and not reserve_jev:
             return await self.binding.batch(raw)
         # Trusted fences contain the account ID and exact persisted user JSON.
         # Never derive the owner or paid plan from an HTTP input or API-key scope.
@@ -193,7 +225,7 @@ class PlanLimitedD1:
             r"^\s*UPDATE\s+expenses\s+SET\s+deleted_at\s*=\s*\?", item.sql, re.I) is not None
             for item, table in mutations)
         record_delta = record_insertions - record_removals
-        jev_delta = JEV_RESERVATION_MICROUSD if any(table == "expense_suggestion_budget" for _, table in mutations) else 0
+        jev_delta = JEV_RESERVATION_MICROUSD if reserve_jev else 0
         write_delta = int(any(table not in {"expense_suggestion_budget", "expense_suggestion_events"}
                               for _, table in mutations))
         if jev_delta and plan not in PAID_PLAN_IDS:
@@ -253,6 +285,17 @@ class PlanLimitedD1:
                 if constraint in str(error):
                     raise PlanLimitError(status, code) from None
             raise
+
+
+async def reserve_jev_batch(binding, statements, *, now):
+    """Use the monthly allowance even for callers without a quota wrapper.
+
+    Runtime routes already use PlanLimitedD1. Local/native callers that supply
+    a raw D1 adapter still receive the same fenced monthly reservation; none
+    may fall back to an unmetered provider call.
+    """
+    limited = binding if isinstance(binding, PlanLimitedD1) else PlanLimitedD1(binding, now=now)
+    return await limited.reserve_jev(statements)
 
 
 @dataclass(frozen=True)

@@ -63,7 +63,7 @@ def test_saved_review_has_per_dimension_results_without_financial_or_commercial_
         assert after_usage[key] == before_usage[key]
     assert after_usage["jev_reserved_microusd"] == JEV_RESERVATION_MICROUSD
     with ledger.store.connect() as db:
-        assert db.execute("SELECT attempts FROM expense_suggestion_budget").fetchone()[0] == 1
+        assert db.execute("SELECT count(*) FROM expense_suggestion_budget").fetchone()[0] == 0
         assert db.execute("SELECT count(*) FROM expense_suggestion_events").fetchone()[0] == 1
         assert db.execute("SELECT recorded_expense_id FROM expense_suggestion_events").fetchone()[0] == saved["id"]
         assert db.execute("SELECT count(*) FROM d1_command_guard").fetchone()[0] == 0
@@ -131,14 +131,23 @@ def test_no_active_categories_still_checks_target_and_local_duplicate(ledger):
 
 
 @pytest.mark.parametrize("change", [
-    {"amount": "13.50"}, {"currency": "EUR"}, {"occurredOn": "2026-10-05"},
-    {"purpose": "different purchase"}, {"target": {"kind": "shared"}},
+    {"amount": "13.50"}, {"currency": "EUR"}, {"occurredOn": "2026-09-26"},
+    {"occurredOn": "2026-09-28"}, {"target": {"kind": "shared"}},
 ])
-def test_local_duplicate_requires_same_target_money_date_window_and_purpose(ledger, change):
+def test_local_duplicate_requires_same_target_money_and_exact_date(ledger, change):
     body, saved, _ = setup_expense(ledger, "project")
     duplicate(ledger, body, **change)
     status, result = review(ledger, saved)
     assert status == 200 and result["checks"]["duplicate"] == {"status": "checked"}
+
+
+def test_local_duplicate_matches_same_day_money_even_with_a_different_purpose(ledger):
+    body, saved, _ = setup_expense(ledger)
+    other = duplicate(ledger, body, purpose="A differently described purchase")
+    status, result = review(ledger, saved)
+    assert status == 200
+    assert result["checks"]["duplicate"] == {
+        "status": "issue", "candidate": {"id": other["id"], "revision": other["revision"]}}
 
 
 @pytest.mark.parametrize("revision,status", [(None, 428), ('"invalid"', 422), ('"0"', 422), ('"2"', 412)])
@@ -154,22 +163,33 @@ def test_review_validates_revision_before_model_or_budget(ledger, revision, stat
 
 
 @pytest.mark.parametrize("plan,maximum", [("pro", 3_000_000), ("max", 5_000_000)])
-@pytest.mark.parametrize("boundary", ["daily", "monthly"])
-def test_review_reuses_existing_paid_daily_and_monthly_budget(ledger, plan, maximum, boundary):
+def test_review_reuses_existing_paid_monthly_budget(ledger, plan, maximum):
     set_plan(ledger, plan)
     _, saved, _ = setup_expense(ledger)
     with ledger.store.connect() as db:
-        if boundary == "monthly":
-            db.execute("UPDATE ledger_plan_usage SET jev_reserved_microusd=?", (maximum,))
-        else:
-            db.execute("INSERT INTO expense_suggestion_budget VALUES(?,?,20)",
-                ("usr_github_77", datetime.fromtimestamp(ledger.now + 3, timezone.utc).date().isoformat()))
+        db.execute("UPDATE ledger_plan_usage SET jev_reserved_microusd=?", (maximum,))
     provider = automatic.Provider()
     before = financial_rows(ledger)
     status, result = review(ledger, saved, provider)
     assert status == 429
-    assert result["error"]["code"] == ("SUGGESTION_LIMIT" if boundary == "daily" else "JEV_BUDGET_LIMIT")
+    assert result["error"]["code"] == "JEV_BUDGET_LIMIT"
     assert not provider.calls and financial_rows(ledger) == before
+
+
+def test_review_ignores_historical_daily_attempts_without_resetting_them(ledger):
+    _, saved, _ = setup_expense(ledger)
+    day = datetime.fromtimestamp(ledger.now + 3, timezone.utc).date().isoformat()
+    with ledger.store.connect() as db:
+        db.execute("INSERT INTO expense_suggestion_budget VALUES(?,?,20)", ("usr_github_77", day))
+    before, before_usage = financial_rows(ledger), usage(ledger)
+    provider = automatic.Provider()
+    status, result = review(ledger, saved, provider)
+    assert status == 200 and len(provider.calls) == 1
+    assert financial_rows(ledger) == before
+    assert usage(ledger)["jev_reserved_microusd"] == before_usage["jev_reserved_microusd"] + JEV_RESERVATION_MICROUSD
+    with ledger.store.connect() as db:
+        assert db.execute("SELECT attempts FROM expense_suggestion_budget WHERE owner_id=? AND day=?",
+            ("usr_github_77", day)).fetchone()[0] == 20
 
 
 def test_write_only_key_gets_minimal_review_without_full_saved_or_candidate_dto(ledger):

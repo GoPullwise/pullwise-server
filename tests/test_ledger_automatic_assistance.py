@@ -2,7 +2,6 @@
 import asyncio
 import json
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pytest
 
@@ -10,7 +9,7 @@ from pullwise_server.cloudflare_api_key_write import create_api_key
 from pullwise_server.cloudflare_ledger_api import handle_ledger_request
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1
 from pullwise_server.cloudflare_state_records import encode_record, record_name
-from pullwise_server.ledger_plan_policy import default_policy
+from pullwise_server.ledger_plan_policy import default_policy, JEV_RESERVATION_MICROUSD
 import test_ledger_suggestions as suggestion_fixture
 from test_cloudflare_github_identity_http import GitHubStub
 
@@ -19,10 +18,6 @@ from test_cloudflare_github_identity_http import GitHubStub
 def ledger():
     fixture = suggestion_fixture.LedgerSuggestionTests()
     fixture.setUp()
-    with fixture.store.connect() as db:
-        migrations = Path(__file__).resolve().parents[1] / "cloudflare/server/migrations"
-        for name in ("0004_ledger_plan_usage.sql",):
-            db.executescript((migrations / name).read_text())
     fixture.binding = PlanLimitedD1(fixture.binding, now=fixture.now + 3)
     yield fixture
     fixture.tearDown()
@@ -47,7 +42,6 @@ def expense(category_id=None, **changes):
 
 class Provider:
     enabled = True
-    daily_limit = 100
 
     def __init__(self, *, confidence=0.95, failure=None, on_call=None):
         self.confidence, self.failure, self.on_call = confidence, failure, on_call
@@ -91,7 +85,7 @@ def test_paid_create_automatically_classifies_and_replay_spends_nothing(ledger, 
     assert len(provider.calls) == 1
     with ledger.store.connect() as db:
         assert db.execute("SELECT count(*) FROM expenses").fetchone()[0] == 1
-        assert db.execute("SELECT attempts FROM expense_suggestion_budget").fetchone()[0] == 1
+        assert db.execute("SELECT count(*) FROM expense_suggestion_budget").fetchone()[0] == 0
         assert db.execute("SELECT records FROM ledger_plan_usage").fetchone()[0] == 1
     assert call(ledger, expense(amount="13.50"), provider)[0] == 409
     assert len(provider.calls) == 1
@@ -241,20 +235,20 @@ def test_category_archived_during_inference_is_not_saved(ledger):
         assert db.execute("SELECT count(*) FROM expenses").fetchone()[0] == 0
 
 
-def test_daily_limit_respects_canonical_schema_and_keeps_manual_save_available(ledger):
+def test_legacy_daily_cap_is_preserved_without_limiting_new_model_calls(ledger):
     chosen = category(ledger)
     day = datetime.fromtimestamp(ledger.now + 3, timezone.utc).date().isoformat()
     with ledger.store.connect() as db:
         owner = db.execute("SELECT owner_id FROM expense_categories WHERE id=?", (chosen,)).fetchone()[0]
-        db.execute("INSERT INTO expense_suggestion_budget(owner_id,day,attempts) VALUES(?,?,19)",
+        db.execute("INSERT INTO expense_suggestion_budget(owner_id,day,attempts) VALUES(?,?,20)",
                    (owner, day))
-    provider = Provider()  # Intentionally requests 100; the schema permits 20.
-    status, first = call(ledger, expense(chosen), provider, key="daily-twentieth")
+    provider = Provider()
+    status, first = call(ledger, expense(chosen), provider, key="after-legacy-daily-cap")
     assert status == 201 and first["assistance"]["status"] == "available"
-    status, second = call(ledger, expense(chosen, purpose="Another hosting bill"), provider, key="daily-limit")
-    assert status == 201 and second["assistance"]["status"] == "unavailable"
-    assert second["assistance"]["reason"] == "SUGGESTION_LIMIT"
-    assert second["categoryId"] == chosen and len(provider.calls) == 1
+    status, second = call(ledger, expense(chosen, purpose="Another hosting bill"), provider, key="next-monthly-reservation")
+    assert status == 201 and second["assistance"]["status"] == "available"
+    assert second["categoryId"] == chosen and len(provider.calls) == 2
     with ledger.store.connect() as db:
         assert db.execute("SELECT attempts FROM expense_suggestion_budget WHERE owner_id=? AND day=?",
                           (owner, day)).fetchone()[0] == 20
+        assert db.execute("SELECT jev_reserved_microusd FROM ledger_plan_usage").fetchone()[0] == 2 * JEV_RESERVATION_MICROUSD

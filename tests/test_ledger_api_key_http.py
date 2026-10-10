@@ -93,7 +93,7 @@ class LedgerApiKeyHttpTests(unittest.TestCase):
         self.assertIn("expenses:write", profile["scopes"])
         self.assertEqual(profile["ledgerUsage"], {"workspaceId": profile["id"],
             "projects": {"used": 0, "limit": 3, "remaining": 3},
-            "expenseRecords": {"used": 0, "limit": 100, "remaining": 100}})
+            "expenseRecords": {"used": 0, "limit": 100, "remaining": 100}, "jev": None})
         status, key = self.run_async(create_api_key(binding=self.binding, headers=cookie,
             body={}, now=self.now + 2))
         self.assertEqual(status, 201)

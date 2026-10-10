@@ -158,7 +158,7 @@ def test_off_during_provider_rejects_old_authority_without_financial_or_suggesti
     assert len(provider.calls) == 1 and financial_rows(ledger) == before
     with ledger.store.connect() as db:
         assert db.execute("SELECT count(*) FROM expense_suggestion_events").fetchone()[0] == 0
-        assert db.execute("SELECT attempts FROM expense_suggestion_budget").fetchone()[0] == 1
+        assert db.execute("SELECT count(*) FROM expense_suggestion_budget").fetchone()[0] == 0
         assert db.execute("SELECT count(*) FROM d1_command_guard").fetchone()[0] == 0
     after_usage = usage(ledger)
     for key in ("projects", "records", "writes", "minute_writes"):

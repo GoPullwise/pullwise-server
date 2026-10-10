@@ -2,7 +2,6 @@
 import asyncio
 import hashlib
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -72,7 +71,7 @@ def test_paid_automatic_edit_selects_category_keeps_explicit_fields_and_excludes
         usage = db.execute("SELECT records,writes,jev_reserved_microusd FROM ledger_plan_usage").fetchone()
         assert usage["records"] == 1 and usage["writes"] == (5 if target == "project" else 4)
         assert usage["jev_reserved_microusd"] == JEV_RESERVATION_MICROUSD
-        assert db.execute("SELECT attempts FROM expense_suggestion_budget").fetchone()[0] == 1
+        assert db.execute("SELECT count(*) FROM expense_suggestion_budget").fetchone()[0] == 0
 
 
 @pytest.mark.parametrize("same", [False, True])
@@ -93,7 +92,7 @@ def test_automatic_edit_requires_inferred_category_to_remain_active_even_when_un
         for key in ("writes", "minute_writes", "records", "projects"):
             assert usage_after[key] == usage_before[key]
         assert usage_after["jev_reserved_microusd"] == JEV_RESERVATION_MICROUSD
-        assert db.execute("SELECT attempts FROM expense_suggestion_budget").fetchone()[0] == 1
+        assert db.execute("SELECT count(*) FROM expense_suggestion_budget").fetchone()[0] == 0
 
 
 def test_explicit_previous_archived_category_remains_editable_but_automatic_needs_active_choice(ledger):
@@ -230,24 +229,19 @@ def test_automatic_edit_uses_workspace_owner_plan_and_audits_the_actual_editor(l
             assert tuple(audit) == ("session", actor_id) and json.loads(activity[0])["userId"] == actor_id
 
 
-@pytest.mark.parametrize("quota", ["daily", "monthly"])
 @pytest.mark.parametrize("plan", ["pro", "max"])
-def test_paid_edit_exhaustion_preserves_automatic_draft_and_allows_explicit_save(ledger, plan, quota):
+def test_paid_edit_monthly_exhaustion_preserves_automatic_draft_and_allows_explicit_save(ledger, plan):
     set_plan(ledger, plan)
     body, saved, _ = setup_expense(ledger)
     before = financial_rows(ledger)
     with ledger.store.connect() as db:
-        if quota == "daily":
-            day = datetime.fromtimestamp(ledger.now+3, timezone.utc).date().isoformat()
-            db.execute("INSERT INTO expense_suggestion_budget VALUES('usr_github_77',?,20)", (day,))
-        else:
-            budget = 3_000_000 if plan == "pro" else 5_000_000
-            db.execute("UPDATE ledger_plan_usage SET jev_reserved_microusd=? WHERE owner_id='usr_github_77'", (budget,))
+        budget = 3_000_000 if plan == "pro" else 5_000_000
+        db.execute("UPDATE ledger_plan_usage SET jev_reserved_microusd=? WHERE owner_id='usr_github_77'", (budget,))
     draft = {key: value for key, value in body.items() if key != "categoryId"}
     provider = automatic.Provider()
     status, failure = edit(ledger, saved, draft, provider)
     assert status == 422 and failure["error"]["code"] == "CATEGORY_REQUIRED"
-    assert failure["assistance"]["reason"] == ("SUGGESTION_LIMIT" if quota == "daily" else "JEV_BUDGET_LIMIT")
+    assert failure["assistance"]["reason"] == "JEV_BUDGET_LIMIT"
     assert provider.calls == [] and financial_rows(ledger) == before
     status, updated = edit(ledger, saved, {**body, "note": "Explicit save remains available"}, provider)
     assert status == 200 and updated["categoryId"] == saved["categoryId"]

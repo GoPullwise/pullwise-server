@@ -12,12 +12,33 @@ from .cloudflare_principal import PrincipalAuthError
 from .cloudflare_ledger_expenses import _amount
 from .typesafe_client import DEFAULT_JEV_MODEL, build_request, validate_response
 from .account_cycle_rules import PAID_PLAN_IDS, effective_user_plan
-from .cloudflare_plan_limits import PlanLimitError
+from .cloudflare_plan_limits import PlanLimitError, reserve_jev_batch
 from .cloudflare_jev_preferences import ensure_current_jev_authority, jev_enabled
 
 
 QUESTION_VERSION = "ledger-suggest-v2"
 CONFIDENCE_THRESHOLD = 0.80
+
+
+def _duplicate_query(binding, owner_id, target_kind, project_id, occurred, minor, currency,
+                     exclude_expense_id=None):
+    from .cloudflare_ledger_reports import VISIBLE_EXPENSE_TARGET_SQL
+    return binding.prepare("""SELECT id,revision FROM expenses
+        WHERE owner_id=? AND deleted_at IS NULL AND target_kind=? AND project_id IS ?
+            AND occurred_on=? AND amount_minor=? AND currency=? AND id!=?
+        """ + VISIBLE_EXPENSE_TARGET_SQL + " ORDER BY id DESC LIMIT 1").bind(
+            owner_id, target_kind, project_id, occurred, minor, currency, exclude_expense_id or "")
+
+
+def _duplicate_guard(binding, owner_id, target_kind, project_id, occurred, minor, currency,
+                     candidate):
+    from .cloudflare_ledger_reports import VISIBLE_EXPENSE_TARGET_SQL
+    return binding.prepare("""INSERT INTO d1_command_guard(ok) VALUES(CASE WHEN EXISTS(
+        SELECT 1 FROM expenses WHERE owner_id=? AND id=? AND revision=? AND deleted_at IS NULL
+            AND target_kind=? AND project_id IS ? AND occurred_on=? AND amount_minor=? AND currency=?
+        """ + VISIBLE_EXPENSE_TARGET_SQL + ") THEN 1 ELSE 0 END)").bind(
+            owner_id, candidate["id"], candidate["revision"], target_kind, project_id,
+            occurred, minor, currency)
 
 
 def _draft(body):
@@ -76,16 +97,12 @@ def suggestion_questions(categories):
 
 async def handle_suggestion_request(*, binding, method, headers, body, now, gateway,
                                     scope="suggestions:use", exclude_expense_id=None):
-    from .cloudflare_ledger_reports import VISIBLE_EXPENSE_TARGET_SQL
     if method != "POST":
         return _error(405, "METHOD_NOT_ALLOWED")
     draft = _draft(body)
     if draft is None:
         return _error(422, "INVALID_INPUT")
     purpose, note, target_kind, project_id, occurred, minor, currency = draft
-    day_date = date.fromisoformat(occurred) if occurred else None
-    start = date.fromordinal(max(date.min.toordinal(), day_date.toordinal() - 7)).isoformat() if day_date else None
-    end = date.fromordinal(min(date.max.toordinal(), day_date.toordinal() + 7)).isoformat() if day_date else None
     proof = {}
     try:
         user, _, auth, validate = await ledger_principal(binding=binding, headers=headers,
@@ -95,28 +112,13 @@ async def handle_suggestion_request(*, binding, method, headers, body, now, gate
         if enabled and effective_user_plan(user, timestamp=now) not in PAID_PLAN_IDS:
             return _error(403, "JEV_PLAN_REQUIRED")
         commands = [binding.prepare("""SELECT id,name FROM expense_categories
-            WHERE owner_id=? AND archived_at IS NULL ORDER BY name,id LIMIT 30""").bind(user["id"]),
-            binding.prepare("""SELECT id,purpose FROM expenses WHERE owner_id=? AND deleted_at IS NULL
-            AND target_kind=? AND (project_id=? OR (project_id IS NULL AND ? IS NULL))
-            AND occurred_on BETWEEN ? AND ? AND amount_minor=? AND currency=? AND id!=?
-            """ + VISIBLE_EXPENSE_TARGET_SQL + " ORDER BY occurred_on DESC,id DESC LIMIT 30").bind(
-                user["id"], target_kind, project_id, project_id, start, end, minor, currency,
-                exclude_expense_id or "")]
-        daily = []
-        if enabled:
-            day = datetime.fromtimestamp(now, timezone.utc).date().isoformat()
-            # Keep the daily bound within the canonical attempts<=20 constraint.
-            limit = max(1, min(20, int(getattr(gateway, "daily_limit", 20))))
-            commands.append(binding.prepare("""SELECT attempts FROM expense_suggestion_budget
-                WHERE owner_id=? AND day=?""").bind(user["id"], day))
+            WHERE owner_id=? AND archived_at IS NULL ORDER BY name,id LIMIT 30""").bind(user["id"])]
         if project_id:
             commands.append(binding.prepare("""SELECT id FROM ledger_projects
                 WHERE owner_id=? AND id=? AND deleted_at IS NULL""").bind(user["id"], project_id))
         rows = await binding.batch([*auth, *commands])
         validate([part.results for part in rows[:len(auth)]])
-        categories, recent = rows[len(auth)].results, rows[len(auth) + 1].results
-        if enabled:
-            daily = rows[len(auth) + 2].results
+        categories = rows[len(auth)].results
         if project_id and not rows[-1].results:
             return _error(404, "NOT_FOUND")
     except PrincipalAuthError as exc:
@@ -125,8 +127,6 @@ async def handle_suggestion_request(*, binding, method, headers, body, now, gate
         return 200, {"status": "unavailable", "reason": "disabled", "suggestions": {}}
     if not categories:
         return 200, {"status": "unavailable", "reason": "no_categories", "suggestions": {}}
-    if daily and daily[0]["attempts"] >= limit:
-        return 429, {"error": {"code": "SUGGESTION_LIMIT"}}
     questions = suggestion_questions(categories)
     try:
         request = build_request(state={"purpose": purpose, "note": note},
@@ -134,18 +134,13 @@ async def handle_suggestion_request(*, binding, method, headers, body, now, gate
     except (ValueError, UnicodeError):
         return 200, {"status": "unavailable", "reason": "invalid_context", "suggestions": {}}
     try:
-        attempt = await binding.batch([_write_guard(binding, proof, user["id"], now),
+        await reserve_jev_batch(binding, [_write_guard(binding, proof, user["id"], now),
             *_project_visibility_guards(binding, user["id"], project_id),
-            binding.prepare("""INSERT INTO expense_suggestion_budget(owner_id,day,attempts)
-                VALUES(?,?,1) ON CONFLICT(owner_id,day) DO UPDATE SET attempts=attempts+1
-                WHERE attempts<? RETURNING attempts""").bind(user["id"], day, limit),
-            binding.prepare("DELETE FROM d1_command_guard")])
+            binding.prepare("DELETE FROM d1_command_guard")], now=now)
     except PlanLimitError as error:
         return error.response()
     except Exception:
         return _error(409, "AUTHORIZATION_CHANGED")
-    if not attempt[-2].results:
-        return 429, {"error": {"code": "SUGGESTION_LIMIT"}}
     outcome = "unavailable"
     suggestions = {}
     category_probs = target_probs = None
@@ -162,9 +157,6 @@ async def handle_suggestion_request(*, binding, method, headers, body, now, gate
             suggestions["categoryId"] = category["choice"]
         if target["choice"] in {"project", "shared"} and target["confidence"] >= CONFIDENCE_THRESHOLD:
             suggestions["targetKind"] = target["choice"]
-        duplicate = next((item for item in recent if item["purpose"].casefold() == purpose.casefold()), None)
-        if duplicate:
-            suggestions["duplicateExpenseId"] = duplicate["id"]
         outcome = "available" if suggestions else "uncertain"
     except PlanLimitError as error:
         return error.response()
@@ -179,11 +171,23 @@ async def handle_suggestion_request(*, binding, method, headers, body, now, gate
         return _error(error.status, error.code)
     # Unknown metered outcomes from the fresh read must reach the HTTP boundary,
     # rather than being classified as an ordinary optional-hint conflict.
+    duplicate = None
+    if outcome != "unavailable":
+        # Never publish a candidate that was deleted, moved or changed while Jev
+        # evaluated the source text. The final write also fences this revision.
+        fresh = await binding.batch([_duplicate_query(binding, user["id"], target_kind,
+            project_id, occurred, minor, currency, exclude_expense_id)])
+        duplicate = next(iter(fresh[0].results), None)
+        if duplicate is not None:
+            suggestions["duplicateExpenseId"] = duplicate["id"]
+            outcome = "available"
     stamp = datetime.fromtimestamp(now, timezone.utc).isoformat().replace("+00:00", "Z")
     event_id = "sg_" + uuid.uuid4().hex
     try:
         await binding.batch([_write_guard(binding, proof, user["id"], now),
             *_project_visibility_guards(binding, user["id"], project_id),
+            *([_duplicate_guard(binding, user["id"], target_kind, project_id,
+                occurred, minor, currency, duplicate)] if duplicate is not None else []),
             binding.prepare("""INSERT INTO expense_suggestion_events(id,owner_id,created_at,
         question_version,draft_target_kind,draft_project_id,model_version,outcome,category_id,target_kind,
         category_probabilities_json,target_probabilities_json)

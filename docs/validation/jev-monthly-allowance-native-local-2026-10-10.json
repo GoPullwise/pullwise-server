@@ -1,0 +1,5911 @@
+{
+  "passed": true,
+  "date": "2026-10-10",
+  "localOnly": true,
+  "canonicalWorkerNativeD1ProductMeterJournal": true,
+  "fixtureClock": 1791633600,
+  "localHttpCap": 25,
+  "localReservedRowCaps": {
+    "read": 100000,
+    "written": 10000
+  },
+  "integrityProbeReadCap": 5000,
+  "syntheticAccounts": 4,
+  "realProviderRequests": 0,
+  "remoteD1Operations": 0,
+  "remoteApplicationRequests": 0,
+  "clientRetries": 0,
+  "sourceSha256": {
+    "pullwise_server/__init__.py": "7d9d0b0ef2d8bc885aec331e6917279945ef9cad3f7647c50f965b584996c5e0",
+    "pullwise_server/account_cycle_rules.py": "f0cc61223ce05a3075461a81bff1469eca656fa003bdee121031cd9258ad8e7c",
+    "pullwise_server/api_key_dto_rules.py": "d0bceb8ddda53ec5712f0a7c2ace38fd734248692da23345e2973a87dda6748d",
+    "pullwise_server/billing_account_rules.py": "50e1b5ca2a9e397b66721f0c155ebf5cfdd3e8e211c1fd236c8871bd194df2a2",
+    "pullwise_server/billing_catalog_rules.py": "2f76f539a6a5b34ba8c2a40006a6cbfbb27e670d8902f6b03c1db962b360bc33",
+    "pullwise_server/billing_projection.py": "e4e59d349edc2f52574d599eb4769690d7f0b4cb5dfb5a365eaedcca2dd268a9",
+    "pullwise_server/cloudflare_account_adapter.py": "c7c0378da2982510671bea8fa027954194662c17201c663424cebee3fd086e46",
+    "pullwise_server/cloudflare_api_key_read.py": "e488f8592a4ddad934a58b68d9822e73018c5f5509809c880c4e80458ab7707d",
+    "pullwise_server/cloudflare_api_key_write.py": "5db6510615ec56d2aeb6327603b453168e5e3490fcd25fdd3aeff6c76688a25d",
+    "pullwise_server/cloudflare_billing_catalog.py": "39c5b3b3c6c968550f58cda07ec8007385c27c4d85c8d3cab95a39cd27abfee3",
+    "pullwise_server/cloudflare_billing_catalog_refresh.py": "42acec5860e4bfe11eb4e4b8b5f1e456cf2a785f2a6a875ef0408b0cdf715aee",
+    "pullwise_server/cloudflare_billing_catalog_write.py": "145ec58d410b47ba0f92a891db3aa8b6cf53a97ac0cfe8d51f8c6c45cb97f486",
+    "pullwise_server/cloudflare_billing_mutations.py": "199549cd6cf1fd675676aa8110ba282a70bc019fc4d4abdb50782602720f0378",
+    "pullwise_server/cloudflare_billing_read.py": "7ae58fb9cd0bffff3174c31135461196427215b4b930a3a47c02366f6251230f",
+    "pullwise_server/cloudflare_creem_gateway.py": "c844912d033226d7721a48d22a15e0ad1763c0461dc4966dd147d6c880bf71fe",
+    "pullwise_server/cloudflare_creem_handler.py": "4af4c9917c59b450a2e593af6c88639589d1fef79b078158eb745a0470fddc0e",
+    "pullwise_server/cloudflare_d1_batch.py": "f3e3e4df4f9d8892683b061cbac8a90c6ba33b5903216e8dc600a5dd3008ca9c",
+    "pullwise_server/cloudflare_d1_mapping.py": "30a9bbc39b5e4e695d3c17aeb7a9b53eb2ed86c6faf12ac8e57e7c59ef61ba1c",
+    "pullwise_server/cloudflare_email_auth.py": "e34f2df3603e34d15af1f4c590e28fb17f9cf2e67d871987e93513fbffa655a8",
+    "pullwise_server/cloudflare_email_gateway.py": "89115a02c5e333d4d9677a66a723fb7c420654e019965cdfc7671173a0bc7219",
+    "pullwise_server/cloudflare_expense_retention.py": "858b4de7ef4f7aad87048e39f212d96b2c13e78dcd337b85cf902be4693fdb9b",
+    "pullwise_server/cloudflare_github_gateway.py": "39bbf035e1247fb8bbfdb748874d720dc130f7065786dc0ace84b7d4eb3837a8",
+    "pullwise_server/cloudflare_github_identity_http.py": "44a85d1a7c4e0b76b8627dfae3595869c735627fb7aa5875d07878b0653a4751",
+    "pullwise_server/cloudflare_github_refresh.py": "44fb113c1a9e65795ae7f6832cd1f5b57568bf891a098ecfaabf8c399d1741d7",
+    "pullwise_server/cloudflare_http_contract.py": "989f55c97cd680dfdcd5c23a901ced1b2f5972f359b32a9989711167a67109a1",
+    "pullwise_server/cloudflare_jev_gateway.py": "0f25b63fa004da620d26d7ad15fb3aa41749420517bd65c182e68be6c36ff269",
+    "pullwise_server/cloudflare_jev_preferences.py": "0ae8780db2dec9757ced98609ff07a284279a4ccc90e4c51318e786705ac67c3",
+    "pullwise_server/cloudflare_ledger_activity.py": "4d7594c2f0ef646ac82130f7abee46628ee4bcc86417d4581250404d0e754683",
+    "pullwise_server/cloudflare_ledger_api.py": "f47ae0287f67571a24b6dc85ed324c9864d0ca4084df57e88a20d6dbf56f2a10",
+    "pullwise_server/cloudflare_ledger_auth.py": "7afcbc716e448053e7b2adb14e6dbf3d7d8ea23e757c3509645cccd131a3686e",
+    "pullwise_server/cloudflare_ledger_categories.py": "3b768281db66faf909a24e51495db62ca9df3fe8c8947025f6df41f3c76e5019",
+    "pullwise_server/cloudflare_ledger_expenses.py": "e29ac29c936cd7ee0415f3a602167c721080fdae437d33980adfe0c3a89f4e8d",
+    "pullwise_server/cloudflare_ledger_profile.py": "f3a38f56746431bed7050f2c589d8de78f446fba5aac68bfc080bbccf5b81db7",
+    "pullwise_server/cloudflare_ledger_recurring.py": "2477a9d210935529cd5e0d92772e77a3ff00ec38645c7ee50c163cdaf313edfb",
+    "pullwise_server/cloudflare_ledger_reports.py": "ae7119ce1754c938b5685083f85deab9206f8593c0acbf942fa848d66bcc3890",
+    "pullwise_server/cloudflare_ledger_review.py": "0e81b0d99ecb3fd01978e6d0ab1296197c3160cfc5dd49834496623c1334e3e9",
+    "pullwise_server/cloudflare_ledger_suggestions.py": "f064b7466f4f294b5f5fc013834a2803df8ad7797c1d269133747048a2630299",
+    "pullwise_server/cloudflare_native_d1.py": "b19bb7e352c24e76af94e3f5e4f0f6969bde9853ce92f7735a4189b80e67a930",
+    "pullwise_server/cloudflare_oauth_state_adapter.py": "7586855d9deca10c0763d5d0ac24ad9c335c574fb98ef207b90a74c5cabe56bd",
+    "pullwise_server/cloudflare_plan_limits.py": "2c1d621f84f9cc94a817c9d7315bd6d842805ae0605ef8e9e3aa5e992c24530e",
+    "pullwise_server/cloudflare_preview_budget.py": "c0ce9d8a8b0a82b7a58c04512888b7a16cbe069623f5dad9056181759b964224",
+    "pullwise_server/cloudflare_preview_business_clear.py": "b8894bf7bed9c5b5e47cb02d932458fa6e39b5a6839941e258948c4b29b38f40",
+    "pullwise_server/cloudflare_preview_rate.py": "ced46bb3b3c7f1bbacf0236223cac604fe99ef12ae22353aa1a808a4f60b2664",
+    "pullwise_server/cloudflare_preview_schema.py": "429315695f58e30ed301f9fcf2a3acd64d91b08166c9b7e03cea3227943ec4a0",
+    "pullwise_server/cloudflare_principal.py": "d1a8c4c985c11b83f10b3493a07ba9bdd52e637a904a43f7b94db1fae93033fb",
+    "pullwise_server/cloudflare_project_erasure.py": "6cd90f4fd4e8c1e6e3d5240895aed13ca56e172f3e41dc59d6279f6399029b8d",
+    "pullwise_server/cloudflare_project_repositories.py": "a7310b6721e6976d8424b904a1f0d90c8e52c0ba6ddbf3f1b3e1fd4601cfbf78",
+    "pullwise_server/cloudflare_recurring_assistance.py": "8571f43be0aefb45423e6b8f0aa3e969c93165aed36306703749341993537bf3",
+    "pullwise_server/cloudflare_recurring_notifications.py": "3b7b41888326701fd0b933fa927b91fc977900bbeb333af0742942277bbb222a",
+    "pullwise_server/cloudflare_session_adapter.py": "0043a42082eb45f280782adea7d52a5a85eda597c6cf16af62277a54db3ca79d",
+    "pullwise_server/cloudflare_state_records.py": "0cc2860e8d9773eafa824d2bf62047551f61782fe74ecdc8ef4bf9ba07a8f01d",
+    "pullwise_server/cloudflare_validation_budget.py": "48deb528340ba172c56052b7dd7fa2a56792863ea0a7f2315c9b015b594e500d",
+    "pullwise_server/cloudflare_webhook_receipts.py": "71d4cdddba613b68f58c8dcd685bcc3fe7a176ff85eee0a36d09fabc9d1ff3e3",
+    "pullwise_server/cloudflare_workspaces.py": "9adb7e75ceb634f9355a29f6d15525ef0ed623362e3ff9b5ac4b469045c2523d",
+    "pullwise_server/creem_event_rules.py": "7f1054d8bf4d04009a48385ed3d393ed983d9e33f940e260d5f757fcbcca1614",
+    "pullwise_server/creem_public_catalog_rules.py": "570f31ef15b5091d6e48494c3d6227e754bf08a33e90becb06416ba890cafd5b",
+    "pullwise_server/creem_signature.py": "3cb105e50952a79365d64f8946db39f7647f5b5da1b52b3e1c4d70cab11787cc",
+    "pullwise_server/json_input.py": "3f5699b1eef9ef6a6119edaf735eadb3cee40fbc863982262c5dede1fbc704b8",
+    "pullwise_server/ledger_money_totals.py": "552c26b9c14343336f9e858488552e05ce1bd90345e3d2f10422c14634124de1",
+    "pullwise_server/ledger_plan_policy.py": "1e515b756600c917e27cf3a7a7ba8a51d2d6ce0cdc689bb1bdfbe95d7b7c3e38",
+    "pullwise_server/ledger_recurrence_calendar.py": "21e33ed0fe7c92de453a8839dece749b2a964b0226ef182915843b859234af41",
+    "pullwise_server/preview_plan_grants.py": "b6afbdbb860ffdba7a3b71732a8ba1376ad9a62b36ba4684974ac2ec895859db",
+    "pullwise_server/typesafe_client.py": "7a18ee3bd21267e6e18b751902ea55561e6074c7c6d9968fff7d173015e7d903"
+  },
+  "canonicalApplicationEntrySha256": "e260ad128e52cffc9524bbc37591e806ccfed984fd9e6f5d29cb6d2578c9bb4e",
+  "fixtureEntrySha256": "f6bfdc50373b3b07255fada8712177038db2f4492aee57fe15ad9f7a87088d04",
+  "workerdSha256": "eb449c84ddd55ea357dc73e6c1b50bd255ccdc5d1875544c162435b7bd6168b6",
+  "runtimeBundleSha256": "3c3fd5a4179230e21e018e28b0e735e7c4abd8fe8e4ff39d2fd6bb2ea3a2e260",
+  "nativeAttemptsFabricated": false,
+  "localHttpRequestsAttempted": 23,
+  "localHttpRequestsCompleted": 23,
+  "cases": [
+    {
+      "name": "setup",
+      "method": "POST",
+      "path": "/_fixture/setup",
+      "status": 200,
+      "result": {
+        "passed": true,
+        "schemaVersion": 12,
+        "reservationMicrousd": 2753
+      }
+    },
+    {
+      "name": "billing_initial_pro",
+      "method": "GET",
+      "path": "/billing",
+      "status": 200,
+      "result": {
+        "page": {
+          "id": "billing",
+          "subscriptionAction": {
+            "label": "View pricing",
+            "href": "/pricing"
+          },
+          "checkoutAction": null
+        },
+        "account": {
+          "provider": "creem",
+          "status": "active",
+          "plan": "pro",
+          "interval": "month",
+          "customerId": null,
+          "subscriptionId": "sub_native_jev_pro",
+          "subscriptionItemId": null,
+          "customerEmail": null,
+          "currentPeriodStart": 1791632600,
+          "currentPeriodEnd": 1800273600,
+          "cancelAtPeriodEnd": null,
+          "canceledAt": null,
+          "lastEventId": null,
+          "lastEventType": null,
+          "lastEventCreated": null,
+          "updatedAt": null,
+          "entitlements": null,
+          "previewPlanGrant": null,
+          "pendingChange": null,
+          "subscriptionEvents": []
+        },
+        "ledgerUsage": {
+          "workspaceId": "usr_github_790101",
+          "jev": {
+            "month": "2026-10",
+            "currency": "USD",
+            "usedMicrousd": 1000000,
+            "limitMicrousd": 3000000
+          },
+          "projects": {
+            "used": 0,
+            "limit": 20,
+            "remaining": 20
+          },
+          "expenseRecords": {
+            "used": 1,
+            "limit": 20000,
+            "remaining": 19999
+          }
+        }
+      }
+    },
+    {
+      "name": "billing_initial_max",
+      "method": "GET",
+      "path": "/billing",
+      "status": 200,
+      "result": {
+        "page": {
+          "id": "billing",
+          "subscriptionAction": {
+            "label": "View pricing",
+            "href": "/pricing"
+          },
+          "checkoutAction": null
+        },
+        "account": {
+          "provider": "creem",
+          "status": "active",
+          "plan": "max",
+          "interval": "month",
+          "customerId": null,
+          "subscriptionId": "sub_native_jev_max",
+          "subscriptionItemId": null,
+          "customerEmail": null,
+          "currentPeriodStart": 1791632600,
+          "currentPeriodEnd": 1800273600,
+          "cancelAtPeriodEnd": null,
+          "canceledAt": null,
+          "lastEventId": null,
+          "lastEventType": null,
+          "lastEventCreated": null,
+          "updatedAt": null,
+          "entitlements": null,
+          "previewPlanGrant": null,
+          "pendingChange": null,
+          "subscriptionEvents": []
+        },
+        "ledgerUsage": {
+          "workspaceId": "usr_github_790102",
+          "jev": {
+            "month": "2026-10",
+            "currency": "USD",
+            "usedMicrousd": 2000000,
+            "limitMicrousd": 5000000
+          },
+          "projects": {
+            "used": 0,
+            "limit": 100,
+            "remaining": 100
+          },
+          "expenseRecords": {
+            "used": 1,
+            "limit": 100000,
+            "remaining": 99999
+          }
+        }
+      }
+    },
+    {
+      "name": "billing_initial_exhausted",
+      "method": "GET",
+      "path": "/billing",
+      "status": 200,
+      "result": {
+        "page": {
+          "id": "billing",
+          "subscriptionAction": {
+            "label": "View pricing",
+            "href": "/pricing"
+          },
+          "checkoutAction": null
+        },
+        "account": {
+          "provider": "creem",
+          "status": "active",
+          "plan": "max",
+          "interval": "month",
+          "customerId": null,
+          "subscriptionId": "sub_native_jev_exhausted",
+          "subscriptionItemId": null,
+          "customerEmail": null,
+          "currentPeriodStart": 1791632600,
+          "currentPeriodEnd": 1800273600,
+          "cancelAtPeriodEnd": null,
+          "canceledAt": null,
+          "lastEventId": null,
+          "lastEventType": null,
+          "lastEventCreated": null,
+          "updatedAt": null,
+          "entitlements": null,
+          "previewPlanGrant": null,
+          "pendingChange": null,
+          "subscriptionEvents": []
+        },
+        "ledgerUsage": {
+          "workspaceId": "usr_github_790103",
+          "jev": {
+            "month": "2026-10",
+            "currency": "USD",
+            "usedMicrousd": 5000000,
+            "limitMicrousd": 5000000
+          },
+          "projects": {
+            "used": 0,
+            "limit": 100,
+            "remaining": 100
+          },
+          "expenseRecords": {
+            "used": 1,
+            "limit": 100000,
+            "remaining": 99999
+          }
+        }
+      }
+    },
+    {
+      "name": "billing_initial_previous",
+      "method": "GET",
+      "path": "/billing",
+      "status": 200,
+      "result": {
+        "page": {
+          "id": "billing",
+          "subscriptionAction": {
+            "label": "View pricing",
+            "href": "/pricing"
+          },
+          "checkoutAction": null
+        },
+        "account": {
+          "provider": "creem",
+          "status": "active",
+          "plan": "max",
+          "interval": "month",
+          "customerId": null,
+          "subscriptionId": "sub_native_jev_previous",
+          "subscriptionItemId": null,
+          "customerEmail": null,
+          "currentPeriodStart": 1791632600,
+          "currentPeriodEnd": 1800273600,
+          "cancelAtPeriodEnd": null,
+          "canceledAt": null,
+          "lastEventId": null,
+          "lastEventType": null,
+          "lastEventCreated": null,
+          "updatedAt": null,
+          "entitlements": null,
+          "previewPlanGrant": null,
+          "pendingChange": null,
+          "subscriptionEvents": []
+        },
+        "ledgerUsage": {
+          "workspaceId": "usr_github_790104",
+          "jev": {
+            "month": "2026-10",
+            "currency": "USD",
+            "usedMicrousd": 0,
+            "limitMicrousd": 5000000
+          },
+          "projects": {
+            "used": 0,
+            "limit": 100,
+            "remaining": 100
+          },
+          "expenseRecords": {
+            "used": 1,
+            "limit": 100000,
+            "remaining": 99999
+          }
+        }
+      }
+    },
+    {
+      "name": "pro_create_after_20_attempts",
+      "method": "POST",
+      "path": "/api/v1/expenses",
+      "status": 201,
+      "result": {
+        "id": "exp_cebc0cd980ed474ba72737de5c40d746",
+        "target": {
+          "kind": "shared"
+        },
+        "occurredOn": "2026-10-10",
+        "amount": "12.00",
+        "amountMinor": 1200,
+        "currency": "USD",
+        "categoryId": "cat_native_jev_pro",
+        "purpose": "Shared account hosting",
+        "note": null,
+        "quantity": null,
+        "unit": null,
+        "revision": 1,
+        "createdAt": "2026-10-10T12:00:00Z",
+        "updatedAt": "2026-10-10T12:00:00Z",
+        "assistance": {
+          "status": "available",
+          "suggestionId": "sg_acaa0449f1094294b146ec04cead5236",
+          "questionVersion": "ledger-suggest-v2",
+          "modelVersion": "jev-1.13.0",
+          "suggestions": {
+            "categoryId": "cat_native_jev_pro",
+            "targetKind": "shared",
+            "duplicateExpenseId": "exp_native_jev_pro"
+          },
+          "probabilities": {
+            "category": {
+              "cat_native_jev_pro": 0.95,
+              "uncertain": 0.050000000000000044
+            },
+            "target": {
+              "project": 0.025000000000000022,
+              "shared": 0.95,
+              "uncertain": 0.025000000000000022
+            }
+          },
+          "categorySource": "jev"
+        }
+      }
+    },
+    {
+      "name": "max_create_same_facts",
+      "method": "POST",
+      "path": "/api/v1/expenses",
+      "status": 201,
+      "result": {
+        "id": "exp_9c05a6fffc8744918035e65cf0345f50",
+        "target": {
+          "kind": "shared"
+        },
+        "occurredOn": "2026-10-10",
+        "amount": "12.00",
+        "amountMinor": 1200,
+        "currency": "USD",
+        "categoryId": "cat_native_jev_max",
+        "purpose": "Shared account hosting",
+        "note": null,
+        "quantity": null,
+        "unit": null,
+        "revision": 1,
+        "createdAt": "2026-10-10T12:00:00Z",
+        "updatedAt": "2026-10-10T12:00:00Z",
+        "assistance": {
+          "status": "available",
+          "suggestionId": "sg_f150848a845847ab8f7f9a9836938ae9",
+          "questionVersion": "ledger-suggest-v2",
+          "modelVersion": "jev-1.13.0",
+          "suggestions": {
+            "categoryId": "cat_native_jev_max",
+            "targetKind": "shared",
+            "duplicateExpenseId": "exp_native_jev_max"
+          },
+          "probabilities": {
+            "category": {
+              "cat_native_jev_max": 0.95,
+              "uncertain": 0.050000000000000044
+            },
+            "target": {
+              "project": 0.025000000000000022,
+              "shared": 0.95,
+              "uncertain": 0.025000000000000022
+            }
+          },
+          "categorySource": "jev"
+        }
+      }
+    },
+    {
+      "name": "draft_after_20_attempts",
+      "method": "POST",
+      "path": "/api/v1/expense-suggestions",
+      "status": 200,
+      "result": {
+        "status": "available",
+        "suggestionId": "sg_ad881b321487459fa2228c165936a72a",
+        "questionVersion": "ledger-suggest-v2",
+        "modelVersion": "jev-1.13.0",
+        "suggestions": {
+          "categoryId": "cat_native_jev_pro",
+          "targetKind": "shared",
+          "duplicateExpenseId": "exp_native_jev_pro"
+        },
+        "probabilities": {
+          "category": {
+            "cat_native_jev_pro": 0.95,
+            "uncertain": 0.050000000000000044
+          },
+          "target": {
+            "project": 0.025000000000000022,
+            "shared": 0.95,
+            "uncertain": 0.025000000000000022
+          }
+        }
+      }
+    },
+    {
+      "name": "create_different_day",
+      "method": "POST",
+      "path": "/api/v1/expenses",
+      "status": 201,
+      "result": {
+        "id": "exp_805cfa2ad86d409a833b6e6309894302",
+        "target": {
+          "kind": "shared"
+        },
+        "occurredOn": "2026-10-11",
+        "amount": "12.00",
+        "amountMinor": 1200,
+        "currency": "USD",
+        "categoryId": "cat_native_jev_max",
+        "purpose": "Shared account hosting",
+        "note": null,
+        "quantity": null,
+        "unit": null,
+        "revision": 1,
+        "createdAt": "2026-10-10T12:00:00Z",
+        "updatedAt": "2026-10-10T12:00:00Z",
+        "assistance": {
+          "status": "available",
+          "suggestionId": "sg_151e200083504ab1b989a8f40d406030",
+          "questionVersion": "ledger-suggest-v2",
+          "modelVersion": "jev-1.13.0",
+          "suggestions": {
+            "categoryId": "cat_native_jev_max",
+            "targetKind": "shared"
+          },
+          "probabilities": {
+            "category": {
+              "cat_native_jev_max": 0.95,
+              "uncertain": 0.050000000000000044
+            },
+            "target": {
+              "project": 0.025000000000000022,
+              "shared": 0.95,
+              "uncertain": 0.025000000000000022
+            }
+          },
+          "categorySource": "user"
+        }
+      }
+    },
+    {
+      "name": "create_different_currency",
+      "method": "POST",
+      "path": "/api/v1/expenses",
+      "status": 201,
+      "result": {
+        "id": "exp_93a4877c1d32481ba971cdc67d22118b",
+        "target": {
+          "kind": "shared"
+        },
+        "occurredOn": "2026-10-10",
+        "amount": "12.00",
+        "amountMinor": 1200,
+        "currency": "EUR",
+        "categoryId": "cat_native_jev_max",
+        "purpose": "Shared account hosting",
+        "note": null,
+        "quantity": null,
+        "unit": null,
+        "revision": 1,
+        "createdAt": "2026-10-10T12:00:00Z",
+        "updatedAt": "2026-10-10T12:00:00Z",
+        "assistance": {
+          "status": "available",
+          "suggestionId": "sg_7f325fcfaad24467b5ee9e2696a848c8",
+          "questionVersion": "ledger-suggest-v2",
+          "modelVersion": "jev-1.13.0",
+          "suggestions": {
+            "categoryId": "cat_native_jev_max",
+            "targetKind": "shared"
+          },
+          "probabilities": {
+            "category": {
+              "cat_native_jev_max": 0.95,
+              "uncertain": 0.050000000000000044
+            },
+            "target": {
+              "project": 0.025000000000000022,
+              "shared": 0.95,
+              "uncertain": 0.025000000000000022
+            }
+          },
+          "categorySource": "user"
+        }
+      }
+    },
+    {
+      "name": "create_different_amount",
+      "method": "POST",
+      "path": "/api/v1/expenses",
+      "status": 201,
+      "result": {
+        "id": "exp_dec620bbd132459486302b76cb77471f",
+        "target": {
+          "kind": "shared"
+        },
+        "occurredOn": "2026-10-10",
+        "amount": "12.01",
+        "amountMinor": 1201,
+        "currency": "USD",
+        "categoryId": "cat_native_jev_max",
+        "purpose": "Shared account hosting",
+        "note": null,
+        "quantity": null,
+        "unit": null,
+        "revision": 1,
+        "createdAt": "2026-10-10T12:00:00Z",
+        "updatedAt": "2026-10-10T12:00:00Z",
+        "assistance": {
+          "status": "available",
+          "suggestionId": "sg_3e1177b8d2f345dd83e8f1f8c82386ff",
+          "questionVersion": "ledger-suggest-v2",
+          "modelVersion": "jev-1.13.0",
+          "suggestions": {
+            "categoryId": "cat_native_jev_max",
+            "targetKind": "shared"
+          },
+          "probabilities": {
+            "category": {
+              "cat_native_jev_max": 0.95,
+              "uncertain": 0.050000000000000044
+            },
+            "target": {
+              "project": 0.025000000000000022,
+              "shared": 0.95,
+              "uncertain": 0.025000000000000022
+            }
+          },
+          "categorySource": "user"
+        }
+      }
+    },
+    {
+      "name": "review_exact_duplicate_after_20_attempts",
+      "method": "POST",
+      "path": "/api/v1/expenses/exp_9c05a6fffc8744918035e65cf0345f50/review",
+      "status": 200,
+      "result": {
+        "expenseId": "exp_9c05a6fffc8744918035e65cf0345f50",
+        "revision": 1,
+        "questionVersion": "ledger-suggest-v2",
+        "modelVersion": "jev-1.13.0",
+        "checks": {
+          "category": {
+            "status": "checked",
+            "current": "cat_native_jev_max",
+            "confidence": 0.95,
+            "suggested": "cat_native_jev_max"
+          },
+          "target": {
+            "status": "checked",
+            "current": {
+              "kind": "shared"
+            },
+            "confidence": 0.95,
+            "suggested": {
+              "kind": "shared"
+            }
+          },
+          "duplicate": {
+            "status": "issue",
+            "candidate": {
+              "id": "exp_native_jev_max",
+              "revision": 1
+            }
+          }
+        },
+        "suggestionId": "sg_c7527d5464174790b46accdd8ed850e2"
+      }
+    },
+    {
+      "name": "review_different_day",
+      "method": "POST",
+      "path": "/api/v1/expenses/exp_805cfa2ad86d409a833b6e6309894302/review",
+      "status": 200,
+      "result": {
+        "expenseId": "exp_805cfa2ad86d409a833b6e6309894302",
+        "revision": 1,
+        "questionVersion": "ledger-suggest-v2",
+        "modelVersion": "jev-1.13.0",
+        "checks": {
+          "category": {
+            "status": "checked",
+            "current": "cat_native_jev_max",
+            "confidence": 0.95,
+            "suggested": "cat_native_jev_max"
+          },
+          "target": {
+            "status": "checked",
+            "current": {
+              "kind": "shared"
+            },
+            "confidence": 0.95,
+            "suggested": {
+              "kind": "shared"
+            }
+          },
+          "duplicate": {
+            "status": "checked"
+          }
+        },
+        "suggestionId": "sg_3945eae11ae4461b8d12eebf7ad4916a"
+      }
+    },
+    {
+      "name": "review_different_currency",
+      "method": "POST",
+      "path": "/api/v1/expenses/exp_93a4877c1d32481ba971cdc67d22118b/review",
+      "status": 200,
+      "result": {
+        "expenseId": "exp_93a4877c1d32481ba971cdc67d22118b",
+        "revision": 1,
+        "questionVersion": "ledger-suggest-v2",
+        "modelVersion": "jev-1.13.0",
+        "checks": {
+          "category": {
+            "status": "checked",
+            "current": "cat_native_jev_max",
+            "confidence": 0.95,
+            "suggested": "cat_native_jev_max"
+          },
+          "target": {
+            "status": "checked",
+            "current": {
+              "kind": "shared"
+            },
+            "confidence": 0.95,
+            "suggested": {
+              "kind": "shared"
+            }
+          },
+          "duplicate": {
+            "status": "checked"
+          }
+        },
+        "suggestionId": "sg_0681ed0c218046ef9a3ff5309aed7ded"
+      }
+    },
+    {
+      "name": "review_different_amount",
+      "method": "POST",
+      "path": "/api/v1/expenses/exp_dec620bbd132459486302b76cb77471f/review",
+      "status": 200,
+      "result": {
+        "expenseId": "exp_dec620bbd132459486302b76cb77471f",
+        "revision": 1,
+        "questionVersion": "ledger-suggest-v2",
+        "modelVersion": "jev-1.13.0",
+        "checks": {
+          "category": {
+            "status": "checked",
+            "current": "cat_native_jev_max",
+            "confidence": 0.95,
+            "suggested": "cat_native_jev_max"
+          },
+          "target": {
+            "status": "checked",
+            "current": {
+              "kind": "shared"
+            },
+            "confidence": 0.95,
+            "suggested": {
+              "kind": "shared"
+            }
+          },
+          "duplicate": {
+            "status": "checked"
+          }
+        },
+        "suggestionId": "sg_4b579fbc34944d99a99bb9c00a84c02a"
+      }
+    },
+    {
+      "name": "exhausted_manual_expense",
+      "method": "POST",
+      "path": "/api/v1/expenses",
+      "status": 201,
+      "result": {
+        "id": "exp_ee5ebdf92f614a3fa7efb2e476cb0068",
+        "target": {
+          "kind": "shared"
+        },
+        "occurredOn": "2026-10-10",
+        "amount": "12.00",
+        "amountMinor": 1200,
+        "currency": "USD",
+        "categoryId": "cat_native_jev_exhausted",
+        "purpose": "Shared account hosting",
+        "note": null,
+        "quantity": null,
+        "unit": null,
+        "revision": 1,
+        "createdAt": "2026-10-10T12:00:00Z",
+        "updatedAt": "2026-10-10T12:00:00Z",
+        "assistance": {
+          "status": "unavailable",
+          "reason": "JEV_BUDGET_LIMIT",
+          "suggestions": {},
+          "categorySource": "user"
+        }
+      }
+    },
+    {
+      "name": "exhausted_review_no_provider",
+      "method": "POST",
+      "path": "/api/v1/expenses/exp_ee5ebdf92f614a3fa7efb2e476cb0068/review",
+      "status": 429,
+      "result": {
+        "error": {
+          "code": "JEV_BUDGET_LIMIT"
+        }
+      }
+    },
+    {
+      "name": "idempotent_replay_no_extra_usage",
+      "method": "POST",
+      "path": "/api/v1/expenses",
+      "status": 201,
+      "result": {
+        "id": "exp_cebc0cd980ed474ba72737de5c40d746",
+        "target": {
+          "kind": "shared"
+        },
+        "occurredOn": "2026-10-10",
+        "amount": "12.00",
+        "amountMinor": 1200,
+        "currency": "USD",
+        "categoryId": "cat_native_jev_pro",
+        "purpose": "Shared account hosting",
+        "note": null,
+        "quantity": null,
+        "unit": null,
+        "revision": 1,
+        "createdAt": "2026-10-10T12:00:00Z",
+        "updatedAt": "2026-10-10T12:00:00Z",
+        "assistance": {
+          "status": "available",
+          "suggestionId": "sg_acaa0449f1094294b146ec04cead5236",
+          "questionVersion": "ledger-suggest-v2",
+          "modelVersion": "jev-1.13.0",
+          "suggestions": {
+            "categoryId": "cat_native_jev_pro",
+            "targetKind": "shared",
+            "duplicateExpenseId": "exp_native_jev_pro"
+          },
+          "probabilities": {
+            "category": {
+              "cat_native_jev_pro": 0.95,
+              "uncertain": 0.050000000000000044
+            },
+            "target": {
+              "project": 0.025000000000000022,
+              "shared": 0.95,
+              "uncertain": 0.025000000000000022
+            }
+          },
+          "categorySource": "jev"
+        }
+      }
+    },
+    {
+      "name": "billing_final_pro",
+      "method": "GET",
+      "path": "/billing",
+      "status": 200,
+      "result": {
+        "page": {
+          "id": "billing",
+          "subscriptionAction": {
+            "label": "View pricing",
+            "href": "/pricing"
+          },
+          "checkoutAction": null
+        },
+        "account": {
+          "provider": "creem",
+          "status": "active",
+          "plan": "pro",
+          "interval": "month",
+          "customerId": null,
+          "subscriptionId": "sub_native_jev_pro",
+          "subscriptionItemId": null,
+          "customerEmail": null,
+          "currentPeriodStart": 1791632600,
+          "currentPeriodEnd": 1800273600,
+          "cancelAtPeriodEnd": null,
+          "canceledAt": null,
+          "lastEventId": null,
+          "lastEventType": null,
+          "lastEventCreated": null,
+          "updatedAt": null,
+          "entitlements": null,
+          "previewPlanGrant": null,
+          "pendingChange": null,
+          "subscriptionEvents": []
+        },
+        "ledgerUsage": {
+          "workspaceId": "usr_github_790101",
+          "jev": {
+            "month": "2026-10",
+            "currency": "USD",
+            "usedMicrousd": 1005506,
+            "limitMicrousd": 3000000
+          },
+          "projects": {
+            "used": 0,
+            "limit": 20,
+            "remaining": 20
+          },
+          "expenseRecords": {
+            "used": 2,
+            "limit": 20000,
+            "remaining": 19998
+          }
+        }
+      }
+    },
+    {
+      "name": "billing_final_max",
+      "method": "GET",
+      "path": "/billing",
+      "status": 200,
+      "result": {
+        "page": {
+          "id": "billing",
+          "subscriptionAction": {
+            "label": "View pricing",
+            "href": "/pricing"
+          },
+          "checkoutAction": null
+        },
+        "account": {
+          "provider": "creem",
+          "status": "active",
+          "plan": "max",
+          "interval": "month",
+          "customerId": null,
+          "subscriptionId": "sub_native_jev_max",
+          "subscriptionItemId": null,
+          "customerEmail": null,
+          "currentPeriodStart": 1791632600,
+          "currentPeriodEnd": 1800273600,
+          "cancelAtPeriodEnd": null,
+          "canceledAt": null,
+          "lastEventId": null,
+          "lastEventType": null,
+          "lastEventCreated": null,
+          "updatedAt": null,
+          "entitlements": null,
+          "previewPlanGrant": null,
+          "pendingChange": null,
+          "subscriptionEvents": []
+        },
+        "ledgerUsage": {
+          "workspaceId": "usr_github_790102",
+          "jev": {
+            "month": "2026-10",
+            "currency": "USD",
+            "usedMicrousd": 2022024,
+            "limitMicrousd": 5000000
+          },
+          "projects": {
+            "used": 0,
+            "limit": 100,
+            "remaining": 100
+          },
+          "expenseRecords": {
+            "used": 5,
+            "limit": 100000,
+            "remaining": 99995
+          }
+        }
+      }
+    },
+    {
+      "name": "billing_final_exhausted",
+      "method": "GET",
+      "path": "/billing",
+      "status": 200,
+      "result": {
+        "page": {
+          "id": "billing",
+          "subscriptionAction": {
+            "label": "View pricing",
+            "href": "/pricing"
+          },
+          "checkoutAction": null
+        },
+        "account": {
+          "provider": "creem",
+          "status": "active",
+          "plan": "max",
+          "interval": "month",
+          "customerId": null,
+          "subscriptionId": "sub_native_jev_exhausted",
+          "subscriptionItemId": null,
+          "customerEmail": null,
+          "currentPeriodStart": 1791632600,
+          "currentPeriodEnd": 1800273600,
+          "cancelAtPeriodEnd": null,
+          "canceledAt": null,
+          "lastEventId": null,
+          "lastEventType": null,
+          "lastEventCreated": null,
+          "updatedAt": null,
+          "entitlements": null,
+          "previewPlanGrant": null,
+          "pendingChange": null,
+          "subscriptionEvents": []
+        },
+        "ledgerUsage": {
+          "workspaceId": "usr_github_790103",
+          "jev": {
+            "month": "2026-10",
+            "currency": "USD",
+            "usedMicrousd": 5000000,
+            "limitMicrousd": 5000000
+          },
+          "projects": {
+            "used": 0,
+            "limit": 100,
+            "remaining": 100
+          },
+          "expenseRecords": {
+            "used": 2,
+            "limit": 100000,
+            "remaining": 99998
+          }
+        }
+      }
+    },
+    {
+      "name": "billing_final_previous",
+      "method": "GET",
+      "path": "/billing",
+      "status": 200,
+      "result": {
+        "page": {
+          "id": "billing",
+          "subscriptionAction": {
+            "label": "View pricing",
+            "href": "/pricing"
+          },
+          "checkoutAction": null
+        },
+        "account": {
+          "provider": "creem",
+          "status": "active",
+          "plan": "max",
+          "interval": "month",
+          "customerId": null,
+          "subscriptionId": "sub_native_jev_previous",
+          "subscriptionItemId": null,
+          "customerEmail": null,
+          "currentPeriodStart": 1791632600,
+          "currentPeriodEnd": 1800273600,
+          "cancelAtPeriodEnd": null,
+          "canceledAt": null,
+          "lastEventId": null,
+          "lastEventType": null,
+          "lastEventCreated": null,
+          "updatedAt": null,
+          "entitlements": null,
+          "previewPlanGrant": null,
+          "pendingChange": null,
+          "subscriptionEvents": []
+        },
+        "ledgerUsage": {
+          "workspaceId": "usr_github_790104",
+          "jev": {
+            "month": "2026-10",
+            "currency": "USD",
+            "usedMicrousd": 0,
+            "limitMicrousd": 5000000
+          },
+          "projects": {
+            "used": 0,
+            "limit": 100,
+            "remaining": 100
+          },
+          "expenseRecords": {
+            "used": 1,
+            "limit": 100000,
+            "remaining": 99999
+          }
+        }
+      }
+    },
+    {
+      "name": "final_journal",
+      "method": "GET",
+      "path": "/_fixture/final",
+      "status": 200,
+      "result": {
+        "passed": true,
+        "journalHealthy": true,
+        "scope": "pullwise-s17-s18-2026-09-28",
+        "schemaVersion": 12,
+        "counters": {
+          "requests": 23,
+          "reserved_read": 48548,
+          "reserved_written": 612,
+          "actual_read": 2839,
+          "actual_written": 466
+        }
+      }
+    }
+  ],
+  "nativeRequests": [
+    {
+      "call": 1,
+      "path": "/_fixture/setup",
+      "method": "POST",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 54,
+          "rowsRead": 569,
+          "rowsWritten": 142,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 12,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 34,
+          "rowsRead": 4,
+          "rowsWritten": 80,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 42,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "ledger_plan_usage": {
+            "rows": 4,
+            "sha256": "ccda194890163164d611a84a047300b27de5e9d2d1cf83376aacdce55c14fe54"
+          },
+          "expense_suggestion_budget": {
+            "rows": 2,
+            "sha256": "bba7fc6a62bf677dfe01547d2dadb0692deca4ccd5fd7d3dd4ec309aec1ebf86"
+          },
+          "expense_suggestion_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expenses": {
+            "rows": 4,
+            "sha256": "3de4088cbc029b8c592560bd03952dac4c097e87083510ef3034a6cde0fd0349"
+          },
+          "expense_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_activity_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "usage": [
+          {
+            "owner_id": "usr_github_790101",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 1000000
+          },
+          {
+            "owner_id": "usr_github_790102",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 2000000
+          },
+          {
+            "owner_id": "usr_github_790104",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-09",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 500000
+          },
+          {
+            "owner_id": "usr_github_790103",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 5000000
+          }
+        ],
+        "legacyDailyAttempts": [
+          20,
+          20
+        ],
+        "cardinalityVerified": true
+      },
+      "syntheticProviderCalls": 0,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 2,
+      "path": "/billing",
+      "method": "GET",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 7,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "ledger_plan_usage": {
+            "rows": 4,
+            "sha256": "ccda194890163164d611a84a047300b27de5e9d2d1cf83376aacdce55c14fe54"
+          },
+          "expense_suggestion_budget": {
+            "rows": 2,
+            "sha256": "bba7fc6a62bf677dfe01547d2dadb0692deca4ccd5fd7d3dd4ec309aec1ebf86"
+          },
+          "expense_suggestion_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expenses": {
+            "rows": 4,
+            "sha256": "3de4088cbc029b8c592560bd03952dac4c097e87083510ef3034a6cde0fd0349"
+          },
+          "expense_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_activity_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "usage": [
+          {
+            "owner_id": "usr_github_790101",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 1000000
+          },
+          {
+            "owner_id": "usr_github_790102",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 2000000
+          },
+          {
+            "owner_id": "usr_github_790104",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-09",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 500000
+          },
+          {
+            "owner_id": "usr_github_790103",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 5000000
+          }
+        ],
+        "legacyDailyAttempts": [
+          20,
+          20
+        ],
+        "cardinalityVerified": true
+      },
+      "syntheticProviderCalls": 0,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 3,
+      "path": "/billing",
+      "method": "GET",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 7,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "ledger_plan_usage": {
+            "rows": 4,
+            "sha256": "ccda194890163164d611a84a047300b27de5e9d2d1cf83376aacdce55c14fe54"
+          },
+          "expense_suggestion_budget": {
+            "rows": 2,
+            "sha256": "bba7fc6a62bf677dfe01547d2dadb0692deca4ccd5fd7d3dd4ec309aec1ebf86"
+          },
+          "expense_suggestion_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expenses": {
+            "rows": 4,
+            "sha256": "3de4088cbc029b8c592560bd03952dac4c097e87083510ef3034a6cde0fd0349"
+          },
+          "expense_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_activity_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "usage": [
+          {
+            "owner_id": "usr_github_790101",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 1000000
+          },
+          {
+            "owner_id": "usr_github_790102",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 2000000
+          },
+          {
+            "owner_id": "usr_github_790104",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-09",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 500000
+          },
+          {
+            "owner_id": "usr_github_790103",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 5000000
+          }
+        ],
+        "legacyDailyAttempts": [
+          20,
+          20
+        ],
+        "cardinalityVerified": true
+      },
+      "syntheticProviderCalls": 0,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 4,
+      "path": "/billing",
+      "method": "GET",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 7,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "ledger_plan_usage": {
+            "rows": 4,
+            "sha256": "ccda194890163164d611a84a047300b27de5e9d2d1cf83376aacdce55c14fe54"
+          },
+          "expense_suggestion_budget": {
+            "rows": 2,
+            "sha256": "bba7fc6a62bf677dfe01547d2dadb0692deca4ccd5fd7d3dd4ec309aec1ebf86"
+          },
+          "expense_suggestion_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expenses": {
+            "rows": 4,
+            "sha256": "3de4088cbc029b8c592560bd03952dac4c097e87083510ef3034a6cde0fd0349"
+          },
+          "expense_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_activity_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "usage": [
+          {
+            "owner_id": "usr_github_790101",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 1000000
+          },
+          {
+            "owner_id": "usr_github_790102",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 2000000
+          },
+          {
+            "owner_id": "usr_github_790104",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-09",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 500000
+          },
+          {
+            "owner_id": "usr_github_790103",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 5000000
+          }
+        ],
+        "legacyDailyAttempts": [
+          20,
+          20
+        ],
+        "cardinalityVerified": true
+      },
+      "syntheticProviderCalls": 0,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 5,
+      "path": "/billing",
+      "method": "GET",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 6,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "ledger_plan_usage": {
+            "rows": 4,
+            "sha256": "ccda194890163164d611a84a047300b27de5e9d2d1cf83376aacdce55c14fe54"
+          },
+          "expense_suggestion_budget": {
+            "rows": 2,
+            "sha256": "bba7fc6a62bf677dfe01547d2dadb0692deca4ccd5fd7d3dd4ec309aec1ebf86"
+          },
+          "expense_suggestion_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expenses": {
+            "rows": 4,
+            "sha256": "3de4088cbc029b8c592560bd03952dac4c097e87083510ef3034a6cde0fd0349"
+          },
+          "expense_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "expense_create_idempotency": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "ledger_activity_events": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "usage": [
+          {
+            "owner_id": "usr_github_790101",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 1000000
+          },
+          {
+            "owner_id": "usr_github_790102",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 2000000
+          },
+          {
+            "owner_id": "usr_github_790104",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-09",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 500000
+          },
+          {
+            "owner_id": "usr_github_790103",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 5000000
+          }
+        ],
+        "legacyDailyAttempts": [
+          20,
+          20
+        ],
+        "cardinalityVerified": true
+      },
+      "syntheticProviderCalls": 0,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 6,
+      "path": "/api/v1/expenses",
+      "method": "POST",
+      "status": 201,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 5,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 5,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 6,
+          "rowsWritten": 3,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 42,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 4,
+          "rowsWritten": 7,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 43,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 9,
+          "rowsRead": 12,
+          "rowsWritten": 22,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 47,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "ledger_plan_usage": {
+            "rows": 4,
+            "sha256": "37d4833d6b0f2beaa3e7fd016933d1ae3932a5ff84b23385a78d768ed50f3e37"
+          },
+          "expense_suggestion_budget": {
+            "rows": 2,
+            "sha256": "bba7fc6a62bf677dfe01547d2dadb0692deca4ccd5fd7d3dd4ec309aec1ebf86"
+          },
+          "expense_suggestion_events": {
+            "rows": 1,
+            "sha256": "6c9a6b8b23736a82231d8778880bdcbe73eb6673be4ba5d4cbc958518899acb5"
+          },
+          "expenses": {
+            "rows": 5,
+            "sha256": "4fb033abd9341ce996b48bd7eb0e5162d9de3ddcb7e773bf87651f66aea8b4c4"
+          },
+          "expense_events": {
+            "rows": 1,
+            "sha256": "995c1b1723ca83fd329996599393c1357e7bc10597f49ca9c3006d3acdc3354d"
+          },
+          "expense_create_idempotency": {
+            "rows": 1,
+            "sha256": "eefa1436e81402383c1e6fff9807984e8cda1d587fdd96647fa6f1d350db9ac1"
+          },
+          "ledger_activity_events": {
+            "rows": 1,
+            "sha256": "be1e10efa19b5ab3a5918670de1819cf400d0890f7dc5fb2c4c237404634a98c"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "usage": [
+          {
+            "owner_id": "usr_github_790101",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 1002753
+          },
+          {
+            "owner_id": "usr_github_790102",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 2000000
+          },
+          {
+            "owner_id": "usr_github_790104",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-09",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 500000
+          },
+          {
+            "owner_id": "usr_github_790103",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 5000000
+          }
+        ],
+        "legacyDailyAttempts": [
+          20,
+          20
+        ],
+        "cardinalityVerified": true
+      },
+      "syntheticProviderCalls": 1,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 7,
+      "path": "/api/v1/expenses",
+      "method": "POST",
+      "status": 201,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 5,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 5,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 6,
+          "rowsWritten": 3,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 47,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 4,
+          "rowsWritten": 7,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 48,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 9,
+          "rowsRead": 12,
+          "rowsWritten": 22,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 52,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "ledger_plan_usage": {
+            "rows": 4,
+            "sha256": "3bd79f129e43bfd54e7d6d3bc2588e9c251383c2092948465529eb8aa105ae07"
+          },
+          "expense_suggestion_budget": {
+            "rows": 2,
+            "sha256": "bba7fc6a62bf677dfe01547d2dadb0692deca4ccd5fd7d3dd4ec309aec1ebf86"
+          },
+          "expense_suggestion_events": {
+            "rows": 2,
+            "sha256": "66cf41e49a8f8fd95036ba329e7577866b9b54586e9851ef71cae52d17e330e4"
+          },
+          "expenses": {
+            "rows": 6,
+            "sha256": "3571e7dc03df5e50e120dceb46058f3a7a879238e3e4683397bc0fb55c566d4b"
+          },
+          "expense_events": {
+            "rows": 2,
+            "sha256": "95b34d59aa58b535ae62ea9ef5ceb48f75253f528a6e7892b9899ac179e7cfec"
+          },
+          "expense_create_idempotency": {
+            "rows": 2,
+            "sha256": "f482ea4ad9f82fa4ef916ccc74fa02f6f8bdf5f36c425b607ac5bccd56c475f3"
+          },
+          "ledger_activity_events": {
+            "rows": 2,
+            "sha256": "fd97306d240a83aaf9c244dac193278bc66eaff3869d77d0900e24da998afaf0"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "usage": [
+          {
+            "owner_id": "usr_github_790101",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 1002753
+          },
+          {
+            "owner_id": "usr_github_790102",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 2002753
+          },
+          {
+            "owner_id": "usr_github_790104",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-09",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 500000
+          },
+          {
+            "owner_id": "usr_github_790103",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 5000000
+          }
+        ],
+        "legacyDailyAttempts": [
+          20,
+          20
+        ],
+        "cardinalityVerified": true
+      },
+      "syntheticProviderCalls": 1,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 8,
+      "path": "/api/v1/expense-suggestions",
+      "method": "POST",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 5,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 7,
+          "rowsWritten": 3,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 52,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 4,
+          "rowsWritten": 7,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 53,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "ledger_plan_usage": {
+            "rows": 4,
+            "sha256": "9ca0d9ab0cdfcf72c9b930d8fb79bf61daaa4769982ab5e012271cb0e8203b3f"
+          },
+          "expense_suggestion_budget": {
+            "rows": 2,
+            "sha256": "bba7fc6a62bf677dfe01547d2dadb0692deca4ccd5fd7d3dd4ec309aec1ebf86"
+          },
+          "expense_suggestion_events": {
+            "rows": 3,
+            "sha256": "5d9c078d6ace9c5ddac315089aaa3a3a61b90c066748edaf917a8e47cd99a6d8"
+          },
+          "expenses": {
+            "rows": 6,
+            "sha256": "3571e7dc03df5e50e120dceb46058f3a7a879238e3e4683397bc0fb55c566d4b"
+          },
+          "expense_events": {
+            "rows": 2,
+            "sha256": "95b34d59aa58b535ae62ea9ef5ceb48f75253f528a6e7892b9899ac179e7cfec"
+          },
+          "expense_create_idempotency": {
+            "rows": 2,
+            "sha256": "f482ea4ad9f82fa4ef916ccc74fa02f6f8bdf5f36c425b607ac5bccd56c475f3"
+          },
+          "ledger_activity_events": {
+            "rows": 2,
+            "sha256": "fd97306d240a83aaf9c244dac193278bc66eaff3869d77d0900e24da998afaf0"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "usage": [
+          {
+            "owner_id": "usr_github_790101",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 1005506
+          },
+          {
+            "owner_id": "usr_github_790102",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 2002753
+          },
+          {
+            "owner_id": "usr_github_790104",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-09",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 500000
+          },
+          {
+            "owner_id": "usr_github_790103",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 5000000
+          }
+        ],
+        "legacyDailyAttempts": [
+          20,
+          20
+        ],
+        "cardinalityVerified": true
+      },
+      "syntheticProviderCalls": 1,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 9,
+      "path": "/api/v1/expenses",
+      "method": "POST",
+      "status": 201,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 5,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 5,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 7,
+          "rowsWritten": 3,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 53,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 3,
+          "rowsWritten": 5,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 54,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 9,
+          "rowsRead": 13,
+          "rowsWritten": 22,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 58,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "ledger_plan_usage": {
+            "rows": 4,
+            "sha256": "bd3215bb4d17a540acbc35d780730898d8acec24cd966fbfa66405f92593866d"
+          },
+          "expense_suggestion_budget": {
+            "rows": 2,
+            "sha256": "bba7fc6a62bf677dfe01547d2dadb0692deca4ccd5fd7d3dd4ec309aec1ebf86"
+          },
+          "expense_suggestion_events": {
+            "rows": 4,
+            "sha256": "df41e2f6fd0be774de5fde3f8de507d1c1709fb7b2d9f03f4fa4d59d77ea3d56"
+          },
+          "expenses": {
+            "rows": 7,
+            "sha256": "367749bf89f6ffce5a6176783584609b646fc84228d3303b9d53fe9a51fd2f02"
+          },
+          "expense_events": {
+            "rows": 3,
+            "sha256": "135593fefb2a2549984d00514ec961e98f059031c80649743142a04e95280888"
+          },
+          "expense_create_idempotency": {
+            "rows": 3,
+            "sha256": "5df5bdec7f18370daa39d9f9c7079497c901b99bebd1faafd152870ff48ed6f7"
+          },
+          "ledger_activity_events": {
+            "rows": 3,
+            "sha256": "7ae5f8287c992401290494d4aec8543bc6c4b90d7d13d65118adc189e0967c33"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "usage": [
+          {
+            "owner_id": "usr_github_790101",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 1005506
+          },
+          {
+            "owner_id": "usr_github_790102",
+            "projects": 0,
+            "records": 3,
+            "month": "2026-10",
+            "writes": 9,
+            "minute_writes": 9,
+            "jev_reserved_microusd": 2005506
+          },
+          {
+            "owner_id": "usr_github_790104",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-09",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 500000
+          },
+          {
+            "owner_id": "usr_github_790103",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 5000000
+          }
+        ],
+        "legacyDailyAttempts": [
+          20,
+          20
+        ],
+        "cardinalityVerified": true
+      },
+      "syntheticProviderCalls": 1,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 10,
+      "path": "/api/v1/expenses",
+      "method": "POST",
+      "status": 201,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 5,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 5,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 4,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 8,
+          "rowsWritten": 3,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 58,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 4,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 3,
+          "rowsWritten": 5,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 59,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 4,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 4,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 9,
+          "rowsRead": 14,
+          "rowsWritten": 22,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 63,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "ledger_plan_usage": {
+            "rows": 4,
+            "sha256": "cc1bcb946cb1f87138df60a93acb28b36ec003863e8996a34b74ea35df89e470"
+          },
+          "expense_suggestion_budget": {
+            "rows": 2,
+            "sha256": "bba7fc6a62bf677dfe01547d2dadb0692deca4ccd5fd7d3dd4ec309aec1ebf86"
+          },
+          "expense_suggestion_events": {
+            "rows": 5,
+            "sha256": "304b6d76d137b9ec370959589055332d489293be427b3a4a120355926b29e53c"
+          },
+          "expenses": {
+            "rows": 8,
+            "sha256": "ec56a21f6f48ff1a905dcb56b2bbf9a0243a6e71153b7d085ff0d731328310cb"
+          },
+          "expense_events": {
+            "rows": 4,
+            "sha256": "18c9d0ca6f076f2860244fa2409f43937644fd9b5fe83ac23012a730c1a1c01f"
+          },
+          "expense_create_idempotency": {
+            "rows": 4,
+            "sha256": "7aba247dcd9f29563e010393e696bf05add7a0c3104f2e45ab663ac0c184cc53"
+          },
+          "ledger_activity_events": {
+            "rows": 4,
+            "sha256": "72d56f4a95451660e8015979598c6d7a13f565f0b1dbb4e37ac415e0e163087b"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "usage": [
+          {
+            "owner_id": "usr_github_790101",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 1005506
+          },
+          {
+            "owner_id": "usr_github_790102",
+            "projects": 0,
+            "records": 4,
+            "month": "2026-10",
+            "writes": 10,
+            "minute_writes": 10,
+            "jev_reserved_microusd": 2008259
+          },
+          {
+            "owner_id": "usr_github_790104",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-09",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 500000
+          },
+          {
+            "owner_id": "usr_github_790103",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 5000000
+          }
+        ],
+        "legacyDailyAttempts": [
+          20,
+          20
+        ],
+        "cardinalityVerified": true
+      },
+      "syntheticProviderCalls": 1,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 11,
+      "path": "/api/v1/expenses",
+      "method": "POST",
+      "status": 201,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 5,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 5,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 5,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 9,
+          "rowsWritten": 3,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 63,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 5,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 3,
+          "rowsWritten": 5,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 64,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 5,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 5,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 9,
+          "rowsRead": 15,
+          "rowsWritten": 22,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 68,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "ledger_plan_usage": {
+            "rows": 4,
+            "sha256": "b10543ebd1bbbca4ee89b1f21296db8f277ca3185806e79d9f83f6d4b432decf"
+          },
+          "expense_suggestion_budget": {
+            "rows": 2,
+            "sha256": "bba7fc6a62bf677dfe01547d2dadb0692deca4ccd5fd7d3dd4ec309aec1ebf86"
+          },
+          "expense_suggestion_events": {
+            "rows": 6,
+            "sha256": "923807cf7bcba85381ed66124545f92879f997402aed78db0dcd20048ae39dcb"
+          },
+          "expenses": {
+            "rows": 9,
+            "sha256": "54c5fe9145380d05c882f4c8db3214cb92f4d9028e25e7ef7b2981db833e32bc"
+          },
+          "expense_events": {
+            "rows": 5,
+            "sha256": "e302ac3a93a3264d0c0344fca3f6457f050d56601409e5a7e79fdde799f3a211"
+          },
+          "expense_create_idempotency": {
+            "rows": 5,
+            "sha256": "ac36b2aab7b08547b0cfcd8f9a5f4a2fb986f1c6708f797b7024cf8b79557966"
+          },
+          "ledger_activity_events": {
+            "rows": 5,
+            "sha256": "e597338f7cbb153acee5d420015eb429e3a05c3e095fc68761a1730849cde448"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "usage": [
+          {
+            "owner_id": "usr_github_790101",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 1005506
+          },
+          {
+            "owner_id": "usr_github_790102",
+            "projects": 0,
+            "records": 5,
+            "month": "2026-10",
+            "writes": 11,
+            "minute_writes": 11,
+            "jev_reserved_microusd": 2011012
+          },
+          {
+            "owner_id": "usr_github_790104",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-09",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 500000
+          },
+          {
+            "owner_id": "usr_github_790103",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 5000000
+          }
+        ],
+        "legacyDailyAttempts": [
+          20,
+          20
+        ],
+        "cardinalityVerified": true
+      },
+      "syntheticProviderCalls": 1,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 12,
+      "path": "/api/v1/expenses/exp_9c05a6fffc8744918035e65cf0345f50/review",
+      "method": "POST",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 5,
+          "rowsRead": 6,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 6,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 11,
+          "rowsWritten": 5,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 68,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 6,
+          "rowsRead": 5,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 6,
+          "rowsRead": 6,
+          "rowsWritten": 11,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 69,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "ledger_plan_usage": {
+            "rows": 4,
+            "sha256": "9be77d935774fb971c5cff215c074c0a4924793c6084b9d16927fe401d6dcc7b"
+          },
+          "expense_suggestion_budget": {
+            "rows": 2,
+            "sha256": "bba7fc6a62bf677dfe01547d2dadb0692deca4ccd5fd7d3dd4ec309aec1ebf86"
+          },
+          "expense_suggestion_events": {
+            "rows": 7,
+            "sha256": "c2f1e021fc1001ee9a83d7262c53a78b2407469c2d51cd312c9e733175a2bd21"
+          },
+          "expenses": {
+            "rows": 9,
+            "sha256": "54c5fe9145380d05c882f4c8db3214cb92f4d9028e25e7ef7b2981db833e32bc"
+          },
+          "expense_events": {
+            "rows": 5,
+            "sha256": "e302ac3a93a3264d0c0344fca3f6457f050d56601409e5a7e79fdde799f3a211"
+          },
+          "expense_create_idempotency": {
+            "rows": 5,
+            "sha256": "ac36b2aab7b08547b0cfcd8f9a5f4a2fb986f1c6708f797b7024cf8b79557966"
+          },
+          "ledger_activity_events": {
+            "rows": 5,
+            "sha256": "e597338f7cbb153acee5d420015eb429e3a05c3e095fc68761a1730849cde448"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "usage": [
+          {
+            "owner_id": "usr_github_790101",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 1005506
+          },
+          {
+            "owner_id": "usr_github_790104",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-09",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 500000
+          },
+          {
+            "owner_id": "usr_github_790103",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 5000000
+          },
+          {
+            "owner_id": "usr_github_790102",
+            "projects": 0,
+            "records": 5,
+            "month": "2026-10",
+            "writes": 11,
+            "minute_writes": 11,
+            "jev_reserved_microusd": 2013765
+          }
+        ],
+        "legacyDailyAttempts": [
+          20,
+          20
+        ],
+        "cardinalityVerified": true
+      },
+      "syntheticProviderCalls": 1,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 13,
+      "path": "/api/v1/expenses/exp_805cfa2ad86d409a833b6e6309894302/review",
+      "method": "POST",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 5,
+          "rowsRead": 6,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 6,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 11,
+          "rowsWritten": 5,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 69,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 6,
+          "rowsRead": 10,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 5,
+          "rowsRead": 5,
+          "rowsWritten": 9,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 70,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "ledger_plan_usage": {
+            "rows": 4,
+            "sha256": "d1250171a4dec3575927549cf6eeec2c11d2d2635af20c9dbb95b6c2929f0120"
+          },
+          "expense_suggestion_budget": {
+            "rows": 2,
+            "sha256": "bba7fc6a62bf677dfe01547d2dadb0692deca4ccd5fd7d3dd4ec309aec1ebf86"
+          },
+          "expense_suggestion_events": {
+            "rows": 8,
+            "sha256": "f584ff28921ebdd9411c11d9d2c8164fb4e02f835c9e790d48bd8dd112c3e101"
+          },
+          "expenses": {
+            "rows": 9,
+            "sha256": "54c5fe9145380d05c882f4c8db3214cb92f4d9028e25e7ef7b2981db833e32bc"
+          },
+          "expense_events": {
+            "rows": 5,
+            "sha256": "e302ac3a93a3264d0c0344fca3f6457f050d56601409e5a7e79fdde799f3a211"
+          },
+          "expense_create_idempotency": {
+            "rows": 5,
+            "sha256": "ac36b2aab7b08547b0cfcd8f9a5f4a2fb986f1c6708f797b7024cf8b79557966"
+          },
+          "ledger_activity_events": {
+            "rows": 5,
+            "sha256": "e597338f7cbb153acee5d420015eb429e3a05c3e095fc68761a1730849cde448"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "usage": [
+          {
+            "owner_id": "usr_github_790101",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 1005506
+          },
+          {
+            "owner_id": "usr_github_790104",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-09",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 500000
+          },
+          {
+            "owner_id": "usr_github_790103",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 5000000
+          },
+          {
+            "owner_id": "usr_github_790102",
+            "projects": 0,
+            "records": 5,
+            "month": "2026-10",
+            "writes": 11,
+            "minute_writes": 11,
+            "jev_reserved_microusd": 2016518
+          }
+        ],
+        "legacyDailyAttempts": [
+          20,
+          20
+        ],
+        "cardinalityVerified": true
+      },
+      "syntheticProviderCalls": 1,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 14,
+      "path": "/api/v1/expenses/exp_93a4877c1d32481ba971cdc67d22118b/review",
+      "method": "POST",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 5,
+          "rowsRead": 6,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 6,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 11,
+          "rowsWritten": 5,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 70,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 6,
+          "rowsRead": 10,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 5,
+          "rowsRead": 5,
+          "rowsWritten": 9,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 71,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "ledger_plan_usage": {
+            "rows": 4,
+            "sha256": "98aebd2c7d165eea1064fdb00fe5512f2ba1757931faf2cd0c18c070b2b55e76"
+          },
+          "expense_suggestion_budget": {
+            "rows": 2,
+            "sha256": "bba7fc6a62bf677dfe01547d2dadb0692deca4ccd5fd7d3dd4ec309aec1ebf86"
+          },
+          "expense_suggestion_events": {
+            "rows": 9,
+            "sha256": "8625fa299b004a3bb4b394ce1c3f82cd8fe07798938700301ec15ae487561a58"
+          },
+          "expenses": {
+            "rows": 9,
+            "sha256": "54c5fe9145380d05c882f4c8db3214cb92f4d9028e25e7ef7b2981db833e32bc"
+          },
+          "expense_events": {
+            "rows": 5,
+            "sha256": "e302ac3a93a3264d0c0344fca3f6457f050d56601409e5a7e79fdde799f3a211"
+          },
+          "expense_create_idempotency": {
+            "rows": 5,
+            "sha256": "ac36b2aab7b08547b0cfcd8f9a5f4a2fb986f1c6708f797b7024cf8b79557966"
+          },
+          "ledger_activity_events": {
+            "rows": 5,
+            "sha256": "e597338f7cbb153acee5d420015eb429e3a05c3e095fc68761a1730849cde448"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "usage": [
+          {
+            "owner_id": "usr_github_790101",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 1005506
+          },
+          {
+            "owner_id": "usr_github_790104",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-09",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 500000
+          },
+          {
+            "owner_id": "usr_github_790103",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 5000000
+          },
+          {
+            "owner_id": "usr_github_790102",
+            "projects": 0,
+            "records": 5,
+            "month": "2026-10",
+            "writes": 11,
+            "minute_writes": 11,
+            "jev_reserved_microusd": 2019271
+          }
+        ],
+        "legacyDailyAttempts": [
+          20,
+          20
+        ],
+        "cardinalityVerified": true
+      },
+      "syntheticProviderCalls": 1,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 15,
+      "path": "/api/v1/expenses/exp_dec620bbd132459486302b76cb77471f/review",
+      "method": "POST",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 5,
+          "rowsRead": 6,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 6,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 11,
+          "rowsWritten": 5,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 71,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 6,
+          "rowsRead": 10,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 5,
+          "rowsRead": 5,
+          "rowsWritten": 9,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 72,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "ledger_plan_usage": {
+            "rows": 4,
+            "sha256": "65cd2d6297760b88ae1a23bb11e137306b2a2168830c8296eaf63ee661c858e1"
+          },
+          "expense_suggestion_budget": {
+            "rows": 2,
+            "sha256": "bba7fc6a62bf677dfe01547d2dadb0692deca4ccd5fd7d3dd4ec309aec1ebf86"
+          },
+          "expense_suggestion_events": {
+            "rows": 10,
+            "sha256": "d1e6f39ab6a0540d3de17447ff8885b8036dc869b9db239b8d3929a139a0ea70"
+          },
+          "expenses": {
+            "rows": 9,
+            "sha256": "54c5fe9145380d05c882f4c8db3214cb92f4d9028e25e7ef7b2981db833e32bc"
+          },
+          "expense_events": {
+            "rows": 5,
+            "sha256": "e302ac3a93a3264d0c0344fca3f6457f050d56601409e5a7e79fdde799f3a211"
+          },
+          "expense_create_idempotency": {
+            "rows": 5,
+            "sha256": "ac36b2aab7b08547b0cfcd8f9a5f4a2fb986f1c6708f797b7024cf8b79557966"
+          },
+          "ledger_activity_events": {
+            "rows": 5,
+            "sha256": "e597338f7cbb153acee5d420015eb429e3a05c3e095fc68761a1730849cde448"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "usage": [
+          {
+            "owner_id": "usr_github_790101",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 1005506
+          },
+          {
+            "owner_id": "usr_github_790104",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-09",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 500000
+          },
+          {
+            "owner_id": "usr_github_790103",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-10",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 5000000
+          },
+          {
+            "owner_id": "usr_github_790102",
+            "projects": 0,
+            "records": 5,
+            "month": "2026-10",
+            "writes": 11,
+            "minute_writes": 11,
+            "jev_reserved_microusd": 2022024
+          }
+        ],
+        "legacyDailyAttempts": [
+          20,
+          20
+        ],
+        "cardinalityVerified": true
+      },
+      "syntheticProviderCalls": 1,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 16,
+      "path": "/api/v1/expenses",
+      "method": "POST",
+      "status": 201,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 5,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 5,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 3,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 2,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 9,
+          "rowsRead": 12,
+          "rowsWritten": 22,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 2,
+          "rowsRead": 76,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "ledger_plan_usage": {
+            "rows": 4,
+            "sha256": "a9e6a225c28698d21a4a57881dfd5fd0761352b835292d55210dcd2bbaa04511"
+          },
+          "expense_suggestion_budget": {
+            "rows": 2,
+            "sha256": "bba7fc6a62bf677dfe01547d2dadb0692deca4ccd5fd7d3dd4ec309aec1ebf86"
+          },
+          "expense_suggestion_events": {
+            "rows": 10,
+            "sha256": "d1e6f39ab6a0540d3de17447ff8885b8036dc869b9db239b8d3929a139a0ea70"
+          },
+          "expenses": {
+            "rows": 10,
+            "sha256": "a7d5b46be6688057e0b6e6d3b463901156d590362349c4b6f2a221c7d1a4b90c"
+          },
+          "expense_events": {
+            "rows": 6,
+            "sha256": "1456e27d96fe131b4a576c2b461c556e797a72ccaa09d9a1383e38fd29f85d72"
+          },
+          "expense_create_idempotency": {
+            "rows": 6,
+            "sha256": "3ef5b7f518608950d9edf38b98eed7551ac7656b79f20b85360934ea9bb908e5"
+          },
+          "ledger_activity_events": {
+            "rows": 6,
+            "sha256": "86c7bb9439a56a4d678b6dbdc1144c759286e335a5ea0f30587cc0949a4a8c4a"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "usage": [
+          {
+            "owner_id": "usr_github_790101",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 1005506
+          },
+          {
+            "owner_id": "usr_github_790104",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-09",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 500000
+          },
+          {
+            "owner_id": "usr_github_790103",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 5000000
+          },
+          {
+            "owner_id": "usr_github_790102",
+            "projects": 0,
+            "records": 5,
+            "month": "2026-10",
+            "writes": 11,
+            "minute_writes": 11,
+            "jev_reserved_microusd": 2022024
+          }
+        ],
+        "legacyDailyAttempts": [
+          20,
+          20
+        ],
+        "cardinalityVerified": true
+      },
+      "syntheticProviderCalls": 0,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 17,
+      "path": "/api/v1/expenses/exp_ee5ebdf92f614a3fa7efb2e476cb0068/review",
+      "method": "POST",
+      "status": 429,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 5,
+          "rowsRead": 6,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 3,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "ledger_plan_usage": {
+            "rows": 4,
+            "sha256": "a9e6a225c28698d21a4a57881dfd5fd0761352b835292d55210dcd2bbaa04511"
+          },
+          "expense_suggestion_budget": {
+            "rows": 2,
+            "sha256": "bba7fc6a62bf677dfe01547d2dadb0692deca4ccd5fd7d3dd4ec309aec1ebf86"
+          },
+          "expense_suggestion_events": {
+            "rows": 10,
+            "sha256": "d1e6f39ab6a0540d3de17447ff8885b8036dc869b9db239b8d3929a139a0ea70"
+          },
+          "expenses": {
+            "rows": 10,
+            "sha256": "a7d5b46be6688057e0b6e6d3b463901156d590362349c4b6f2a221c7d1a4b90c"
+          },
+          "expense_events": {
+            "rows": 6,
+            "sha256": "1456e27d96fe131b4a576c2b461c556e797a72ccaa09d9a1383e38fd29f85d72"
+          },
+          "expense_create_idempotency": {
+            "rows": 6,
+            "sha256": "3ef5b7f518608950d9edf38b98eed7551ac7656b79f20b85360934ea9bb908e5"
+          },
+          "ledger_activity_events": {
+            "rows": 6,
+            "sha256": "86c7bb9439a56a4d678b6dbdc1144c759286e335a5ea0f30587cc0949a4a8c4a"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "usage": [
+          {
+            "owner_id": "usr_github_790101",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 1005506
+          },
+          {
+            "owner_id": "usr_github_790104",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-09",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 500000
+          },
+          {
+            "owner_id": "usr_github_790103",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 5000000
+          },
+          {
+            "owner_id": "usr_github_790102",
+            "projects": 0,
+            "records": 5,
+            "month": "2026-10",
+            "writes": 11,
+            "minute_writes": 11,
+            "jev_reserved_microusd": 2022024
+          }
+        ],
+        "legacyDailyAttempts": [
+          20,
+          20
+        ],
+        "cardinalityVerified": true
+      },
+      "syntheticProviderCalls": 0,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 18,
+      "path": "/api/v1/expenses",
+      "method": "POST",
+      "status": 201,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 5,
+          "rowsRead": 4,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "ledger_plan_usage": {
+            "rows": 4,
+            "sha256": "a9e6a225c28698d21a4a57881dfd5fd0761352b835292d55210dcd2bbaa04511"
+          },
+          "expense_suggestion_budget": {
+            "rows": 2,
+            "sha256": "bba7fc6a62bf677dfe01547d2dadb0692deca4ccd5fd7d3dd4ec309aec1ebf86"
+          },
+          "expense_suggestion_events": {
+            "rows": 10,
+            "sha256": "d1e6f39ab6a0540d3de17447ff8885b8036dc869b9db239b8d3929a139a0ea70"
+          },
+          "expenses": {
+            "rows": 10,
+            "sha256": "a7d5b46be6688057e0b6e6d3b463901156d590362349c4b6f2a221c7d1a4b90c"
+          },
+          "expense_events": {
+            "rows": 6,
+            "sha256": "1456e27d96fe131b4a576c2b461c556e797a72ccaa09d9a1383e38fd29f85d72"
+          },
+          "expense_create_idempotency": {
+            "rows": 6,
+            "sha256": "3ef5b7f518608950d9edf38b98eed7551ac7656b79f20b85360934ea9bb908e5"
+          },
+          "ledger_activity_events": {
+            "rows": 6,
+            "sha256": "86c7bb9439a56a4d678b6dbdc1144c759286e335a5ea0f30587cc0949a4a8c4a"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "usage": [
+          {
+            "owner_id": "usr_github_790101",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 1005506
+          },
+          {
+            "owner_id": "usr_github_790104",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-09",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 500000
+          },
+          {
+            "owner_id": "usr_github_790103",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 5000000
+          },
+          {
+            "owner_id": "usr_github_790102",
+            "projects": 0,
+            "records": 5,
+            "month": "2026-10",
+            "writes": 11,
+            "minute_writes": 11,
+            "jev_reserved_microusd": 2022024
+          }
+        ],
+        "legacyDailyAttempts": [
+          20,
+          20
+        ],
+        "cardinalityVerified": true
+      },
+      "syntheticProviderCalls": 0,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 19,
+      "path": "/billing",
+      "method": "GET",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 8,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "ledger_plan_usage": {
+            "rows": 4,
+            "sha256": "a9e6a225c28698d21a4a57881dfd5fd0761352b835292d55210dcd2bbaa04511"
+          },
+          "expense_suggestion_budget": {
+            "rows": 2,
+            "sha256": "bba7fc6a62bf677dfe01547d2dadb0692deca4ccd5fd7d3dd4ec309aec1ebf86"
+          },
+          "expense_suggestion_events": {
+            "rows": 10,
+            "sha256": "d1e6f39ab6a0540d3de17447ff8885b8036dc869b9db239b8d3929a139a0ea70"
+          },
+          "expenses": {
+            "rows": 10,
+            "sha256": "a7d5b46be6688057e0b6e6d3b463901156d590362349c4b6f2a221c7d1a4b90c"
+          },
+          "expense_events": {
+            "rows": 6,
+            "sha256": "1456e27d96fe131b4a576c2b461c556e797a72ccaa09d9a1383e38fd29f85d72"
+          },
+          "expense_create_idempotency": {
+            "rows": 6,
+            "sha256": "3ef5b7f518608950d9edf38b98eed7551ac7656b79f20b85360934ea9bb908e5"
+          },
+          "ledger_activity_events": {
+            "rows": 6,
+            "sha256": "86c7bb9439a56a4d678b6dbdc1144c759286e335a5ea0f30587cc0949a4a8c4a"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "usage": [
+          {
+            "owner_id": "usr_github_790101",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 1005506
+          },
+          {
+            "owner_id": "usr_github_790104",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-09",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 500000
+          },
+          {
+            "owner_id": "usr_github_790103",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 5000000
+          },
+          {
+            "owner_id": "usr_github_790102",
+            "projects": 0,
+            "records": 5,
+            "month": "2026-10",
+            "writes": 11,
+            "minute_writes": 11,
+            "jev_reserved_microusd": 2022024
+          }
+        ],
+        "legacyDailyAttempts": [
+          20,
+          20
+        ],
+        "cardinalityVerified": true
+      },
+      "syntheticProviderCalls": 0,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 20,
+      "path": "/billing",
+      "method": "GET",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 11,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "ledger_plan_usage": {
+            "rows": 4,
+            "sha256": "a9e6a225c28698d21a4a57881dfd5fd0761352b835292d55210dcd2bbaa04511"
+          },
+          "expense_suggestion_budget": {
+            "rows": 2,
+            "sha256": "bba7fc6a62bf677dfe01547d2dadb0692deca4ccd5fd7d3dd4ec309aec1ebf86"
+          },
+          "expense_suggestion_events": {
+            "rows": 10,
+            "sha256": "d1e6f39ab6a0540d3de17447ff8885b8036dc869b9db239b8d3929a139a0ea70"
+          },
+          "expenses": {
+            "rows": 10,
+            "sha256": "a7d5b46be6688057e0b6e6d3b463901156d590362349c4b6f2a221c7d1a4b90c"
+          },
+          "expense_events": {
+            "rows": 6,
+            "sha256": "1456e27d96fe131b4a576c2b461c556e797a72ccaa09d9a1383e38fd29f85d72"
+          },
+          "expense_create_idempotency": {
+            "rows": 6,
+            "sha256": "3ef5b7f518608950d9edf38b98eed7551ac7656b79f20b85360934ea9bb908e5"
+          },
+          "ledger_activity_events": {
+            "rows": 6,
+            "sha256": "86c7bb9439a56a4d678b6dbdc1144c759286e335a5ea0f30587cc0949a4a8c4a"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "usage": [
+          {
+            "owner_id": "usr_github_790101",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 1005506
+          },
+          {
+            "owner_id": "usr_github_790104",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-09",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 500000
+          },
+          {
+            "owner_id": "usr_github_790103",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 5000000
+          },
+          {
+            "owner_id": "usr_github_790102",
+            "projects": 0,
+            "records": 5,
+            "month": "2026-10",
+            "writes": 11,
+            "minute_writes": 11,
+            "jev_reserved_microusd": 2022024
+          }
+        ],
+        "legacyDailyAttempts": [
+          20,
+          20
+        ],
+        "cardinalityVerified": true
+      },
+      "syntheticProviderCalls": 0,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 21,
+      "path": "/billing",
+      "method": "GET",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 8,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "ledger_plan_usage": {
+            "rows": 4,
+            "sha256": "a9e6a225c28698d21a4a57881dfd5fd0761352b835292d55210dcd2bbaa04511"
+          },
+          "expense_suggestion_budget": {
+            "rows": 2,
+            "sha256": "bba7fc6a62bf677dfe01547d2dadb0692deca4ccd5fd7d3dd4ec309aec1ebf86"
+          },
+          "expense_suggestion_events": {
+            "rows": 10,
+            "sha256": "d1e6f39ab6a0540d3de17447ff8885b8036dc869b9db239b8d3929a139a0ea70"
+          },
+          "expenses": {
+            "rows": 10,
+            "sha256": "a7d5b46be6688057e0b6e6d3b463901156d590362349c4b6f2a221c7d1a4b90c"
+          },
+          "expense_events": {
+            "rows": 6,
+            "sha256": "1456e27d96fe131b4a576c2b461c556e797a72ccaa09d9a1383e38fd29f85d72"
+          },
+          "expense_create_idempotency": {
+            "rows": 6,
+            "sha256": "3ef5b7f518608950d9edf38b98eed7551ac7656b79f20b85360934ea9bb908e5"
+          },
+          "ledger_activity_events": {
+            "rows": 6,
+            "sha256": "86c7bb9439a56a4d678b6dbdc1144c759286e335a5ea0f30587cc0949a4a8c4a"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "usage": [
+          {
+            "owner_id": "usr_github_790101",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 1005506
+          },
+          {
+            "owner_id": "usr_github_790104",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-09",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 500000
+          },
+          {
+            "owner_id": "usr_github_790103",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 5000000
+          },
+          {
+            "owner_id": "usr_github_790102",
+            "projects": 0,
+            "records": 5,
+            "month": "2026-10",
+            "writes": 11,
+            "minute_writes": 11,
+            "jev_reserved_microusd": 2022024
+          }
+        ],
+        "legacyDailyAttempts": [
+          20,
+          20
+        ],
+        "cardinalityVerified": true
+      },
+      "syntheticProviderCalls": 0,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 22,
+      "path": "/billing",
+      "method": "GET",
+      "status": 200,
+      "meteredGroups": [
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 1,
+          "rowsRead": 1,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null
+          ]
+        },
+        {
+          "phase": "metered",
+          "statements": 4,
+          "rowsRead": 6,
+          "rowsWritten": 0,
+          "nativeAttempts": [
+            null,
+            null,
+            null,
+            null
+          ]
+        }
+      ],
+      "integrity": {
+        "tables": {
+          "ledger_plan_usage": {
+            "rows": 4,
+            "sha256": "a9e6a225c28698d21a4a57881dfd5fd0761352b835292d55210dcd2bbaa04511"
+          },
+          "expense_suggestion_budget": {
+            "rows": 2,
+            "sha256": "bba7fc6a62bf677dfe01547d2dadb0692deca4ccd5fd7d3dd4ec309aec1ebf86"
+          },
+          "expense_suggestion_events": {
+            "rows": 10,
+            "sha256": "d1e6f39ab6a0540d3de17447ff8885b8036dc869b9db239b8d3929a139a0ea70"
+          },
+          "expenses": {
+            "rows": 10,
+            "sha256": "a7d5b46be6688057e0b6e6d3b463901156d590362349c4b6f2a221c7d1a4b90c"
+          },
+          "expense_events": {
+            "rows": 6,
+            "sha256": "1456e27d96fe131b4a576c2b461c556e797a72ccaa09d9a1383e38fd29f85d72"
+          },
+          "expense_create_idempotency": {
+            "rows": 6,
+            "sha256": "3ef5b7f518608950d9edf38b98eed7551ac7656b79f20b85360934ea9bb908e5"
+          },
+          "ledger_activity_events": {
+            "rows": 6,
+            "sha256": "86c7bb9439a56a4d678b6dbdc1144c759286e335a5ea0f30587cc0949a4a8c4a"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "usage": [
+          {
+            "owner_id": "usr_github_790101",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 1005506
+          },
+          {
+            "owner_id": "usr_github_790104",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-09",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 500000
+          },
+          {
+            "owner_id": "usr_github_790103",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 5000000
+          },
+          {
+            "owner_id": "usr_github_790102",
+            "projects": 0,
+            "records": 5,
+            "month": "2026-10",
+            "writes": 11,
+            "minute_writes": 11,
+            "jev_reserved_microusd": 2022024
+          }
+        ],
+        "legacyDailyAttempts": [
+          20,
+          20
+        ],
+        "cardinalityVerified": true
+      },
+      "syntheticProviderCalls": 0,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    },
+    {
+      "call": 23,
+      "path": "/_fixture/final",
+      "method": "GET",
+      "status": 200,
+      "meteredGroups": [],
+      "integrity": {
+        "tables": {
+          "ledger_plan_usage": {
+            "rows": 4,
+            "sha256": "a9e6a225c28698d21a4a57881dfd5fd0761352b835292d55210dcd2bbaa04511"
+          },
+          "expense_suggestion_budget": {
+            "rows": 2,
+            "sha256": "bba7fc6a62bf677dfe01547d2dadb0692deca4ccd5fd7d3dd4ec309aec1ebf86"
+          },
+          "expense_suggestion_events": {
+            "rows": 10,
+            "sha256": "d1e6f39ab6a0540d3de17447ff8885b8036dc869b9db239b8d3929a139a0ea70"
+          },
+          "expenses": {
+            "rows": 10,
+            "sha256": "a7d5b46be6688057e0b6e6d3b463901156d590362349c4b6f2a221c7d1a4b90c"
+          },
+          "expense_events": {
+            "rows": 6,
+            "sha256": "1456e27d96fe131b4a576c2b461c556e797a72ccaa09d9a1383e38fd29f85d72"
+          },
+          "expense_create_idempotency": {
+            "rows": 6,
+            "sha256": "3ef5b7f518608950d9edf38b98eed7551ac7656b79f20b85360934ea9bb908e5"
+          },
+          "ledger_activity_events": {
+            "rows": 6,
+            "sha256": "86c7bb9439a56a4d678b6dbdc1144c759286e335a5ea0f30587cc0949a4a8c4a"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        "usage": [
+          {
+            "owner_id": "usr_github_790101",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 1005506
+          },
+          {
+            "owner_id": "usr_github_790104",
+            "projects": 0,
+            "records": 1,
+            "month": "2026-09",
+            "writes": 7,
+            "minute_writes": 7,
+            "jev_reserved_microusd": 500000
+          },
+          {
+            "owner_id": "usr_github_790103",
+            "projects": 0,
+            "records": 2,
+            "month": "2026-10",
+            "writes": 8,
+            "minute_writes": 8,
+            "jev_reserved_microusd": 5000000
+          },
+          {
+            "owner_id": "usr_github_790102",
+            "projects": 0,
+            "records": 5,
+            "month": "2026-10",
+            "writes": 11,
+            "minute_writes": 11,
+            "jev_reserved_microusd": 2022024
+          }
+        ],
+        "legacyDailyAttempts": [
+          20,
+          20
+        ],
+        "cardinalityVerified": true
+      },
+      "syntheticProviderCalls": 0,
+      "journalActualDeltasMatchRawMeta": true,
+      "journalHealthy": true
+    }
+  ],
+  "nativeStatements": 820,
+  "meteredNativeRowsRead": 2839,
+  "meteredNativeRowsWritten": 466,
+  "integrityProbeNativeRowsRead": 748,
+  "nativeAttemptsObserved": [
+    null
+  ],
+  "syntheticProviderCalls": 10,
+  "runtimeStopped": true,
+  "dailyHistoricalRowsUnchanged": true,
+  "exactDuplicatePredicatesNative": true,
+  "paidBillingTruthAndReadOnlyNative": true,
+  "monthlyExhaustionNoProviderNative": true,
+  "businessWritesChargedOnce": true,
+  "idempotentReplayNoExtraUsageNative": true,
+  "noSchemaUpgradeRequired": true,
+  "integrityProbesReadOnlyAndOutsideJournal": true,
+  "nativeAttemptMetadataMissing": true
+}

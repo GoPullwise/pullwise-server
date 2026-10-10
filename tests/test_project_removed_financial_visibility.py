@@ -9,6 +9,7 @@ from pullwise_server.cloudflare_api_key_write import create_api_key
 from pullwise_server.cloudflare_ledger_api import handle_ledger_request
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1
 from pullwise_server.cloudflare_state_records import encode_record, record_name
+from pullwise_server.ledger_plan_policy import JEV_RESERVATION_MICROUSD
 from test_cloudflare_github_identity_http import GitHubStub
 import test_ledger_routes as route_fixture
 from test_ledger_automatic_assistance import Provider
@@ -272,7 +273,7 @@ def test_suggestion_removal_fences_prevent_removed_project_results(ledger, stage
         remove(ledger, project)
     elif stage == "reservation":
         fired = remove_before_batch(ledger, project, lambda statements: any(
-            "INSERT INTO expense_suggestion_budget" in statement.sql for statement in statements))
+            "INSERT INTO ledger_plan_usage" in statement.sql for statement in statements))
     before = facts(ledger)
     status, result = invoke(ledger, "POST", "/api/v1/expense-suggestions",
         {"target": draft["target"], "purpose": draft["purpose"]}, provider=provider)
@@ -286,7 +287,9 @@ def test_suggestion_removal_fences_prevent_removed_project_results(ledger, stage
         assert after == before
     else:
         assert after["expense_suggestion_events"] == before["expense_suggestion_events"]
-        assert len(after["expense_suggestion_budget"]) == 1
+        assert after["expense_suggestion_budget"] == before["expense_suggestion_budget"]
+        with ledger.store.connect() as db:
+            assert db.execute("SELECT jev_reserved_microusd FROM ledger_plan_usage").fetchone()[0] == JEV_RESERVATION_MICROUSD
         for table in ("expenses", "expense_events", "expense_create_idempotency", "ledger_activity_events"):
             assert after[table] == before[table]
 

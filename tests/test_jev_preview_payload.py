@@ -63,7 +63,7 @@ def assert_accounting(client, *, writes, reservations):
     with client.preview.fixture.store.connect() as database:
         usage = database.execute("SELECT writes,records,jev_reserved_microusd FROM ledger_plan_usage").fetchone()
         assert tuple(usage) == (writes, 1, reservations * JEV_RESERVATION_MICROUSD)
-        assert database.execute("SELECT attempts FROM expense_suggestion_budget").fetchone()[0] == reservations
+        assert database.execute("SELECT count(*) FROM expense_suggestion_budget").fetchone()[0] == 0
         assert database.execute("SELECT count(*) FROM expense_suggestion_events").fetchone()[0] == reservations
     assert len(client.provider.calls) == reservations
 

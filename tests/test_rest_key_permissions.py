@@ -18,6 +18,7 @@ from pullwise_server.cloudflare_ledger_auth import ledger_principal
 from pullwise_server.cloudflare_ledger_profile import read_ledger_me
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1
 from pullwise_server.cloudflare_state_records import encode_record, record_name
+from pullwise_server.ledger_plan_policy import JEV_RESERVATION_MICROUSD
 
 
 NOW = 1_800_000_000
@@ -62,7 +63,6 @@ class NoGitHub:
 
 class SyntheticModel:
     enabled = True
-    daily_limit = 20
 
     def __init__(self):
         self.calls = 0
@@ -255,9 +255,10 @@ def test_suggestions_use_key_can_get_and_confirm_synthetic_answer_without_financ
     assert status == 204 and model.calls == 1
     after = facts(rest_db)
     assert after[:3] == before[:3] and after[5:] == before[5:]
-    assert after[3:5] == (1, 1)
+    assert after[3:5] == (1, 0)
     with rest_db.store.connect() as db:
         assert tuple(db.execute("SELECT accepted_category_id,accepted_target_kind FROM expense_suggestion_events").fetchone()) == ("cat_rest", "shared")
+        assert db.execute("SELECT jev_reserved_microusd FROM ledger_plan_usage").fetchone()[0] == JEV_RESERVATION_MICROUSD
 
 
 def test_expense_write_key_cannot_use_advanced_suggestions_without_use_scope(rest_db):

@@ -105,7 +105,7 @@ def test_money_full_expense_replacement_and_list_dtos_match_runtime():
     assert CONTRACT["paths"]["/api/v1/categories"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]["type"] == "array"
     for name in ("ProjectPage", "ExpensePage", "RecurringExpensePage"):
         assert SCHEMAS[name]["required"] == ["items", "nextCursor"]
-    assert SCHEMAS["LedgerUsage"]["required"] == ["workspaceId", "projects", "expenseRecords"]
+    assert SCHEMAS["LedgerUsage"]["required"] == ["workspaceId", "projects", "expenseRecords", "jev"]
 
 
 def test_billing_reads_describe_actual_account_catalog_and_cookie_only_personalization():

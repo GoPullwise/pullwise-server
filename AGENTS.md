@@ -1,5 +1,24 @@
 # Pullwise Server
 
+## Jev allowance and usage (2026-10-10)
+
+The user removes the application-side daily Jev attempt cap. Automatic expense
+assistance, advanced drafts and saved-record reviews share only the Owner's
+existing UTC-month Jev USD allowance, with atomic pre-call reservations and
+unchanged credential, permission and accounting fences. Preserve historical
+daily rows without reading or updating them; no schema migration is required.
+This supersedes all older 20-attempt daily rules below. Billing reads expose
+the actor's personal Pro/Max Jev used reservation and total allowance through
+the existing read, without writes, polling, or reporting reservations as invoices.
+
+Possible duplicates require the same authorized target, expense date, currency
+and integer minor-unit amount; purpose text need not match. Recheck candidates
+after inference and fence their current identity, revision and matching fields.
+The Web review selector explicitly reads the first 100 filtered records apart
+from ordinary ten-record pagination, then processes selected records serially.
+The user also requests monthly/custom-range combined project and Shared Pool
+totals, using the existing authorized per-currency summary API.
+
 ## Recurring expense posting and recovery (2026-10-10)
 
 The user requests completion, both main pushes and Cloudflare publication of

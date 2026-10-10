@@ -133,8 +133,9 @@ a new month replaces the period counters; it does not add unused old credit.
 Annual subscriptions use the same monthly periods. A named constraint rejects
 late requests that would move counters back to an older month/minute.
 
-The shared daily assistance guard (20 attempts per ledger Owner per UTC day) and
-request/response bounds remain additional safety controls. Free cannot
+Jev has no daily attempt cap. The ledger Owner's shared UTC-month USD reservation
+and request/response bounds remain the controls for model use. Historical daily
+attempt rows remain untouched and no longer gate or count new calls. Free cannot
 invoke Jev even with suggestions scope. Pro/Max eligibility does not imply that
 Jev is active: public DTOs distinguish `eligible` and `available`. Preserve
 enable/evaluated flags at 0 in each environment until its quality, metering and provider gates pass.
