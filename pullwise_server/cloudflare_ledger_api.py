@@ -65,7 +65,8 @@ def _revision(headers: Mapping[str, object]):
 
 
 def _project(row: dict, allowed_repos: dict[int, dict], totals: list[dict], github_access="lost",
-             bindings: list[dict] | None = None, organizations: list[dict] | None = None):
+             bindings: list[dict] | None = None, organizations: list[dict] | None = None,
+             refresh_required: bool = False):
     repo_id = row["github_repo_id"]
     standalone = standalone_project(row, bindings or [])
     ids = [item["github_repo_id"] for item in (bindings or [])]
@@ -86,6 +87,7 @@ def _project(row: dict, allowed_repos: dict[int, dict], totals: list[dict], gith
             "description": row["description"],
             "developmentUrl": row.get("development_url"), "productUrl": row.get("product_url"),
             "status": row["status"], "githubAccess": state,
+            **({"githubRefreshRequired": True} if refresh_required and not standalone else {}),
             "canCreateExpense": row["status"] == "active" and (standalone or authorized > 0),
             "revision": row["revision"], "totals": [{"currency": total["currency"],
                 "amountMinor": total["amountMinor"] if "amountMinor" in total
@@ -143,15 +145,20 @@ async def _live_repos(user: dict, gateway: Any) -> dict[int, str]:
     return {item["githubRepoId"]: item["fullName"] for item in access["items"]}
 
 
-async def _project_repos(user: dict, gateway: Any):
+async def _project_repos(user: dict, gateway: Any, now: int | None = None):
     """History reads remain usable without claiming an outage revoked grants."""
     try:
-        access = await live_repository_access(user, gateway)
+        access = await live_repository_access(user, gateway, now)
         repos = {item["githubRepoId"]: item for item in access["items"]}
         state = "reauthorization_required" if access["githubAccess"] == "reauthorization_required" else "lost"
-        return repos, state, access.get("organizations", [])
+        return repos, state, access.get("organizations", []), access.get("githubRefreshRequired") is True
     except Exception:
-        return {}, "unavailable", []
+        return {}, "unavailable", [], False
+
+
+def _browser_refresh(headers: Mapping[str, object]) -> bool:
+    # Only a cookie-authenticated browser can call the fenced refresh route.
+    return not (_header(headers, "Authorization") or _header(headers, "X-Pullwise-Api-Key"))
 
 
 async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path: str,
@@ -188,7 +195,7 @@ async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path
                 binding=binding, headers=headers, scope="projects:read", now=now)
             snapshot = await binding.batch(auth)
             validate([part.results for part in snapshot])
-            access = await live_repository_access(user, gateway)
+            access = await live_repository_access(user, gateway, now)
             items = sorted((item for item in access["items"]
                             if item["githubRepoId"] > (int(cursor) if cursor else 0)),
                            key=lambda item: item["githubRepoId"])
@@ -209,7 +216,8 @@ async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path
             return 200, {"items": page,
                          "nextCursor": str(page[-1]["githubRepoId"]) if len(items) > limit else None,
                          "githubAccess": access["githubAccess"],
-                         "organizations": access.get("organizations", [])}
+                         "organizations": access.get("organizations", []),
+                         **({"githubRefreshRequired": True} if access.get("githubRefreshRequired") and _browser_refresh(headers) else {})}
         except PrincipalAuthError as exc:
             return _error(exc.status, exc.code)
         except GitHubFailure as exc:
@@ -315,9 +323,10 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
             project_rows, totals, bindings = [part.results for part in rows[len(auth):]]
             if not project_rows:
                 return _error(404, "NOT_FOUND")
-            repos, state, organizations = ({}, "not_linked", []) if standalone_project(
-                project_rows[0], bindings) else await _project_repos(user, gateway)
-            return 200, _project(project_rows[0], repos, totals, state, bindings, organizations)
+            repos, state, organizations, refresh = ({}, "not_linked", [], False) if standalone_project(
+                project_rows[0], bindings) else await _project_repos(user, gateway, now)
+            refresh = refresh and _browser_refresh(headers)
+            return 200, _project(project_rows[0], repos, totals, state, bindings, organizations, refresh)
         try:
             limit, cursor = _page_inputs(params)
         except ValueError:
@@ -361,11 +370,13 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
         by_binding = {}
         for row in bindings:
             by_binding.setdefault(row["project_id"], []).append(row)
-        repos, state, organizations = ({}, "not_linked", []) if all(standalone_project(
-            row, by_binding.get(row["id"], [])) for row in page) else await _project_repos(user, gateway)
+        repos, state, organizations, refresh = ({}, "not_linked", [], False) if all(standalone_project(
+            row, by_binding.get(row["id"], [])) for row in page) else await _project_repos(user, gateway, now)
+        refresh = refresh and _browser_refresh(headers)
         return 200, {"items": [_project(row, repos, by_project.get(row["id"], []), state,
-            by_binding.get(row["id"], []), organizations) for row in page],
-                     "nextCursor": page[-1]["id"] if len(projects) > limit else None}
+            by_binding.get(row["id"], []), organizations, refresh) for row in page],
+                     "nextCursor": page[-1]["id"] if len(projects) > limit else None,
+                     **({"githubRefreshRequired": True} if refresh else {})}
     user, restrictions, proof, rows = await _authorized(binding, headers, scope, now,
         [binding.prepare("SELECT * FROM ledger_projects WHERE id=? AND deleted_at IS NULL").bind(item_id or ""),
          binding.prepare("""SELECT * FROM ledger_project_repositories
@@ -492,9 +503,10 @@ async def _projects(binding, gateway, method, item_id, headers, params, body, no
         "name": body.get("name", existing["name"]), "github_organization_id": organization_id,
         "github_repo_id": repo_id, "status": status, "revision": expected + 1}
     bindings = [{"github_repo_id": value} for value in selected] if selected is not None else current_bindings
-    repos, state, organizations = ({}, "not_linked", []) if standalone_project(
-        updated, bindings) else await _project_repos(user, gateway)
-    return 200, _project(updated, repos, result[-1].results, state, bindings, organizations)
+    repos, state, organizations, refresh = ({}, "not_linked", [], False) if standalone_project(
+        updated, bindings) else await _project_repos(user, gateway, now)
+    refresh = refresh and _browser_refresh(headers)
+    return 200, _project(updated, repos, result[-1].results, state, bindings, organizations, refresh)
 
 
 async def _remove_project(binding, item_id, headers, now, scope):

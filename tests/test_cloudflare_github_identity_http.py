@@ -12,6 +12,7 @@ from pullwise_server.cloudflare_github_identity_http import (
     _repo_items, _user, _write_user, _write_linked_user, handle_identity_request, session_payload,
 )
 from pullwise_server.cloudflare_state_records import record_name, encode_record
+from pullwise_server.cloudflare_github_gateway import GitHubTokenBundle
 
 
 class ClosingConnection(sqlite3.Connection):
@@ -78,7 +79,7 @@ class GitHubStub:
         assert code == "synthetic-code"
         assert redirect_uri == "https://app.example.test/api/auth/github/callback"
         assert verifier
-        return "synthetic-access-token"
+        return GitHubTokenBundle("synthetic-access-token")
 
     async def profile(self, token):
         assert token == "synthetic-access-token"

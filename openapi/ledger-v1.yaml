@@ -432,6 +432,33 @@ paths:
         '401': {description: UNAUTHENTICATED; original link session is missing or changed, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '409': {description: GITHUB_IDENTITY_CONFLICT or ACCOUNT_CHANGED; account IDs and billing are preserved, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '502': {description: GITHUB_PROFILE_INVALID; no trusted numeric identity, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /integrations/github/refresh:
+    post:
+      operationId: refreshGithubCredential
+      x-pullwise-scope: account:auth
+      security: [{cookieSession: []}]
+      tags: [Authentication]
+      parameters: [{$ref: '#/components/parameters/AuthOrigin'}]
+      description: |
+        Renew the signed-in account's own expiring GitHub App credential using
+        its encrypted refresh token. Requires a current cookie session and a
+        trusted Origin or Referer; Bearer credentials cannot refresh an account.
+        A credential with more than sixty seconds remaining is a successful
+        no-op. One durable claim admits one provider exchange, and publication
+        fences the original account, session and token generation. Unknown
+        exchange or storage outcomes do not repeat the old refresh token.
+        This operation preserves the Pullwise session, memberships, ledger
+        data and repository bindings. It never exposes either token. Old
+        accounts without saved refresh credentials require one explicit GitHub
+        reconnection. A read with githubRefreshRequired true may be followed
+        by this POST and one repeated read; business writes must not be replayed.
+      responses:
+        '200': {description: Credential renewed or already current, headers: {Cache-Control: {$ref: '#/components/headers/NoStore'}}, content: {application/json: {schema: {type: object, required: [ok, refreshed], properties: {ok: {type: boolean, const: true}, refreshed: {type: boolean}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {description: UNTRUSTED_ORIGIN or GITHUB_REAUTHORIZATION_REQUIRED; missing, expired or revoked refresh credentials require explicit reconnect, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '409': {description: GITHUB_REFRESH_PENDING or ACCOUNT_CHANGED; do not repeat a provider exchange while another attempt is pending, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '502': {description: GITHUB_RESPONSE_INVALID; no automatic retry of an uncertain exchange, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '503': {description: GitHub rate limit, transport, configuration or encrypted credential failure; errors retain distinct safe codes, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /api/v1/workspaces:
     get:
       operationId: listWorkspaces
@@ -1528,7 +1555,8 @@ components:
         githubAccess:
           type: string
           enum: [authorized, not_connected, lost, reauthorization_required]
-          description: Reauthorization requires an explicit GitHub login; expired/revoked credentials never revoke the Pullwise session or write on a GET. Unavailable/unknown grants return an error rather than a successful empty page.
+          description: Expired or revoked credentials never revoke the Pullwise session or write on a GET. When githubRefreshRequired is true, cookie clients may POST /integrations/github/refresh and repeat this read once. Otherwise reconnect requires explicit GitHub login. Unavailable/unknown grants return an error rather than a successful empty page.
+        githubRefreshRequired: {type: boolean, description: A saved refresh credential permits one separate cookie-authenticated refresh attempt; no token material is returned}
     Target:
       oneOf:
         - {type: object, required: [kind, projectId], additionalProperties: false, properties: {kind: {const: project}, projectId: {type: string, pattern: '^[A-Za-z0-9_-]{1,120}$'}}}
@@ -1634,6 +1662,7 @@ components:
         productUrl: {$ref: '#/components/schemas/ProjectUrl'}
         status: {type: string, enum: [active, archived]}
         githubAccess: {type: string, enum: [not_linked, authorized, partial, lost, reauthorization_required, unavailable], description: "not_linked identifies an explicitly standalone project, with null GitHub anchor and organization and empty repository arrays; loss or unavailability of a bound grant never implicitly disconnects a project."}
+        githubRefreshRequired: {type: boolean, description: The actual actor may renew their own GitHub credential through the separate cookie-authenticated refresh endpoint}
         canCreateExpense: {type: boolean, description: "Active standalone project, or an active repository-backed project with at least one bound repository currently authorized to the actor. Ledger role, key target scopes and plan limits still apply. Historical edits and deletion do not require a live GitHub grant."}
         revision: {type: integer, minimum: 1}
         totals: {type: array, items: {$ref: '#/components/schemas/MoneyTotal'}}
@@ -1643,6 +1672,7 @@ components:
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/Project'}}
         nextCursor: {type: [string, 'null']}
+        githubRefreshRequired: {type: boolean, description: One or more linked projects require the actual actor's separate GitHub credential refresh}
     CategoryInput:
       type: object
       additionalProperties: false

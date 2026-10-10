@@ -18,7 +18,7 @@ the implementation; `cloudflare/server/sync_server_modules.py` generates the
 ignored Worker mirror. The [ledger OpenAPI](openapi/ledger-v1.yaml) is the shared
 business contract.
 
-## Current version (2026-10-09)
+## Current version (2026-10-10)
 
 Standalone named projects, optional repository/Organization associations and
 shared ledgers are implemented. Development/product links and server-generated
@@ -47,6 +47,15 @@ are needed only for optional repository linking. Linked projects explicitly bind
 association. Repository visibility and new-target
 eligibility use the actual actor's GitHub credentials. Existing finance history
 remains usable according to ledger role when repository access is lost.
+
+Expiring GitHub App credentials renew automatically when a signed-in browser
+reads linked repositories or projects. OAuth stores both tokens encrypted and
+their provider lifetimes; a separate cookie/Origin-protected POST rotates the
+pair once before repeating the read. Concurrent requests share the same renewal.
+Legacy accounts must reconnect once to supply the previously unsaved refresh
+token. Revoked/expired refresh tokens and uncertain rotation outcomes require
+explicit reconnection. GitHub's eight-hour access-token lifetime and Pullwise's
+seven-day login session remain separate. See [renewal acceptance](docs/validation/local-acceptance.md#automatic-github-credential-renewal-2026-10-10).
 
 Select a ledger with `X-Pullwise-Workspace`; native browser CSV links use the
 `workspaceId` query parameter. Workspace-scoped keys retain their membership

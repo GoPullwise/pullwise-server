@@ -6,6 +6,52 @@ and preserved database, journal, hourly schedule and production D1 pause. No
 remote business mutation, forced tick, provider call or real payment is performed
 by this publication check. Local fixture acceptance is recorded separately below.
 
+## Automatic GitHub credential renewal (2026-10-10)
+
+[Preview publication receipt](github-refresh-preview-release-2026-10-10.json) records
+the two released versions, matching static assets and preserved database/coordinator,
+schedules and production D1 pause. No remote business/provider workflow was invoked.
+
+OAuth now retains an AES-GCM-encrypted access/refresh token pair and the provider's
+lifetimes. A cookie-session/trusted-Origin `POST /integrations/github/refresh`
+rotates only the actual account's pair. Expiring repository/project reads signal
+`githubRefreshRequired`; GET, repository sync, session reads and scheduled rules
+never rotate or write credentials. Web shares concurrent renewals within the
+confirmed account generation and repeats a read at most once. Account changes,
+new sessions and successful logout discard obsolete work. Business writes are
+never replayed. Temporary GitHub failures retain successfully read financial
+history; real resource/role/session failures remain failures.
+
+A durable per-user claim and native user/session CAS prevent two Workers from
+consuming one refresh token. Known non-rotating rejections release the claim;
+unknown transport/provider/D1 outcomes retain it and cannot redispatch the old
+refresh token. Recent claims report temporary unavailability; stale uncertain
+claims, revoked/expired refresh tokens and legacy users without a saved refresh
+token require explicit reconnection. Existing users must reconnect once because
+older callbacks discarded refresh credentials. Provider TTLs are not extended
+locally, and the separate seven-day Pullwise session is unchanged.
+
+Python 3.10.12 passes the complete **2,396 tests and 62 subtests** in 102.71 seconds.
+Web passes **65 files / 1,268 tests**, ESLint, build and Worker configuration checks.
+Generated OpenAPI artifacts match the Server YAML. The canonical Python Worker
+packages with frozen Python 3.14.2, workers-py 1.17.4 and Wrangler 4.136.3.
+The final read-only review finds no token leakage, old-account restoration,
+implicit GET writes or replayed business writes.
+
+[Native evidence](github-refresh-native-local-2026-10-10.json) records **21 bounded
+local HTTP requests**, real WebCrypto AES-GCM, Native D1 and the original-scope
+SQLite coordinator. It proves callback persistence, expired GET without
+provider/write, Cookie/Origin guards, one rotation and a repeated no-op, user/session
+CAS, persistence through two restarts, and an uncertain claim that is never
+redispatched. All financial, binding, audit and entitlement facts are preserved.
+Across **439 native statements**, measured usage is **835 rows read / 183 written**,
+with **10,796 / 320** cumulative reservations; separate read-only integrity probes
+use **398 reads**. Metadata and journal accounting agree; missing attempt metadata
+is recorded as missing rather than fabricated. The runtime is stopped. These are
+local synthetic provider results, not acceptance against a real GitHub account.
+No schema migration or extra cron is needed. Remote publication is recorded
+separately and preserves the original database/journal and production D1 pause.
+
 ## Optional oldest-expense replacement (2026-10-09)
 
 Owner account Settings offers two expense-capacity modes without overage billing.

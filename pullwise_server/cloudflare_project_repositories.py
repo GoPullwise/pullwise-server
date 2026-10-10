@@ -72,9 +72,9 @@ def github_actor(user: dict) -> dict:
     return user.get("_actor", user)
 
 
-async def live_repository_access(user: dict, gateway: Any) -> dict:
+async def live_repository_access(user: dict, gateway: Any, now: int | None = None) -> dict:
     try:
-        return await read_repository_access(github_actor(user), gateway)
+        return await read_repository_access(github_actor(user), gateway, now)
     except (ValueError, UnicodeError, TypeError):
         raise GitHubFailure("GITHUB_RESPONSE_INVALID") from None
 
