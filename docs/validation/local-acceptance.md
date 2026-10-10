@@ -26,8 +26,21 @@ validated tests and 62 subtests** in total. The identity/refresh subset passes
 refresh credentials, read-only behavior and actual-account isolation from the
 workspace selector. S01, synchronized Worker mirror, deployment-shell syntax
 and diff whitespace checks pass. All validation for this repair is local and
-synthetic; there is no real OAuth/provider request, remote D1 access, push or
-deployment.
+synthetic; they perform no real OAuth/provider requests or remote D1 access.
+
+[GitHub authorization preview publication](github-authorization-preview-release-2026-10-10.json)
+records runtime commit `fd97a88`, Web commit `f69a6c0` and both 100%-active preview
+versions. The original preview database, coordinator namespace, all binding
+values, secret names, compatibility settings and hourly schedule remain. The
+first upload is rejected before activation because a temporary config's child
+directory omits vendored Python SDK modules; the corrected ignored overlay
+beside the existing project packages all 727 modules without dependency or
+runtime-setting changes. Four bounded static GETs return 200 and the three
+hashed assets match Web's local build. A supplemental CSP checker mistakenly
+includes rewritten JSON-LD and remains inconclusive, with no additional request.
+There is no migration, reset or real OAuth/provider/business/D1 acceptance.
+Existing production Builds follow main pushes; production D1 stays paused.
+Subsequent publication receipt commits change documentation only.
 
 [Jev/overview preview publication](jev-overview-preview-release-2026-10-10.json)
 records both main runtime commits and 100%-active preview versions. The original

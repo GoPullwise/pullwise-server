@@ -1,0 +1,521 @@
+{
+  "date": "2026-10-10",
+  "passed": true,
+  "scope": "GitHub account reconnect entry, integration authorization state and browser callback recovery; preview-only publication and bounded static readback",
+  "serverSourceCommit": "fd97a888dcb884055ab6b9a4791b143690d56e52",
+  "webSourceCommit": "f69a6c0179fb942df04ee71205d7032e4d1dd67b",
+  "serverVersion": "39101e87-652b-4383-a678-8e0787fcef55",
+  "webVersion": "d7d66daf-e7cb-4d9b-9a5b-9116072fedce",
+  "findings": [
+    "Settings originally hid GitHub controls after failed integration reads and had no account-link OAuth action in Sign-in methods.",
+    "The legacy GET /integrations projection discarded githubAccess, so reauthorization_required looked like an absent repository installation.",
+    "Browser callback failures originally exposed JSON with no recovery page; an installation popup could display completion copy for an error.",
+    "GITHUB_IDENTITY_CONFLICT correctly protects existing numeric GitHub identity bindings. Actual cookie actors are used throughout shared-ledger flows; ledger Admin roles confer no provider repository permissions."
+  ],
+  "changes": [
+    "Confirmed session accounts can connect/reconnect their own GitHub identity with intent=link independently of integration-read availability.",
+    "GET /integrations preserves top-level githubAccess while retaining the existing compatible DTO and read-only contract.",
+    "Explicit reauthorization_required directs account reconnect before installation; unknown/transient failures do not claim disconnected accounts or successful repository counts.",
+    "Exact account and installation callbacks redirect HTML JSON errors to fixed same-origin recovery destinations, bounded to 4KiB and allowlisted codes. OAuth code/state/provider parameters are not copied.",
+    "Recovery screens preserve the JSON API contract, cookies, identity protection and popup/session fences; failure popups neither synchronize nor claim success."
+  ],
+  "checks": {
+    "serverTestsValidated": 2550,
+    "serverSubtestsPassed": 62,
+    "serverSocketTestPermissionRerun": true,
+    "serverIdentityRefreshSubsetPassed": 122,
+    "serverStaticConfig": true,
+    "serverMirror": true,
+    "deployBashSyntax": true,
+    "webTestsPassed": 1654,
+    "webTestFilesPassed": 83,
+    "webLint": true,
+    "webBuild": true,
+    "webWorkerConfig": true,
+    "previewWorkerDryRuns": true,
+    "independentReadOnlyAudit": true,
+    "localNativeBrowserCases": 20,
+    "localNativeBrowserRetainedRequests": 494,
+    "localBrowserExternalDelivery": 0,
+    "localBrowserBusinessWrites": 0,
+    "localBrowserRequestViolations": 0,
+    "localAccountLinkActions": 10,
+    "localAccountLinkIntentVerified": "link",
+    "localFailurePopupAPIRequests": 0,
+    "localFailurePopupSyncs": 0,
+    "localFailurePopupOpenerMessages": 0,
+    "localFailurePopupAutoClose": 0,
+    "nativeDesktopTouch": {
+      "coarse": false,
+      "maxTouchPoints": 0
+    },
+    "native390pxTouch": {
+      "coarse": true,
+      "maxTouchPoints": 1,
+      "accountButtonHeightPx": 44
+    },
+    "screenshotsReviewedAfterAnimations": true
+  },
+  "deploymentPackaging": {
+    "firstServerUploadRejected": true,
+    "firstServerUploadActivated": false,
+    "cause": "Temporary Wrangler config in a child work/ directory changed projectRoot and omitted vendored Python SDK modules.",
+    "resolution": "Ignored overlay config placed alongside the existing Python Worker project and python_modules; dependency versions, flags/date and keep_vars unchanged.",
+    "completeServerBundleModules": 727,
+    "existingRuntimeSDKVersion": "1.9.0"
+  },
+  "managementReadback": {
+    "checks": [
+      {
+        "name": "pullwise-web-preview",
+        "bindingsPreserved": true,
+        "bindingDifferences": [],
+        "compatibilityDatePreserved": true,
+        "compatibilityFlagsPreserved": true,
+        "schedulesPreserved": true,
+        "activeVersions": [
+          {
+            "version_id": "d7d66daf-e7cb-4d9b-9a5b-9116072fedce",
+            "percentage": 100
+          }
+        ]
+      },
+      {
+        "name": "pullwise-server-preview",
+        "bindingsPreserved": true,
+        "bindingDifferences": [],
+        "compatibilityDatePreserved": true,
+        "compatibilityFlagsPreserved": true,
+        "schedulesPreserved": true,
+        "activeVersions": [
+          {
+            "version_id": "39101e87-652b-4383-a678-8e0787fcef55",
+            "percentage": 100
+          }
+        ]
+      },
+      {
+        "name": "pullwise-server-production",
+        "bindingsPreserved": true,
+        "bindingDifferences": [],
+        "compatibilityDatePreserved": true,
+        "compatibilityFlagsPreserved": true,
+        "schedulesPreserved": true,
+        "productionD1Paused": true,
+        "activeVersions": [
+          {
+            "version_id": "e8d032fb-96bc-45ab-bcab-d129cc98cd4a",
+            "percentage": 100
+          }
+        ]
+      }
+    ],
+    "after": [
+      {
+        "name": "pullwise-web-preview",
+        "compatibility_date": "2026-05-25",
+        "compatibility_flags": [],
+        "bindings": [
+          {
+            "name": "ASSETS",
+            "type": "assets"
+          },
+          {
+            "name": "PULLWISE_API_ORIGIN",
+            "type": "plain_text",
+            "text": "https://preview-api.pull-wise.com"
+          },
+          {
+            "name": "PULLWISE_MODE",
+            "type": "plain_text",
+            "text": "preview"
+          },
+          {
+            "name": "PULLWISE_SERVER",
+            "type": "service",
+            "service": "pullwise-server-preview",
+            "environment": "production"
+          }
+        ],
+        "deployment": {
+          "created_on": "2026-10-10T10:57:11.620537Z",
+          "versions": [
+            {
+              "version_id": "d7d66daf-e7cb-4d9b-9a5b-9116072fedce",
+              "percentage": 100
+            }
+          ],
+          "annotations": {
+            "workers/message": "Restore GitHub reconnect and callback recovery f69a6c0",
+            "workers/triggered_by": "deployment"
+          }
+        },
+        "schedules": []
+      },
+      {
+        "name": "pullwise-server-preview",
+        "compatibility_date": "2026-09-23",
+        "compatibility_flags": [
+          "python_workers"
+        ],
+        "bindings": [
+          {
+            "name": "DB",
+            "type": "d1",
+            "id": "e9dc3b89-f81f-4fce-87ef-d8797d879fb4"
+          },
+          {
+            "name": "EMAIL",
+            "type": "send_email"
+          },
+          {
+            "name": "PULLWISE_ALLOWED_ORIGINS",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_APP_URL",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_COOKIE_SAME_SITE",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_API_BASE_URL",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_API_KEY",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_PRODUCT_IDS_JSON",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_WEBHOOK_SECRET",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_D1_ACCESS_ENABLED",
+            "type": "plain_text",
+            "text": "1"
+          },
+          {
+            "name": "PULLWISE_EMAIL_AUTH_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_EMAIL_CODE_SECRET",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_EMAIL_FROM",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_APP_SLUG",
+            "type": "plain_text",
+            "text": "gopullwise-preview"
+          },
+          {
+            "name": "PULLWISE_GITHUB_CALLBACK_URL",
+            "type": "plain_text",
+            "text": "https://preview.pull-wise.com/api/auth/github/callback"
+          },
+          {
+            "name": "PULLWISE_GITHUB_CLIENT_ID",
+            "type": "plain_text",
+            "text": "Iv23liUTSufy2U2Dc5l7"
+          },
+          {
+            "name": "PULLWISE_GITHUB_CLIENT_SECRET",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_TOKEN_KEY",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_JEV_SUGGESTIONS_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_JEV_SUGGESTIONS_EVALUATED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_MODE",
+            "type": "plain_text",
+            "text": "preview"
+          },
+          {
+            "name": "PULLWISE_PLAN_LIMITS_JSON",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_BUSINESS_CLEAR_ID",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_BUSINESS_CLEAR_MANIFEST",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_PRODUCT_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V10_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V11_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V12_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V6_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V7_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V8_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V9_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_RECURRING_EXPENSES_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "TYPESAFE_API_KEY",
+            "type": "secret_text"
+          },
+          {
+            "name": "VALIDATION_BUDGET",
+            "type": "durable_object_namespace",
+            "class_name": "ValidationBudget",
+            "namespace_id": "0e0ce4946c5e4d5f81c606273ba94b5d"
+          }
+        ],
+        "deployment": {
+          "created_on": "2026-10-10T10:57:56.835116Z",
+          "versions": [
+            {
+              "version_id": "39101e87-652b-4383-a678-8e0787fcef55",
+              "percentage": 100
+            }
+          ],
+          "annotations": {
+            "workers/message": "Preserve GitHub account reauthorization state fd97a88",
+            "workers/triggered_by": "deployment"
+          }
+        },
+        "schedules": [
+          {
+            "cron": "0 * * * *"
+          }
+        ]
+      },
+      {
+        "name": "pullwise-server-production",
+        "compatibility_date": "2026-09-23",
+        "compatibility_flags": [
+          "python_workers"
+        ],
+        "bindings": [
+          {
+            "name": "DB",
+            "type": "d1",
+            "id": "80a29a0d-5699-449f-9541-a01dc461ca9d"
+          },
+          {
+            "name": "PULLWISE_ALLOWED_ORIGINS",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_APP_URL",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_COOKIE_SAME_SITE",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_API_BASE_URL",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_API_KEY",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_PRODUCT_IDS_JSON",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_WEBHOOK_SECRET",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_D1_ACCESS_ENABLED",
+            "type": "plain_text",
+            "text": "0"
+          },
+          {
+            "name": "PULLWISE_EMAIL_AUTH_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_APP_SLUG",
+            "type": "plain_text",
+            "text": "gopullwise"
+          },
+          {
+            "name": "PULLWISE_GITHUB_CALLBACK_URL",
+            "type": "plain_text",
+            "text": "https://pull-wise.com/api/auth/github/callback"
+          },
+          {
+            "name": "PULLWISE_GITHUB_CLIENT_ID",
+            "type": "plain_text",
+            "text": "Iv23lipOl05N1ZULZmYW"
+          },
+          {
+            "name": "PULLWISE_GITHUB_CLIENT_SECRET",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_TOKEN_KEY",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_JEV_SUGGESTIONS_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_JEV_SUGGESTIONS_EVALUATED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_MODE",
+            "type": "plain_text",
+            "text": "production"
+          },
+          {
+            "name": "PULLWISE_PLAN_LIMITS_JSON",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_BUSINESS_CLEAR_ID",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_BUSINESS_CLEAR_MANIFEST",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V11_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "TYPESAFE_API_KEY",
+            "type": "secret_text"
+          }
+        ],
+        "deployment": {
+          "created_on": "2026-10-10T10:55:18.023301Z",
+          "versions": [
+            {
+              "version_id": "e8d032fb-96bc-45ab-bcab-d129cc98cd4a",
+              "percentage": 100
+            }
+          ],
+          "annotations": {
+            "workers/triggered_by": "deployment"
+          }
+        },
+        "schedules": []
+      }
+    ]
+  },
+  "schemaMigration": false,
+  "extraCronAdded": false,
+  "productionD1Paused": true,
+  "realGitHubAccountAuthorizationAcceptance": false,
+  "realRepositoryInstallationAcceptance": false,
+  "remoteBusinessMutations": 0,
+  "remoteProviderRequests": 0,
+  "remoteD1Operations": 0,
+  "limitations": "OAuth and provider behavior are tested with bounded local synthetic fixtures. The supplied user's OAuth callback code/state was never replayed. The specific conflicting identity branch for that user's live account cannot be established without actual authenticated provider/session evidence. Production Builds follow main pushes; production database access remains paused.",
+  "staticReadback": {
+    "origin": "https://preview.pull-wise.com",
+    "requestCap": 4,
+    "requests": 4,
+    "automaticRetries": 0,
+    "redirectsFollowed": 0,
+    "javascriptExecuted": false,
+    "businessAPIRequests": 0,
+    "remoteProviderRequests": 0,
+    "remoteD1Operations": 0,
+    "results": [
+      {
+        "path": "/",
+        "status": 200,
+        "bytes": 5237,
+        "sha256": "538d1e91a6cbbd989d4802942328b9fb035488a1501ee5d8fbef532a2a9654c8",
+        "xRobotsTag": "noindex, nofollow",
+        "entryPresent": true,
+        "cssPresent": true,
+        "passed": true,
+        "supplementalCSPCheck": {
+          "verified": false,
+          "originalResult": false,
+          "reason": "The original local verifier included application/ld+json content that the SEO middleware rewrites. It did not retain individual hashes or headers, so the theme-only header check is inconclusive. No extra remote request is made."
+        }
+      },
+      {
+        "path": "/assets/index-CAg_k35d.js",
+        "status": 200,
+        "bytes": 101720,
+        "sha256": "2bc61d8e5d8eaa750e7bf32c6a89a50642491647c8cc1b848d5986f1c46a94dd",
+        "matchesLocalBytes": true,
+        "passed": true
+      },
+      {
+        "path": "/assets/index-C5sr-AnU.css",
+        "status": 200,
+        "bytes": 65351,
+        "sha256": "ec57430c19bcf2970c2e5153eb57938846549527be8210dc2d303628e3ac69a0",
+        "matchesLocalBytes": true,
+        "passed": true
+      },
+      {
+        "path": "/assets/settings-BGB82N-X.js",
+        "status": 200,
+        "bytes": 32331,
+        "sha256": "6249fecfb38caeada2d7a2c118299572338a08339644fe55032cce504880a845",
+        "matchesLocalBytes": true,
+        "passed": true
+      }
+    ],
+    "passed": true,
+    "passScope": "Homepage status/noindex/current entry and CSS paths, plus exact bytes of three built hashed assets; supplemental CSP check is inconclusive."
+  },
+  "localNativeBrowserEvidenceSha256": "33cd3a11acb1ad39b4a999bcbf140fbb603435595920657c68af3751cc988c86",
+  "localNativeBrowserEvidenceLocation": "ignored work/github-authorization-browser/evidence.json"
+}
