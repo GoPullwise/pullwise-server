@@ -226,10 +226,15 @@ async def handle_ledger_request(*, binding: Any, gateway: Any, method: str, path
         from .cloudflare_ledger_reports import handle_report_request
         return await handle_report_request(binding=binding, method=method, path=path,
             headers=headers, params=params, now=now)
+    if path == "/api/v1/recurring-expense-notifications":
+        from .cloudflare_recurring_notifications import handle_recurring_notification_request
+        return await handle_recurring_notification_request(binding=binding, method=method,
+            path=path, headers=headers, now=now)
     if path == "/api/v1/expense-recurring-rules" or path.startswith("/api/v1/expense-recurring-rules/"):
         from .cloudflare_ledger_recurring import handle_recurring_request
         return await handle_recurring_request(binding=binding, gateway=gateway,
-            method=method, path=path, headers=headers, params=params, body=body, now=now)
+            method=method, path=path, headers=headers, params=params, body=body, now=now,
+            suggestion_gateway=suggestion_gateway)
     if path == "/api/v1/activity":
         from .cloudflare_ledger_activity import handle_activity_request
         return await handle_activity_request(binding=binding, gateway=gateway, method=method,

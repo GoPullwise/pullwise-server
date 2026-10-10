@@ -149,7 +149,7 @@ def test_every_current_literal_update_has_a_unique_key_fence():
     # complete fixed group is admitted by its own pre-reserved plan, while the
     # ordinary scalar SQL meter must continue to reject this exact statement.
     assert CLEAR_SQL == (*("DELETE FROM " + table for table in BUSINESS_TABLES),
-        capacity_reset, "SELECT 1 AS maintenance_applied") and len(CLEAR_SQL) == 12
+        capacity_reset, "SELECT 1 AS maintenance_applied") and len(CLEAR_SQL) == 13
     with pytest.raises(ValueError, match="unique key"):
         sql_write_bound(capacity_reset)
     unlink_sql = PROJECT_MUTATIONS[4][1]

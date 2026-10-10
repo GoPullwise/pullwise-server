@@ -23,7 +23,7 @@ def rows(ledger):
     with ledger.store.connect() as db:
         return {table: [tuple(row) for row in db.execute("SELECT * FROM " + table)] for table in (
             "ledger_projects", "ledger_project_repositories", "expenses", "expense_events",
-            "expense_create_idempotency", "expense_recurring_rules", "expense_recurring_occurrences",
+            "expense_create_idempotency", "expense_recurring_rules", "expense_recurring_occurrences", "expense_recurring_pending",
             "ledger_activity_events", "d1_command_guard")}
 
 
@@ -248,7 +248,7 @@ def test_erasure_uses_one_closed_bounded_batch_and_releases_actual_capacity(ledg
     assert ledger.gateway.calls == [] and len(binding.mutations) == 1
     batch = binding.mutations[0]
     unlinks = [item for item in batch if item.sql.lstrip().startswith("DELETE FROM ledger_project_repositories")]
-    assert len(unlinks) == 1 and len(batch) == 17
+    assert len(unlinks) == 1 and len(batch) == 18
     assert all("owner_id=? AND project_id=?" in item.sql for item in unlinks)
     assert any(item.sql.lstrip().startswith("DELETE FROM expenses") for item in batch)
     with ledger.store.connect() as db:

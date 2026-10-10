@@ -43,11 +43,14 @@ def test_identity_trace_replays_fresh_schema_and_keeps_providers_synthetic(tmp_p
     assert {"schema", "login_authorize", "login_callback", "callback_replay",
             "session", "install_authorize", "install_callback", "repositories",
             "sign_out", "signed_out_session"} <= cases
-    assert manifest["tables"] == 22 and manifest["indexes"] == 50
+    assert manifest["tables"] == 23 and manifest["indexes"] == 52
+    assert manifest["migrations"][-1]["name"] == "0012_recurring_pending.sql"
     assert manifest["http_cases"] == 9
     assert manifest["remote_admissible"] is False
+    assert manifest["provider_mode"] == "synthetic"
     assert manifest["final_state"] == {"users": 1, "sessions": 0, "githubStates": 0}
     assert manifest["state_storage_version"] == 1
-    # Current v11 adds the preserving occurrence rebuild and replay index.
+    # Current v12 adds bounded pending occurrences, their recipient index,
+    # two enforcing triggers and the migration's atomic integrity guard.
     # This is an offline trace, explicitly not an admitted remote plan.
-    assert len(trace) == 128
+    assert len(trace) == 134

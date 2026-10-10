@@ -28,7 +28,7 @@ from test_ledger_recurring import NOW, NoGitHub, SafeD1, app, draft
 BUSINESS = (
     "ledger_projects", "ledger_project_repositories", "expenses", "expense_events",
     "expense_create_idempotency", "expense_recurring_rules",
-    "expense_recurring_occurrences", "expense_suggestion_events",
+    "expense_recurring_occurrences", "expense_recurring_pending", "expense_suggestion_events",
     "ledger_activity_events", "ledger_plan_usage", "d1_command_guard",
 )
 
@@ -85,7 +85,8 @@ def test_actual_erasure_preserves_external_consumed_month_after_generated_expens
         "timezone": "UTC", "startOn": "2026-10-01"})
     status, original = app.call("POST", body=body)
     assert status == 201
-    assert app.tick() == {"scanned": 1, "created": 1, "blocked": 0, "replayed": 0}
+    assert len(app.rows("expenses")) == 1
+    assert app.tick() == {"scanned": 0, "created": 0, "blocked": 0, "replayed": 0}
     expense = app.rows("expenses")[0]
     occurrence = app.rows("expense_recurring_occurrences")[0]
     assert occurrence["period_key"] == "M2026-10"
@@ -224,7 +225,7 @@ def test_quota_or_clock_race_after_preflight_rolls_back_all_children(app, race):
 
         async def batch(self, commands):
             commands = list(commands)
-            if len(commands) == 17 and not self.raced:
+            if len(commands) == 18 and not self.raced:
                 self.raced = True
                 with self.store._immediate() as db:
                     if race == "minute":
@@ -276,7 +277,7 @@ def test_closed_admission_rejects_any_changed_sequence_or_fixed_binding_before_d
     commands = statements(app)
     assert recipe_identity(commands, policy=app.policy, now=NOW) == ("owner", "prj_1", 1)
     indices = {"omit-owner": 0, "omit-project": 1, "omit-usage": 2,
-               "omit-changed": 3, "omit-final": 15, "omit-cleanup": 16}
+               "omit-changed": 3, "omit-final": 16, "omit-cleanup": 17}
     if mutation in indices:
         commands.pop(indices[mutation])
     elif mutation == "swap-child":
@@ -385,10 +386,10 @@ def test_late_failure_rolls_back_every_child_and_usage_and_unknown_error_propaga
     class FailLate(SafeD1):
         async def batch(self, commands):
             commands = list(commands)
-            if len(commands) == 17 and commands[13].sql.startswith("DELETE FROM ledger_projects"):
+            if len(commands) == 18 and commands[14].sql.startswith("DELETE FROM ledger_projects"):
                 # Emulate D1's atomic rollback after the full child cleanup.
                 with self.store._immediate() as db:
-                    for item in commands[:15]:
+                    for item in commands[:16]:
                         db.execute(item.sql, item.params)
                     assert db.execute("SELECT COUNT(*) FROM expenses WHERE id=?", (selected["id"],)).fetchone()[0] == 0
                     if failure == "unknown":
@@ -439,7 +440,7 @@ class AdmissionSpy:
 def test_owner_bound_key_admits_only_the_complete_paid_recipe_and_preserves_raw_envelope(app, raw_note_bytes):
     extra = {"retainedNote": "x" * raw_note_bytes} if raw_note_bytes else None
     commands = key_statements(app, user_extra=extra)
-    assert len(commands) == 17 and commands[0].sql == owner_key_guard_sql()
+    assert len(commands) == 18 and commands[0].sql == owner_key_guard_sql()
     assert len(commands[0].params) == 7
     assert commands[0].params[2] == hashlib.sha256(
         b"pwk_independent-owner-erasure-admission").hexdigest()
@@ -616,4 +617,21 @@ def test_erasure_reconciles_active_records_and_retains_cumulative_projects_fees_
         assert usage["jev_reserved_microusd"] == usage_before[0]["jev_reserved_microusd"]
     with closing(app.store.connect()) as db:
         assert db.execute("SELECT payload FROM app_state WHERE name=?", (name,)).fetchone()[0] == raw_user_before
+        assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_project_erasure_removes_pending_recovery_children_without_erasing_shared_finance(app):
+    saved, _ = save(app, "retained-shared")
+    app.policy["pro"]["records"] = 1
+    status, rule = app.call("POST", body=draft(target={"kind": "project", "projectId": "prj_1"},
+        schedule={"frequency": "monthly", "day": 1, "timezone": "UTC", "startOn": "2026-10-01"}))
+    assert status == 201 and len(app.rows("expense_recurring_pending")) == 1
+    pending = app.rows("expense_recurring_pending")[0]
+    assert pending["rule_id"] == rule["id"] and pending["failed_code"] == "RECORD_LIMIT"
+    financial = app.rows("expenses")
+    assert financial[0]["id"] == saved["id"]
+    assert erase(app) == (204, None)
+    assert app.rows("expense_recurring_pending") == app.rows("expense_recurring_rules") == []
+    assert app.rows("expenses") == financial
+    with closing(app.store.connect()) as db:
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []

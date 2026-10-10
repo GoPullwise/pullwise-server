@@ -46,6 +46,7 @@ PROJECT_MUTATIONS = (
         AND expense_id IN ({D}) AND rule_id NOT IN ({R})"""),
     ("expense_recurring_occurrences", f"""DELETE FROM expense_recurring_occurrences WHERE owner_id=:owner
         AND rule_id IN ({R})"""),
+    ("expense_recurring_pending", f"DELETE FROM expense_recurring_pending WHERE owner_id=:owner AND rule_id IN ({R})"),
     ("expense_recurring_rules", "DELETE FROM expense_recurring_rules WHERE owner_id=:owner AND target_kind='project' AND project_id=:project"),
     ("expenses", "DELETE FROM expenses WHERE owner_id=:owner AND target_kind='project' AND project_id=:project"),
     ("ledger_project_repositories", "DELETE FROM ledger_project_repositories WHERE owner_id=:owner AND project_id=:project"),
@@ -162,7 +163,7 @@ def recipe_identity(statements, *, policy=None, now=None):
     Native metering uses the exact supplied clock/limits; PlanLimitedD1 also
     reconstructs them from its current effective Owner plan and trusted clock.
     """
-    if len(statements) != 17 or statements[0].sql not in {
+    if len(statements) != len(PROJECT_MUTATIONS) + 7 or statements[0].sql not in {
             owner_cookie_guard_sql(), owner_key_guard_sql()}:
         return None
     try:
@@ -246,7 +247,7 @@ def recipe_bounds(statements, rows, indexes):
         # eight-row margin. Fixed index/FK probes get separate margins below.
         read = 32 + 8 * sum(rows[table.lower()] for table in references)
         read += 32 * rows['expenses'] * item.sql.count(ACTIVE_EXPENSE_SQL)
-        if 4 <= index <= 13:
+        if 4 <= index < 4 + len(PROJECT_MUTATIONS):
             table, named = PROJECT_MUTATIONS[index - 4]
             outer_memberships = 2 if table == 'expense_suggestion_events' else named.upper().count(' IN (')
             read += 8 * rows[table] * (1 + indexes[table] + outer_memberships)
@@ -255,7 +256,7 @@ def recipe_bounds(statements, rows, indexes):
             elif table == 'expenses':
                 read += 24 * rows[table]
             elif table == 'expense_recurring_rules':
-                read += 8 * rows[table]
+                read += 8 * (rows[table] + rows['expense_recurring_pending'])
             elif table == 'ledger_projects':
                 read += 8 * sum(rows[key] for key in ('expenses', 'expense_recurring_rules', 'ledger_project_repositories'))
             size = 1 if table == 'ledger_projects' else rows[table]
@@ -265,7 +266,7 @@ def recipe_bounds(statements, rows, indexes):
             read += 8 * (1 + 2 * indexes['ledger_plan_usage'])
             write = 1 + 2 * indexes['ledger_plan_usage']
         else:
-            write = 5 if index == 16 else 1
+            write = 5 if index == len(statements) - 1 else 1
         reads += read
         writes += write
     if max(reads, writes) > 9007199254740991:

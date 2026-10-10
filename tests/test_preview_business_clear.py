@@ -88,6 +88,9 @@ def fixture():
         ):
             insert(db, "app_state", name=record_name(kind, identity),
                 payload=encode_record(kind, identity, payload), updated_at=1)
+        insert(db, "expense_recurring_pending", rule_id="rule_owner", owner_id="owner",
+            period_key="2026-11", scheduled_on="2026-11-09", template_json='{"purpose":"Pending history"}',
+            failed_code="RECORD_LIMIT", rule_revision=7, created_at="2026-11-09T00:00:00Z", recipient_user_id="owner")
         db.commit()
         journal = BudgetJournal(LocalSql(storage), preview_product=True, product_operations=True)
         state = journal.snapshot()
@@ -129,7 +132,7 @@ def test_complete_clear_preserves_all_nonbusiness_rows_and_all_other_usage_colum
             assert remaining[table] == expected
         else:
             assert remaining[table] == rows
-    assert raw.calls == 3 and raw.dispatched[1] == CLEAR_SQL and len(CLEAR_SQL) == 12
+    assert raw.calls == 3 and raw.dispatched[1] == CLEAR_SQL and len(CLEAR_SQL) == 13
     assert all(ticket == after[MARKER_KEY]["request"] and used == 1 and marker["complete"] is False
                and verified is False for ticket, used, marker, verified in raw.admissions)
     assert len(set(raw.reservations)) == 1
@@ -180,7 +183,7 @@ def test_read_retry_or_absent_attempts_retains_full_plan_margin_and_write_contra
     after = journal.snapshot()
     assert after["reserved_read"] == before["reserved_read"] + plan.rows_read
     assert after["reserved_written"] == before["reserved_written"] + plan.rows_written
-    assert after[MARKER_KEY]["write_execution"]["native_attempts"] == [None] * 12
+    assert after[MARKER_KEY]["write_execution"]["native_attempts"] == [None] * 13
     assert after.get("read_margin_released", 0) == before.get("read_margin_released", 0)
 
 

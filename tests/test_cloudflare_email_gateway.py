@@ -62,3 +62,47 @@ def test_provider_failure_is_redacted_and_not_retried():
     assert str(error.value) == "EMAIL_DELIVERY_UNAVAILABLE"
     assert error.value.__cause__ is None
     mail.binding.send.assert_awaited_once()
+
+
+def test_recurring_failure_mail_is_english_and_preserves_the_manual_action():
+    mail = gateway()
+    asyncio.run(mail.send_recurring_failure("user+local@example.com",
+        scheduled_on="2026-10-01", amount="12.34", currency="USD"))
+    body = mail.binding.send.await_args.args[0]
+    assert body["subject"] == "A Pullwise recurring expense needs your attention"
+    for field in ("subject", "text", "html"):
+        assert body[field].isascii()
+        assert "user+local@example.com" not in body[field]
+    for field in ("text", "html"):
+        assert "2026-10-01" in body[field] and "USD 12.34" in body[field]
+        assert "has not been recorded" in body[field]
+        assert "Add expense" in body[field]
+        assert "10 pending expenses" in body[field]
+    assert '<html lang="en">' in body["html"]
+    mail.binding.send.assert_awaited_once()
+
+
+@pytest.mark.parametrize("field,value", [
+    ("email", "recipient@example.com\r\nBcc: victim@example.com"),
+    ("email", "not-an-email"), ("scheduled_on", "2026-02-30"),
+    ("scheduled_on", "<script>"), ("amount", "12<script>"),
+    ("amount", 12), ("currency", "USD<script>"),
+])
+def test_recurring_failure_rejects_unsafe_fields_before_provider_call(field, value):
+    mail = gateway()
+    values = {"email": "user@example.com", "scheduled_on": "2026-10-01",
+        "amount": "12.34", "currency": "USD", field: value}
+    with pytest.raises(EmailDeliveryError):
+        asyncio.run(mail.send_recurring_failure(**values))
+    mail.binding.send.assert_not_awaited()
+
+
+def test_recurring_delivery_failure_is_redacted_and_never_retried():
+    mail = gateway()
+    mail.binding.send.side_effect = RuntimeError("private recipient and provider response")
+    with pytest.raises(EmailDeliveryError) as error:
+        asyncio.run(mail.send_recurring_failure("user@example.com",
+            scheduled_on="2026-10-01", amount="12.34", currency="USD"))
+    assert str(error.value) == "EMAIL_DELIVERY_UNAVAILABLE"
+    assert error.value.__cause__ is None
+    mail.binding.send.assert_awaited_once()

@@ -229,11 +229,20 @@ def test_downgrade_above_capacity_requires_manual_cleanup_without_bulk_retiremen
     assert retired == {oldest["id"], second["id"]}
 
 
+def legacy_due_rule(app, *, headers, actor="owner", project=False):
+    status, rule = app.call("POST", body=draft(project=project, start="2026-11-01"), actor=actor, headers=headers)
+    assert status == 201
+    with app.store._immediate() as db:
+        db.execute("UPDATE expense_recurring_rules SET schedule_json=?,next_occurrence_on='2026-09-30',next_period_key='M2026-09',next_run_at=0 WHERE id=?",
+            (json.dumps(draft(start="2026-09-01")["schedule"]), rule["id"]))
+    return rule
+
+
 @pytest.mark.parametrize("mutation", ["UPDATE api_keys SET revoked_at=1", "UPDATE api_keys SET expires_at=0"])
 def test_expired_or_revoked_original_recurring_key_cannot_retire_expenses_at_capacity(app, mutation):
     full(app)
     auth = api_auth(app)
-    assert app.call("POST", body=draft(start="2026-09-01"), headers=auth)[0] == 201
+    legacy_due_rule(app, headers=auth)
     before = state(app)
     with app.store._immediate() as db:
         db.execute(mutation)
@@ -246,19 +255,20 @@ def test_expired_or_revoked_original_recurring_key_cannot_retire_expenses_at_cap
 def test_recurring_key_cannot_replace_an_oldest_expense_outside_its_current_target_grant(app):
     full(app)
     auth = api_auth(app, actor="editor", restrictions={"shared": False, "projectIds": ["prj_1"]})
-    assert app.call("POST", body=draft(project=True, start="2026-09-01"), actor="editor", headers=auth)[0] == 201
+    legacy_due_rule(app, headers=auth, actor="editor", project=True)
     before = state(app)
     result = app.tick()
     assert result["created"] == 0 and result["blocked"] == 1
     assert state(app) == before
-    assert app.rows("expense_recurring_rules")[0]["blocked_code"] == "RETENTION_TARGET_FORBIDDEN"
+    assert app.rows("expense_recurring_rules")[0]["blocked_code"] is None
+    assert app.rows("expense_recurring_pending")[0]["failed_code"] == "RETENTION_TARGET_FORBIDDEN"
 
 
 @pytest.mark.parametrize("mutation", ["UPDATE api_keys SET revoked_at=1", "UPDATE api_keys SET expires_at=0"])
 def test_recurring_key_revocation_during_commit_rolls_back_prepared_retirement(app, mutation):
     full(app)
     auth = api_auth(app)
-    assert app.call("POST", body=draft(start="2026-09-01"), headers=auth)[0] == 201
+    legacy_due_rule(app, headers=auth)
     before, before_rules = state(app), app.rows("expense_recurring_rules")
 
     async def interleave():

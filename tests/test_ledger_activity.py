@@ -6,7 +6,7 @@ from contextlib import closing
 
 import pytest
 
-from test_ledger_recurring import app, draft, NOW
+from test_ledger_recurring import app, draft, legacy_due, NOW
 from pullwise_server.cloudflare_api_key_write import create_api_key
 from pullwise_server.cloudflare_ledger_api import handle_ledger_request
 from pullwise_server.cloudflare_ledger_activity import _stamp
@@ -156,7 +156,7 @@ def test_project_settings_and_recurring_rule_edits_publish_specific_before_after
     archived = next(item for item in page["items"] if item["action"] == "archive")
     assert archived["resource"]["label"] == "New project"
     assert {change["field"] for change in archived["changes"]} == {"description", "status"}
-    _, rule = app.call("POST", body=draft(start="2026-10-01"))
+    _, rule = app.call("POST", body=draft(start="2026-10-31"))
     assert app.call("PATCH", rule["id"], {"status": "paused"}, revision=1)[0] == 200
     assert app.call("PATCH", rule["id"], {"status": "active"}, revision=2)[0] == 200
     assert app.call("DELETE", rule["id"], revision=3)[0] == 204
@@ -248,7 +248,8 @@ def test_key_activity_query_has_finite_meter_reservation_with_large_record_array
 
 def test_generated_expense_identifies_automation_and_real_rule_creator(app):
     identity(app, "editor", name="Schedule creator")
-    _, rule = app.call("POST", body=draft(start="2026-09-01"), actor="editor")
+    _, rule = app.call("POST", body=draft(start="2026-10-31"), actor="editor")
+    legacy_due(app, start="2026-09-01", rule_id=rule["id"])
     assert app.tick()["created"] == 1
     _, page = history(app)
     generated = next(row for row in page["items"] if row["action"] == "generate")

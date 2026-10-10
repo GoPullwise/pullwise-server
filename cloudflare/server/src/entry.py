@@ -30,7 +30,7 @@ from pullwise_server.cloudflare_jev_gateway import WorkerJevGateway
 from pullwise_server.cloudflare_ledger_reports import CsvExport
 from pullwise_server.cloudflare_plan_limits import PlanLimitedD1, PlanLimitError
 from pullwise_server.ledger_plan_policy import parse_policy
-from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initialize_product, reconcile_schema_reads, upgrade_product_schema, upgrade_product_schema_v6, upgrade_product_schema_v7, upgrade_product_schema_v8, upgrade_product_schema_v9, upgrade_product_schema_v10, upgrade_product_schema_v11, migrate_product_state_records
+from pullwise_server.cloudflare_preview_budget import ProductMeteredD1, initialize_product, reconcile_schema_reads, upgrade_product_schema, upgrade_product_schema_v6, upgrade_product_schema_v7, upgrade_product_schema_v8, upgrade_product_schema_v9, upgrade_product_schema_v10, upgrade_product_schema_v11, upgrade_product_schema_v12, migrate_product_state_records
 from pullwise_server.cloudflare_preview_schema import SCHEMA_VERSION
 from pullwise_server.cloudflare_preview_business_clear import business_clear_pending, clear_preview_business, business_clear_receipt
 from pullwise_server.cloudflare_preview_rate import PreviewRateLimiter, PreviewRateLimit, EmailRateLimiter, EmailRateLimit, request_channel
@@ -93,6 +93,8 @@ class _Application:
         self.bounded_exports = isinstance(binding, ProductMeteredD1)
         self.binding = PlanLimitedD1(binding,
             policy=parse_policy(getattr(env, "PULLWISE_PLAN_LIMITS_JSON", None)), now=int(time.time()))
+        self.binding.email_gateway = WorkerEmailGateway(env)
+        binding.email_gateway = self.binding.email_gateway
         self.jev_gateway = WorkerJevGateway(env)
         self.binding.jev_available = self.jev_gateway.enabled
         self.email_admission = None
@@ -200,7 +202,8 @@ class _Application:
         if path.startswith(("/api/v1/projects", "/api/v1/categories",
                             "/api/v1/account/",
                             "/api/v1/expenses", "/api/v1/reports/",
-                            "/api/v1/expense-suggestions", "/api/v1/expense-recurring-rules", "/api/v1/workspaces",
+                            "/api/v1/expense-suggestions", "/api/v1/expense-recurring-rules",
+                            "/api/v1/recurring-expense-notifications", "/api/v1/workspaces",
                             "/api/v1/workspace-invitations", "/api/v1/workspace-invitation-requests", "/api/v1/repositories", "/api/v1/activity")):
             from pullwise_server.cloudflare_principal import _cookie_sessions, PrincipalAuthError
             try:
@@ -630,6 +633,8 @@ class ValidationBudget(DurableObject):
                         await binding.ensure_cardinality()
                         application = PlanLimitedD1(binding, now=now,
                             policy=parse_policy(getattr(self.env, "PULLWISE_PLAN_LIMITS_JSON", "")))
+                        application.email_gateway = WorkerEmailGateway(self.env)
+                        binding.email_gateway = application.email_gateway
                         result = await run_due_recurring(binding=application,
                             maintenance_binding=binding, gateway=WorkerGitHubGateway(self.env),
                             now=now, rule_limit=10, occurrence_limit=10)
@@ -728,6 +733,9 @@ class ValidationBudget(DurableObject):
                         if (str(getattr(self.env, "PULLWISE_PREVIEW_SCHEMA_V11_UPGRADE_ENABLED", "0")) == "1"
                                 and journal.snapshot().get("schema_ready")):
                             await upgrade_product_schema_v11(native, journal)
+                        if (str(getattr(self.env, "PULLWISE_PREVIEW_SCHEMA_V12_UPGRADE_ENABLED", "0")) == "1"
+                                and journal.snapshot().get("schema_version") == 11):
+                            await upgrade_product_schema_v12(native, journal)
                         await initialize_product(native, journal)
                         await migrate_product_state_records(native, journal)
                         await clear_preview_business(native, journal, self.env)

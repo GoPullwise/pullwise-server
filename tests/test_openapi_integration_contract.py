@@ -155,3 +155,55 @@ def test_owner_retention_policy_is_cookie_only_and_uses_its_independent_revision
     assert schema["properties"]["revision"]["maximum"] == 9007199254740991
     assert "soft-deleted" not in SCHEMAS["LedgerUsage"]["description"]
     assert "getAccountJevPreference" == CONTRACT["paths"]["/api/v1/account/jev"]["get"]["operationId"]
+
+
+def test_recurring_contract_distinguishes_automatic_input_frozen_retries_and_future_dates():
+    import re
+
+    fields = SCHEMAS["RecurringExpenseFields"]
+    assert set(fields["required"]) == {"target", "amount", "currency", "purpose", "schedule"}
+    assert fields["properties"]["categoryId"]["type"] == ["string", "null"]
+    dto = SCHEMAS["RecurringExpenseRule"]["allOf"][1]
+    assert {"categoryId", "pendingOccurrences", "awaitingSync"} <= set(dto["required"])
+    assert dto["properties"]["categoryId"]["type"] == "string"
+    pending = dto["properties"]["pendingOccurrences"]
+    assert pending["maxItems"] == 10
+    assert pending["items"] == {"$ref": "#/components/schemas/RecurringExpensePendingOccurrence"}
+    frozen = SCHEMAS["RecurringExpensePendingOccurrence"]
+    assert set(frozen["required"]) == set(frozen["properties"]) == {
+        "periodKey", "scheduledOn", "amount", "currency", "purpose", "categoryId", "blockedCode", "createdAt"}
+    assert frozen["additionalProperties"] is False
+    assert set(frozen["properties"]["blockedCode"]["enum"]) == {
+        "RECORD_LIMIT", "RETENTION_CLEANUP_REQUIRED", "RETENTION_TARGET_FORBIDDEN"}
+    patch = CONTRACT["paths"]["/api/v1/expense-recurring-rules/{id}"]["patch"]
+    assert {"$ref": "#/components/parameters/IfMatch"} in patch["parameters"]
+    assert {"$ref": "#/components/schemas/RecurringExpenseRetryInput"} in patch["requestBody"]["content"]["application/json"]["schema"]["oneOf"]
+    retry = SCHEMAS["RecurringExpenseRetryInput"]
+    assert retry["required"] == ["retryPeriodKey"]
+    assert set(retry["properties"]) == {"retryPeriodKey"}
+    assert retry["additionalProperties"] is False
+    assert "strictly after today" in dto["properties"]["nextOccurrenceOn"]["description"]
+    assert "GET" in dto["properties"]["awaitingSync"]["description"]
+    for name in ("ExpenseFields", "RecurringExpenseFields", "RecurringExpensePendingOccurrence", "RecurringExpenseNotification"):
+        pattern = SCHEMAS[name]["properties"]["amount"]["pattern"]
+        assert re.fullmatch(pattern, "12.30")
+        assert not re.fullmatch(pattern, "12x30")
+
+
+def test_recurring_notification_inbox_is_cookie_only_bounded_and_read_only():
+    route = CONTRACT["paths"]["/api/v1/recurring-expense-notifications"]
+    assert set(route) == {"get"}
+    read = route["get"]
+    assert read["operationId"] == "listRecurringExpenseNotifications"
+    assert read["security"] == [{"cookieSession": []}]
+    assert read["x-pullwise-scope"] == "account:auth"
+    assert "COOKIE_SESSION_REQUIRED" in read["responses"]["403"]["description"]
+    page = SCHEMAS["RecurringExpenseNotificationPage"]
+    assert page["required"] == ["items", "hasMore"]
+    assert page["properties"]["items"]["maxItems"] == 100
+    assert page["properties"]["items"]["items"] == {"$ref": "#/components/schemas/RecurringExpenseNotification"}
+    notice = SCHEMAS["RecurringExpenseNotification"]
+    assert set(notice["required"]) == set(notice["properties"]) == {
+        "id", "ruleId", "periodKey", "scheduledOn", "workspaceId", "workspaceName", "target",
+        "amount", "currency", "failedCode", "createdAt", "purpose"}
+    assert not {"email", "recipientUserId", "notificationState", "credentialHash"}.intersection(notice["properties"])

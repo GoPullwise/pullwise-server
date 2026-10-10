@@ -24,7 +24,7 @@ ACTION_ID = "preview-ledger-business-clear-2026-10-09-v1"
 MARKER_KEY = "preview_business_clear_v1"
 BUSINESS_TABLES = (
     "expense_suggestion_events", "ledger_activity_events", "expense_events",
-    "expense_create_idempotency", "expense_recurring_occurrences", "expense_recurring_rules",
+    "expense_create_idempotency", "expense_recurring_occurrences", "expense_recurring_pending", "expense_recurring_rules",
     "expenses", "ledger_project_repositories", "ledger_projects", "expense_categories",
 )
 CLEAR_SQL = tuple("DELETE FROM " + table for table in BUSINESS_TABLES) + (
@@ -39,10 +39,10 @@ _CAPACITY_POST_SQL = _CAPACITY_PRE_SQL.replace("AS usageRows", "AS remainingUsag
 _PRE_SQL = (_SCHEMA_QUERY, _COUNT_SQL, _RECORD_COUNT_SQL, _STRICT_RECORD_SQL,
             _FK_COUNT_SQL, _FK_ENABLED_SQL, _CAPACITY_PRE_SQL)
 _POST_SQL = (*_PRE_SQL[:-1], _CAPACITY_POST_SQL)
-_INCOMING_FKS = {"expenses": 3, "expense_recurring_rules": 1, "ledger_projects": 3,
+_INCOMING_FKS = {"expenses": 3, "expense_recurring_rules": 2, "ledger_projects": 3,
                  "expense_categories": 1}
 _UPGRADE_MARKERS = ("schema_upgrade", "schema_upgrade_v6", "schema_upgrade_v7",
-    "schema_upgrade_v8", "schema_upgrade_v9", "schema_upgrade_v10", "schema_upgrade_v11",
+    "schema_upgrade_v8", "schema_upgrade_v9", "schema_upgrade_v10", "schema_upgrade_v11", "schema_upgrade_v12",
     "state_record_migration")
 
 
@@ -76,7 +76,7 @@ def _armed(env, journal):
             or str(getattr(env, "PULLWISE_PREVIEW_PRODUCT_ENABLED", "0")) != "1"
             or getattr(env, "PULLWISE_PREVIEW_BUSINESS_CLEAR_MANIFEST", "") != EXPECTED_MANIFEST
             or journal.preview_product is not True or journal.snapshot().get("scope") != BUDGET_SCOPE
-            or SCHEMA_VERSION != 11):
+            or SCHEMA_VERSION != 12):
         raise BudgetError("PREVIEW_BUSINESS_CLEAR_UNREVIEWED")
     return True
 

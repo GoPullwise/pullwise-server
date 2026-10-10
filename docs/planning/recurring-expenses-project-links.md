@@ -25,11 +25,23 @@ project role, key, ownership, metadata-visibility and revision guards remain.
 ## Actual expenses and automation
 
 Project entry always targets the current project; shared-pool entry always
-targets the shared pool. The same form supports one-time costs and recurring
-rules. Rules require an explicit active category and never invoke Jev. Planned
-costs remain separate from ordinary expenses and are excluded from reports.
-Once generated, a cost is an ordinary expense with its original occurrence date
-and normal history/edit/delete/export/report behavior.
+targets the shared pool. One-time entry records an expense already incurred;
+recurring entry configures future expenses. Recurring creation and complete
+edits support the same Jev category omission as ordinary expenses, subject to
+the Owner's eligible plan, enabled preference, model availability and allowance.
+Only a confident existing active category is selected. Explicit categories and
+other explicit input remain unchanged. `CATEGORY_REQUIRED` preserves the draft
+without saving the rule. Background execution reuses the saved category and
+never invokes Jev.
+
+Planned costs remain separate from ordinary expenses and are excluded from
+spent totals and reports. A start date on or before today in the schedule's
+timezone records exactly one initial expense dated `startOn`, without filling
+every intervening period. A future start waits for that exact date, even when
+the calendar selector differs; selectors govern later periods. Every successful
+occurrence creates a separate ordinary expense with its original date and
+normal history/edit/delete/export/report behavior. Repeated amounts are never
+accumulated into an existing expense.
 
 Calendar schedules store their original selectors, IANA timezone, inclusive
 start date and optional inclusive end date:
@@ -51,7 +63,7 @@ runtime acceptance.
 
 `/api/v1/expense-recurring-rules` and `/{id}` provide the same management
 resources to browser sessions and Bearer API keys. GET requires `expenses:read`;
-creation/edit/pause/resume/cancel require `expenses:write`, the issuer's current
+creation/edit/pause/resume/cancel/historical retry require `expenses:write`, the issuer's current
 workspace role and the permitted project/shared target. POST uses the existing namespaced idempotency-key convention;
 PATCH and DELETE require If-Match. A rule's target is immutable. Editing or
 resuming validates the current actor and renews the background grant, without
@@ -67,12 +79,42 @@ the same generated-expense transaction. A full edit or explicit resume adopts
 the current actor and credential; a browser session can renew the rule without
 retaining an old key grant. Pausing does not silently replace the saved grant.
 
-A start date in the past allows bounded catch-up. More than 12 due periods
-blocks for explicit review; resume starts at the next future matching date and
-does not backfill paused periods. Blocked access/category/quota rules require
-an explicit correction and resume. There are at most 100 uncanceled rules per
-workspace, 10 rules and 10 processed occurrences per tick, and 3 occurrences per
-rule per tick. The UI explains these lifecycle states and the next date.
+Create, edit and resume present a next date strictly after local today, or null
+when the schedule has ended. GET projects an overdue stored pointer into the
+future for both `nextOccurrenceOn` and `nextRunAt`, returning `awaitingSync`
+without a financial write. Reads never generate expenses or repair state.
+Resume starts at the next future matching date and does not backfill paused
+periods. Blocked access/category/commercial-write-allowance rules still require
+explicit correction and resume. Delayed scheduled execution remains bounded;
+there are at most 100 uncanceled rules per workspace, 10 rules and 10 processed
+occurrences per tick, and 3 occurrences per rule per tick.
+
+Capacity failures follow the current Owner's automatic-removal policy. If a
+due expense cannot be inserted, the rule advances its future calendar and
+retains the first ten unresolved failures in `pendingOccurrences`, with frozen
+`periodKey`, `scheduledOn`, `amount`, `currency`, `purpose`, `categoryId`,
+`blockedCode` and `createdAt`. While ten remain unresolved, later failures are
+discarded rather than replacing those retained records. Each retained
+occurrence keeps an Add to expenses action. The original period identity is
+preserved across rule edits and expense removal.
+
+Manual posting PATCHes the rule with only `retryPeriodKey` and the current
+`If-Match`. It checks the current caller's authority, target, category, capacity
+and credential. One atomic success creates one expense and immutable period
+identity, removes that pending occurrence and leaves the future calendar
+unchanged. A failed retry retains the occurrence. A settled period with a
+current revision returns a no-op rule; a stale revision returns 412. Canceled
+rules reject historical retries.
+
+The saved execution account receives an English-only email when it has a usable
+verified address, otherwise an actionable Pullwise inbox notification. Delivery
+claims prevent repeating a settled send. The cookie-only read
+`GET /api/v1/recurring-expense-notifications` returns up to 100 oldest actionable
+retained failures plus `hasMore` across currently authorized ledgers, independent
+of the selected workspace. It filters recipient identity, membership and target
+access, excludes canceled rules, removed targets and email-delivered failures,
+and never marks read or changes delivery state. Successful historical posting
+removes the actionable notification with its pending occurrence.
 
 Only preview has the hourly `0 * * * *` scheduled trigger. A due local-day cost
 is normally generated within the next hourly check, subject to authorization,

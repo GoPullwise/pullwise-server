@@ -92,11 +92,25 @@ def app(tmp_path):
     return SimpleNamespace(store=store, raw=raw, policy=policy, call=call, tick=tick, rows=rows)
 
 
-def draft(*, project=False, start="2026-07-01", **changes):
+def draft(*, project=False, start="2026-10-31", **changes):
     return {"target": {"kind": "project", "projectId": "prj_1"} if project else {"kind": "shared"},
             "amount": "12.34", "currency": "USD", "categoryId": "cat_1", "purpose": "Hosting",
             "schedule": {"frequency": "monthly", "day": 31, "timezone": "Asia/Shanghai", "startOn": start},
             **changes}
+
+
+def legacy_due(app, *, start="2026-07-01", rule_id=None):
+    """Model a pre-upgrade stored rule; current creation always skips old plans."""
+    from pullwise_server.ledger_recurrence_calendar import next_fields, next_occurrence
+    with app.store._immediate() as db:
+        for row in app.rows("expense_recurring_rules"):
+            if rule_id is not None and row["id"] != rule_id:
+                continue
+            schedule = {**json.loads(row["schedule_json"]), "startOn": start}
+            fields = next_fields(schedule, next_occurrence(schedule))
+            db.execute("""UPDATE expense_recurring_rules SET schedule_json=?,next_occurrence_on=?,
+                next_run_at=?,next_period_key=? WHERE id=?""", (json.dumps(schedule),
+                fields["next_occurrence_on"], fields["next_run_at"], fields["next_period_key"], row["id"]))
 
 
 def create(app, **kwargs):
@@ -106,10 +120,11 @@ def create(app, **kwargs):
 
 
 def test_public_ledger_router_manages_rules_used_by_internal_expense_runner(app):
-    status, rule = app.call("POST", body=draft(start="2026-09-01"), handler=handle_ledger_request)
+    status, rule = app.call("POST", body=draft(start="2026-10-31"), handler=handle_ledger_request)
     assert status == 201
     status, page = app.call("GET", params={"target": "shared"}, handler=handle_ledger_request)
     assert status == 200 and page["items"] == [rule]
+    legacy_due(app, start="2026-09-01")
     assert app.tick()["created"] == 1
     status, current = app.call("GET", rule["id"], handler=handle_ledger_request)
     assert status == 200 and current["revision"] == 2
@@ -123,8 +138,9 @@ def test_public_ledger_router_manages_rules_used_by_internal_expense_runner(app)
 @pytest.mark.parametrize("project", [False, True])
 def test_due_rules_create_real_target_expenses_exact_money_and_atomic_audit_quota(app, project):
     rule = create(app, project=project, amount="90071992547409.91")
+    legacy_due(app)
     assert rule["amount"] == "90071992547409.91"
-    assert rule["nextOccurrenceOn"] == "2026-07-31"
+    assert rule["nextOccurrenceOn"] == "2026-10-31"
     assert app.rows("expenses") == []
     result = app.tick()
     assert result == {"scanned": 1, "created": 3, "blocked": 0, "replayed": 0}
@@ -187,7 +203,8 @@ def test_revision_limit_rejects_mutation_without_partial_state_or_quota(app, met
 
 
 def test_record_deletion_and_stale_pointer_never_regenerate_an_occurrence(app):
-    rule = create(app, start="2026-09-01")
+    rule = create(app, start="2026-10-31")
+    legacy_due(app, start="2026-09-01")
     assert app.tick()["created"] == 1
     with app.store._immediate() as db:
         db.execute("UPDATE expenses SET deleted_at='deleted'")
@@ -207,13 +224,14 @@ def test_record_deletion_and_stale_pointer_never_regenerate_an_occurrence(app):
 ])
 def test_archived_target_or_category_blocks_once_without_advancing_or_hot_loop(app, mutation, code):
     rule = create(app, project=True)
+    legacy_due(app)
     with app.store._immediate() as db:
         db.execute(mutation)
     result = app.tick()
     assert result["blocked"] == 1 and result["created"] == 0
     stored = app.call("GET", rule["id"])[1]
     assert stored["status"] == "blocked" and stored["blockedCode"] == code
-    assert stored["nextOccurrenceOn"] == "2026-07-31"
+    assert stored["nextOccurrenceOn"] == "2026-10-31"
     assert app.tick()["scanned"] == 0
     assert app.rows("expenses") == []
 
@@ -221,6 +239,7 @@ def test_archived_target_or_category_blocks_once_without_advancing_or_hot_loop(a
 def test_persistent_grant_survives_session_expiry_but_not_member_downgrade(app):
     status, rule = app.call("POST", body=draft(), actor="editor")
     assert status == 201
+    legacy_due(app)
     with app.store._immediate() as db:
         db.execute("DELETE FROM app_state WHERE name=?", (record_name("sessions", "editor"),))
     assert app.tick()["created"] == 3
@@ -259,13 +278,14 @@ def api_auth(app, *, actor="owner", scopes=None, restrictions=None, expires=None
 @pytest.mark.parametrize("project", [False, True])
 def test_api_key_manages_project_and_shared_rules_with_revocable_hidden_grants(app, project):
     auth = api_auth(app)
-    body = draft(project=project, start="2026-09-01")
+    body = draft(project=project, start="2026-10-31")
     status, rule = app.call("POST", body=body, headers=auth, handler=handle_ledger_request)
     assert status == 201
     assert app.call("POST", body=body, headers=auth) == (201, rule)
     saved = json.loads(app.rows("expense_recurring_rules")[0]["template_json"])
     assert saved["_api_key_hash"] == hashlib.sha256(auth["Authorization"].split()[1].encode()).hexdigest()
     assert "_api_key_hash" not in json.dumps(rule)
+    legacy_due(app, start="2026-09-01")
     assert app.tick()["created"] == 1
     status, current = app.call("GET", rule["id"], headers=auth)
     assert status == 200 and current["revision"] == 2
@@ -343,6 +363,7 @@ def test_scheduled_api_grant_rechecks_key_and_member_authority_and_blocks_once(a
     auth = api_auth(app, actor=actor)
     status, rule = app.call("POST", body=draft(project=project), actor=actor, headers=auth)
     assert status == 201
+    legacy_due(app)
     writes = app.rows("ledger_plan_usage")[0]["writes"]
     with app.store._immediate() as db:
         db.execute(mutation)
@@ -357,7 +378,7 @@ def test_scheduled_api_grant_rechecks_key_and_member_authority_and_blocks_once(a
 
 def test_api_rule_grant_expires_at_execution_and_owner_can_reauthorize_with_cookie(app):
     auth = api_auth(app, expires=NOW + 60)
-    status, rule = app.call("POST", body=draft(start="2026-10-01"), headers=auth)
+    status, rule = app.call("POST", body=draft(start="2026-10-31"), headers=auth)
     assert status == 201
     october = int(datetime(2026, 10, 31, 12, tzinfo=timezone.utc).timestamp())
     assert app.tick(now=october)["blocked"] == 1
@@ -371,7 +392,7 @@ def test_api_rule_grant_expires_at_execution_and_owner_can_reauthorize_with_cook
 
 def test_replay_and_pause_keep_original_key_but_resume_transfers_to_new_key(app):
     first, second = api_auth(app), api_auth(app, suffix="second")
-    body = draft(start="2026-09-01")
+    body = draft(start="2026-10-31")
     status, rule = app.call("POST", body=body, headers=first)
     assert status == 201
     grant = json.loads(app.rows("expense_recurring_rules")[0]["template_json"])["_api_key_hash"]
@@ -393,9 +414,9 @@ def test_replay_and_pause_keep_original_key_but_resume_transfers_to_new_key(app)
 
 
 def test_member_api_edit_replaces_cookie_grant_and_runs_without_session(app):
-    rule = create(app, start="2026-09-01")
+    rule = create(app, start="2026-10-31")
     auth = api_auth(app, actor="editor")
-    status, changed = app.call("PATCH", rule["id"], draft(start="2026-09-01", amount="88.00"),
+    status, changed = app.call("PATCH", rule["id"], draft(start="2026-10-31", amount="88.00"),
                                revision=1, actor="editor", headers=auth)
     assert status == 200
     with app.store._immediate() as db:
@@ -414,6 +435,7 @@ def test_member_api_edit_replaces_cookie_grant_and_runs_without_session(app):
 @pytest.mark.parametrize("grant", [None, "", "incorrect", "G" * 64])
 def test_malformed_persisted_key_grant_blocks_instead_of_becoming_session_authority(app, grant):
     rule = create(app)
+    legacy_due(app)
     with app.store._immediate() as db:
         stored = app.rows("expense_recurring_rules")[0]
         template = json.loads(stored["template_json"])
@@ -433,6 +455,7 @@ def test_malformed_persisted_key_grant_blocks_instead_of_becoming_session_author
 def test_key_change_between_schedule_read_and_commit_rolls_back_expense_audit_occurrence_and_quota(app, mutation):
     auth = api_auth(app)
     assert app.call("POST", body=draft(), headers=auth)[0] == 201
+    legacy_due(app)
     before = {table: app.rows(table) for table in (
         "expense_recurring_rules", "expenses", "expense_events", "expense_recurring_occurrences",
         "ledger_activity_events", "ledger_plan_usage")}
@@ -468,29 +491,37 @@ def test_quota_block_keeps_pending_period_and_pause_cancel_remain_available(app)
     app.policy["pro"]["records"] = 1
     app.policy["max"]["records"] = 1
     rule = create(app)
+    legacy_due(app)
     result = app.tick()
-    assert result["created"] == 1 and result["blocked"] == 1
+    assert result["created"] == 1 and result["blocked"] == 2
     _, blocked = app.call("GET", rule["id"])
-    assert blocked["blockedCode"] == "RECORD_LIMIT" and blocked["nextOccurrenceOn"] == "2026-08-31"
+    assert blocked["status"] == "active" and blocked["blockedCode"] is None
+    assert blocked["nextOccurrenceOn"] == "2026-10-31"
+    assert [item["scheduledOn"] for item in blocked["pendingOccurrences"]] == ["2026-08-31", "2026-09-30"]
     app.policy["pro"]["writesPerMinute"] = 1
     assert app.call("PATCH", rule["id"], {"status": "paused"}, revision=blocked["revision"])[0] == 200
     assert app.call("DELETE", rule["id"], revision=blocked["revision"] + 1)[0] == 204
     assert len(app.rows("expenses")) == 1
 
 
-def test_backlog_over_twelve_periods_requires_review_without_starving_newer_rule(app):
-    oldest = create(app, start="2024-01-01")
-    status, fresh = app.call("POST", body=draft(start="2026-09-01"), key="fresh")
+def test_backlog_over_twelve_periods_advances_finitely_without_starving_newer_rule(app):
+    oldest = create(app)
+    legacy_due(app, start="2024-01-01", rule_id=oldest["id"])
+    status, fresh = app.call("POST", body=draft(start="2026-10-31"), key="fresh")
     assert status == 201
+    legacy_due(app, start="2026-09-01", rule_id=fresh["id"])
     result = app.tick()
-    assert result["blocked"] == result["created"] == 1
-    assert app.call("GET", oldest["id"])[1]["blockedCode"] == "CATCHUP_REVIEW_REQUIRED"
+    assert result["blocked"] == 0 and result["created"] == 4
+    current = app.call("GET", oldest["id"])[1]
+    assert current["blockedCode"] is None and current["awaitingSync"]
+    assert current["nextOccurrenceOn"] == "2026-10-31"
     assert app.call("GET", fresh["id"])[1]["nextOccurrenceOn"] == "2026-10-31"
 
 
 def test_global_tick_and_per_rule_catchup_are_finite(app):
     for number in range(5):
-        assert app.call("POST", body=draft(start="2026-06-01"), key=f"bounded-{number}")[0] == 201
+        assert app.call("POST", body=draft(), key=f"bounded-{number}")[0] == 201
+    legacy_due(app, start="2026-06-01")
     result = app.tick(limit=4)
     assert result["created"] == 4
     assert len(app.rows("expenses")) == 4
@@ -502,6 +533,7 @@ def test_global_tick_and_per_rule_catchup_are_finite(app):
 
 def test_member_change_during_atomic_generation_rolls_back_every_financial_write(app):
     assert app.call("POST", body=draft(), actor="editor")[0] == 201
+    legacy_due(app)
     writes_before = app.rows("ledger_plan_usage")[0]["writes"]
     def revoke_before_expense(statements):
         if any("INSERT INTO expenses(" in statement.sql for statement in statements):
@@ -530,7 +562,7 @@ def test_fixed_rule_target_cannot_be_changed_and_cancel_never_resumes(app):
 
 
 def test_actor_reauthorization_keeps_creator_namespaces_and_exact_create_replay(app):
-    body = draft(start="2026-09-01")
+    body = draft(start="2026-10-31")
     status, original = app.call("POST", body=body, actor="editor")
     assert status == 201
     status, own_rule = app.call("POST", body=body, actor="owner")
@@ -545,7 +577,7 @@ def test_actor_reauthorization_keeps_creator_namespaces_and_exact_create_replay(
         db.execute("UPDATE workspace_members SET role='viewer',revision=revision+1 WHERE user_id='editor'")
     assert app.call("POST", body=body, actor="editor")[0] == 403
     october = int(datetime(2026, 10, 31, 12, tzinfo=timezone.utc).timestamp())
-    assert app.tick(now=october)["created"] == 3
+    assert app.tick(now=october)["created"] == 2
     assert app.call("GET", original["id"], now=NOW)[1]["status"] == "active"
     assert {row["actor_id"] for row in app.rows("expense_events") if row["actor_id"].startswith(original["id"])} == {original["id"] + ":owner"}
 
@@ -587,6 +619,7 @@ def test_linked_rules_use_grant_actors_live_github_access_and_owner_may_reauthor
             github_full_name,created_at) VALUES('owner','prj_1',202,'team/private','created')""")
     status, rule = app.call("POST", body=draft(project=True), actor="editor", gateway=gateway)
     assert status == 201
+    legacy_due(app)
     gateway.allowed["editor"] = False
     assert app.tick(gateway=gateway)["blocked"] == 1
     assert gateway.tokens == ["editor", "editor"]
@@ -607,17 +640,19 @@ def remove_project(app):
 
 
 def test_removed_project_rules_and_replays_are_hidden_without_erasing_financial_history(app):
-    body = draft(project=True, start="2026-09-01")
-    rule = create(app, project=True, start="2026-09-01")
+    body = draft(project=True, start="2026-10-31")
+    rule = create(app, project=True, start="2026-10-31")
+    legacy_due(app, start="2026-09-01")
     assert app.tick()["created"] == 1
-    status, shared = app.call("POST", body=draft(start="2026-09-01"), key="shared")
+    status, shared = app.call("POST", body=draft(start="2026-10-31"), key="shared")
     assert status == 201
+    legacy_due(app, start="2026-09-01", rule_id=shared["id"])
     remove_project(app)
     before = {table: app.rows(table) for table in (
         "expense_recurring_rules", "expense_recurring_occurrences", "expenses",
         "expense_events", "ledger_activity_events", "ledger_plan_usage")}
     assert app.call("GET", rule["id"])[0] == 404
-    assert app.call("GET")[1]["items"] == [shared]
+    assert app.call("GET")[1]["items"][0]["id"] == shared["id"]
     assert app.call("GET", params={"target": "project", "projectId": "prj_1"})[1]["items"] == []
     assert app.call("POST", body=body)[0] == 404
     assert app.call("POST", body=draft())[0] == 404  # Same key cannot expose the hidden rule either.
@@ -650,8 +685,9 @@ def test_removed_project_hides_every_preserved_rule_state(app, status):
 
 @pytest.mark.parametrize("existing_occurrence", [False, True])
 def test_stale_selected_rule_for_removed_project_skips_generation_and_replay_maintenance(app, existing_occurrence):
-    rule = create(app, project=True, start="2026-09-01")
+    rule = create(app, project=True, start="2026-10-31")
     if existing_occurrence:
+        legacy_due(app, start="2026-09-01")
         assert app.tick()["created"] == 1
         first = app.rows("expense_recurring_occurrences")[0]
         with app.store._immediate() as db:
@@ -671,6 +707,7 @@ def test_stale_selected_rule_for_removed_project_skips_generation_and_replay_mai
 
 def test_project_removal_during_atomic_generation_rolls_back_even_without_revision_change(app):
     create(app, project=True)
+    legacy_due(app)
     before = {table: app.rows(table) for table in (
         "expense_recurring_rules", "expense_recurring_occurrences", "expenses",
         "expense_events", "ledger_activity_events", "ledger_plan_usage")}
@@ -725,7 +762,8 @@ def test_monthly_start_boundary_is_saved_without_changing_the_selected_day(app, 
     body = draft(project=project, schedule={"frequency": "monthly", "day": 9,
         "timezone": "Asia/Shanghai", "startOn": "2026-10-01"})
     status, original = app.call("POST", body=body)
-    assert status == 201 and original["nextOccurrenceOn"] == "2026-10-09"
+    assert status == 201 and original["nextOccurrenceOn"] == "2026-11-09"
+    assert app.rows("expenses")[0]["occurred_on"] == "2026-10-01"
     edited = {**body, "schedule": {**body["schedule"], "startOn": "2026-10-10"}}
     before = app.rows("expense_recurring_rules")
     # Constructing a form draft sends no write. The saved row and list remain
@@ -745,7 +783,7 @@ def test_monthly_start_boundary_is_saved_without_changing_the_selected_day(app, 
     stored = app.rows("expense_recurring_rules")[0]
     assert json.loads(stored["schedule_json"]) == saved["schedule"]
     assert stored["next_occurrence_on"] == "2026-11-09" and stored["next_period_key"] == "M2026-11"
-    assert app.rows("expenses") == app.rows("expense_events") == app.rows("expense_recurring_occurrences") == []
+    assert len(app.rows("expenses")) == len(app.rows("expense_events")) == len(app.rows("expense_recurring_occurrences")) == 1
 
 
 @pytest.mark.parametrize("project", [False, True])
@@ -765,9 +803,9 @@ def test_monthly_day_edit_keeps_recorded_october_period_and_applies_in_november(
         db.execute("UPDATE app_state SET payload=? WHERE name=?", (
             encode_record("sessions", "owner", session), record_name("sessions", "owner")))
     october = _shanghai_instant("2026-10-09T00:00:00")
-    assert app.tick(now=october) == {"scanned": 1, "created": 1, "blocked": 0, "replayed": 0}
+    assert app.tick(now=october) == {"scanned": 0, "created": 0, "blocked": 0, "replayed": 0}
     recorded = {table: app.rows(table) for table in ("expenses", "expense_events", "expense_recurring_occurrences")}
-    assert recorded["expenses"][0]["occurred_on"] == "2026-10-09"
+    assert recorded["expenses"][0]["occurred_on"] == "2026-10-01"
     assert recorded["expense_recurring_occurrences"][0]["period_key"] == "M2026-10"
     edit_now = _shanghai_instant(edit_date + "T00:05:00")
     current = app.call("GET", original["id"], now=edit_now)[1]
@@ -798,7 +836,7 @@ def test_monthly_day_edit_keeps_recorded_october_period_and_applies_in_november(
     # The next calendar month creates exactly one new record on the edited day;
     # the old October expense and its durable financial audit stay unchanged.
     assert app.tick(now=_shanghai_instant("2026-11-10T00:00:00"))["created"] == 1
-    assert [row["occurred_on"] for row in app.rows("expenses")] == ["2026-10-09", "2026-11-10"]
+    assert [row["occurred_on"] for row in app.rows("expenses")] == ["2026-10-01", "2026-11-10"]
     assert [row["period_key"] for row in app.rows("expense_recurring_occurrences")] == ["M2026-10", "M2026-11"]
     for table in recorded:
         assert app.rows(table)[0] == recorded[table][0]

@@ -79,6 +79,8 @@ def test_activity_extension_preserves_identity_finance_membership_and_journal(v8
     # within their bounded upgrade, so a healthy first read needs no scan.
     asyncio.run(upgrade_product_schema_v10(raw, restarted, clock=lambda: 12))
     asyncio.run(upgrade_product_schema_v11(raw, restarted, clock=lambda: 12))
+    from pullwise_server.cloudflare_preview_budget import upgrade_product_schema_v12
+    asyncio.run(upgrade_product_schema_v12(raw, restarted, clock=lambda: 12))
     calls = raw.calls
     ticket = restarted.begin_product(now=12)
     meter = ProductMeteredD1(raw, restarted, ticket, clock=lambda: 13)
@@ -182,6 +184,6 @@ def test_fresh_schema_matches_canonical_migrations_within_original_batch_cap():
             canonical.executescript(migration.read_text())
         for sql in SCHEMA_SQL:
             compiled.execute(sql)
-        assert len(SCHEMA_SQL) == 48 <= 64
+        assert len(SCHEMA_SQL) == 54 <= 64
         assert schema(canonical) == schema(compiled) == SCHEMA_OBJECTS
-        assert len(INDEX_COUNTS) == 22 and sum(INDEX_COUNTS.values()) == 50
+        assert len(INDEX_COUNTS) == 23 and sum(INDEX_COUNTS.values()) == 52

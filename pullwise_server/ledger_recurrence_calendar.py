@@ -86,9 +86,25 @@ def next_occurrence(schedule, on_or_after=None):
 
 def following_occurrence(schedule, current):
     try:
-        return next_occurrence(schedule, current + timedelta(days=1))
+        result = next_occurrence(schedule, current + timedelta(days=1))
+        # The first exact start date can differ from the configured selector.
+        # Its calendar period is already consumed, just like an edited date.
+        if result is not None and period_key(schedule, result) == period_key(schedule, current):
+            result = next_occurrence(schedule, result + timedelta(days=1))
+        return result
     except OverflowError:
         return None
+
+
+def future_occurrence(schedule, now, *, consumed_on=None):
+    """A future plan pointer, excluding an already posted initial period."""
+    try:
+        result = next_occurrence(schedule, local_today(schedule, now) + timedelta(days=1))
+    except OverflowError:
+        return None
+    if result is not None and consumed_on is not None and period_key(schedule, result) == period_key(schedule, consumed_on):
+        result = following_occurrence(schedule, result)
+    return result
 
 
 def period_key(schedule, occurred):

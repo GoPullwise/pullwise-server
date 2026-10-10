@@ -42,6 +42,8 @@ MODULES = (
     "cloudflare_ledger_reports",
     "cloudflare_ledger_review",
     "cloudflare_ledger_recurring",
+    "cloudflare_recurring_assistance",
+    "cloudflare_recurring_notifications",
     "ledger_recurrence_calendar",
     "cloudflare_ledger_suggestions",
     "cloudflare_native_d1",

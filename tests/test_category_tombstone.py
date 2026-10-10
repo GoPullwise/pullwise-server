@@ -5,7 +5,7 @@ import pytest
 
 from test_rest_key_permissions import NOW, OWNER, cookie, credentials, issue, rest_db, route
 from test_ledger_recurring import (
-    app as recurring_app, draft as recurring_draft, NoGitHub, NOW as RECURRING_NOW,
+    app as recurring_app, draft as recurring_draft, NoGitHub, NOW as RECURRING_NOW, legacy_due,
 )
 from pullwise_server.cloudflare_ledger_api import MAX_REVISION, handle_ledger_request
 from pullwise_server import cloudflare_ledger_categories as categories
@@ -135,6 +135,7 @@ def test_removed_category_blocks_next_due_once_until_schedule_is_replaced_and_re
     app = recurring_app
     code, rule = app.call("POST", body=recurring_draft())
     assert code == 201
+    legacy_due(app, start="2026-09-01", rule_id=rule["id"])
     original = app.rows("expense_recurring_rules")
     headers = {"Cookie": "pw_session=owner", "Origin": "https://app.example.test"}
     binding = PlanLimitedD1(app.raw, policy=app.policy, now=RECURRING_NOW)

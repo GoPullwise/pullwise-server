@@ -1,0 +1,571 @@
+{
+  "passed": true,
+  "date": "2026-10-10",
+  "localOnly": true,
+  "nativePythonFFI": true,
+  "nativeDurableObjectSQLite": true,
+  "syntheticPriorJournal": true,
+  "remoteRequests": 0,
+  "remoteD1Operations": 0,
+  "realProviderRequests": 0,
+  "realAccounts": 0,
+  "realPayments": 0,
+  "clientRetries": 0,
+  "localHttpCap": 6,
+  "nativeAttemptsFabricated": false,
+  "fixtureBindingCount": 3,
+  "canonicalSourceTreeSha256": "7ecbd5f7ddcb1d276f831bbc94a2f31b3b96c7dae77ff37d06faa75622a4586c",
+  "canonicalSourceFileCount": 62,
+  "fixtureEntrySha256": "ed0a88223482efb4a1e6f70604396809426c3b52a5ae181dbac8c5a8410c0278",
+  "dependencySha256": {
+    "pyproject.toml": "56d0701742d5cef95b710dbb3a31acf3b630eaaa8d84b49dd1ae035e84d24917",
+    "uv.lock": "aea70025439004f1a9f620893451948e49ba15a61d86df800c2c451bdedc05bb",
+    "pylock.toml": "d7a3bb80dc3055b5abd8b0bc2414b38c5cd6929f5c19434260a1b5c6654fa54e",
+    "package.json": "e05670dd516ab014e0504f36969200f7edfdba8900b0ef75d6697124214e046b",
+    "package-lock.json": "0dda8adc25430a835cf489c62c0298905eb0f29cdde08cc2373ea3e31a57dbc1"
+  },
+  "sourceSha256": {
+    "pullwise_server/cloudflare_native_d1.py": "5408b843e5e2d02cf153b89457210fd60d47ff20150a35fbf280593df466eaa0",
+    "pullwise_server/cloudflare_preview_budget.py": "c0ce9d8a8b0a82b7a58c04512888b7a16cbe069623f5dad9056181759b964224",
+    "pullwise_server/cloudflare_preview_schema.py": "429315695f58e30ed301f9fcf2a3acd64d91b08166c9b7e03cea3227943ec4a0",
+    "pullwise_server/cloudflare_state_records.py": "0cc2860e8d9773eafa824d2bf62047551f61782fe74ecdc8ef4bf9ba07a8f01d",
+    "pullwise_server/cloudflare_validation_budget.py": "48deb528340ba172c56052b7dd7fa2a56792863ea0a7f2315c9b015b594e500d"
+  },
+  "migrationsSha256": {
+    "0001_ledger.sql": "9c55859edadcb1837ce226a3df07b48c4522223ba30915d5d20c514eb75e9538",
+    "0002_identity_billing_keys.sql": "1dabed034c4e8f9ea62e3ab71308dddbab5ad47907d367375a771cfcb2293a31",
+    "0003_ledger_suggestions.sql": "8b258f5a64f2f5cc559aa0c7aad3a9f187a975880ff3799ccdbf740d0903e412",
+    "0004_ledger_plan_usage.sql": "febe80c0f21a9a3697a1a9a6b8b7f35ed1dc28fc831b65ce948e87e9df41d514",
+    "0005_workspaces_repositories.sql": "dccc2c7d4e8bd695158b1748c10c8b527be6d84c4dc2be073e63e4ade6650bc9",
+    "0006_blank_projects.sql": "544bf65c506f0bc2becc6f38678d26ecd6a42aa378a60e1de8da2b1c47b6cfa2",
+    "0007_recurring_expenses_project_links.sql": "5993f4ec02bd02d18ef067ae1fc9d0fcef1472da89d3e3a20733af2ac8baa339",
+    "0008_workspace_join_approval.sql": "1b19ec277ec96064717d851605f879d7fee8324b41f6b74dd5fa41e7d7bbd406",
+    "0009_activity_log.sql": "c6aeb2ce902aab69b63c8004a0fba421aa20c6d377dab816e2afecc497a8cd1e",
+    "0010_project_removal.sql": "e4b4fda5f3be4ee0ef174e11b5a9ec7231ea5cb32955b75748ccef917edf1fd1",
+    "0011_business_erasure.sql": "eb24baa4a56a526e787985b9236891a4aa764eae2c41bb5758637b5d15af6ba9",
+    "0012_recurring_pending.sql": "f32ec014a37f6e1dea81a0a61d66057776e057c0a1446b00102c71330ab97c8d"
+  },
+  "runtimeProvenance": {
+    "workerdSha256": "eb449c84ddd55ea357dc73e6c1b50bd255ccdc5d1875544c162435b7bd6168b6",
+    "runtimeBundleSha256": "3c3fd5a4179230e21e018e28b0e735e7c4abd8fe8e4ff39d2fd6bb2ea3a2e260",
+    "miniflareD1SourceSha256": "eb213ff08bfc9f2992253e8ff01fe31229a069728431df54a3f44c9c4c191ee7",
+    "localTransaction": "state.storage.transactionSync(() => queries.map(query))",
+    "totalAttempts": "Raw native fields retained; no fixture metadata substitution"
+  },
+  "scope": "Preserving v11-to-v12 schema, bounded pending native metering, caps and restart; authenticated API flow separate",
+  "localHttpRequestsAttempted": 6,
+  "localHttpRequestsCompleted": 6,
+  "runtimeProcessesStarted": 3,
+  "actualProcessRestarts": 2,
+  "nativeResultStatements": 902,
+  "nativeRowsRead": 5506,
+  "nativeRowsWritten": 688,
+  "nativeAttemptsObserved": [
+    null
+  ],
+  "failedNativeDispatches": [
+    {
+      "binding": "fresh",
+      "statements": 1,
+      "injectedLateFailure": false,
+      "nativeResultsUnavailable": true
+    },
+    {
+      "binding": "fresh",
+      "statements": 1,
+      "injectedLateFailure": false,
+      "nativeResultsUnavailable": true
+    },
+    {
+      "binding": "fresh",
+      "statements": 1,
+      "injectedLateFailure": false,
+      "nativeResultsUnavailable": true
+    },
+    {
+      "binding": "rollback",
+      "statements": 7,
+      "injectedLateFailure": true,
+      "nativeResultsUnavailable": true
+    }
+  ],
+  "nativeFailedBatchTotalsUnavailable": true,
+  "cases": [
+    {
+      "path": "setup",
+      "status": 200,
+      "result": {
+        "passed": true,
+        "freshV12Schema": true,
+        "nativePerRuleCap10": true,
+        "reparentingCapGuard": true,
+        "invalidFrozenTemplateGuard": true,
+        "nativeSafeIntegerMoney": true,
+        "historicalTables": {
+          "account_entitlement_authority": {
+            "rows": 0,
+            "sha256": "c7b6e1f93daf8d50d52e1e9af167953be5ec3de6704cfa7bc42977da5a86499b"
+          },
+          "api_keys": {
+            "rows": 1,
+            "sha256": "3230d993213975157b693289ba470e4ac6505280596d12280926b8d092589db8"
+          },
+          "app_state": {
+            "rows": 6,
+            "sha256": "90b63d63f5da8c52c157f7ceee4f4c1a93285cc6412802a7c29a0165cce432bc"
+          },
+          "billing_public_catalog": {
+            "rows": 0,
+            "sha256": "2dc21d4f6df68d9142522b48576abccd227bcd33805add0aa7bdc30af90111e3"
+          },
+          "billing_webhook_receipts": {
+            "rows": 1,
+            "sha256": "85c0d500ede662f1cc195365f1de49d8306cd49992ae2e5c7f805d87c7612439"
+          },
+          "d1_command_guard": {
+            "rows": 0,
+            "sha256": "cf176897b3141ce62477b917e7362629245ec3e8f7333f26df186ec52e5381f1"
+          },
+          "expense_categories": {
+            "rows": 2,
+            "sha256": "c271813c1c5894ed5ca407b805d51c55f12c56086b1c5605f8fd13ea0b34260c"
+          },
+          "expense_create_idempotency": {
+            "rows": 2,
+            "sha256": "af785b2cf77ad624276c73827bb760e94b904dd2630f513bda9de4b5281b43d1"
+          },
+          "expense_events": {
+            "rows": 2,
+            "sha256": "b879a9d035cd587111c321133dd8a9801a2b5a988584f2a119e5b68bdc48f367"
+          },
+          "expense_recurring_occurrences": {
+            "rows": 2,
+            "sha256": "b7584563808fe9fb0a010e66526177a849f945fb109934610cc2736d76f5455e"
+          },
+          "expense_recurring_rules": {
+            "rows": 2,
+            "sha256": "da15e66156c023fa67f64a827c58520de68893df4ef4b4e721acd6763aba1ecc"
+          },
+          "expense_suggestion_budget": {
+            "rows": 0,
+            "sha256": "724993d4c7a51b274406089b75dd80606ef7068dbb13aa7b5147df0afe60524c"
+          },
+          "expense_suggestion_events": {
+            "rows": 0,
+            "sha256": "ebf48ccf41015fd9fdea30c7622b25bc335952498cdb8febeee81f02d598bb1b"
+          },
+          "expenses": {
+            "rows": 2,
+            "sha256": "6cb668cf217c61eb32c410da7c1ef96748bd77fca3cb5c48e2271dece264715e"
+          },
+          "ledger_activity_events": {
+            "rows": 0,
+            "sha256": "46dc0293885d70846d9a8fa7ceffe7a0fb09437795cb465a035d63f1065278ce"
+          },
+          "ledger_plan_usage": {
+            "rows": 0,
+            "sha256": "b78bcb08cc3d40ba6680f47adb03c067a43680642b542811ef0ab583e7ab31f3"
+          },
+          "ledger_project_repositories": {
+            "rows": 0,
+            "sha256": "477424a0802e13c88f21a1784fe86c0e0b43f4e1fa768044c6c6fea398f4a882"
+          },
+          "ledger_projects": {
+            "rows": 2,
+            "sha256": "43c4307c583bb558c643ba5593816cc2f17106679f15de92fe6b2b7852fbdac1"
+          },
+          "workspace_events": {
+            "rows": 0,
+            "sha256": "a90dbc3dce7a277ebb8ddcaa20e6530e59bf5f4e82c2390f39da9113d95806c0"
+          },
+          "workspace_invites": {
+            "rows": 0,
+            "sha256": "88da54914a8bb4262ee99a10fca42cf03a8adb24f6c460c5d0e34d011d764408"
+          },
+          "workspace_join_requests": {
+            "rows": 0,
+            "sha256": "123eff576fef7785fd7e2b7ed26dbc2b837638dc0743fa955ea7223b64381a42"
+          },
+          "workspace_members": {
+            "rows": 0,
+            "sha256": "bc9b94417183a19729600de71a69da34b708ef8dad0ee1139f140dd80348ddcd"
+          }
+        },
+        "freshFailedProbes": 3
+      }
+    },
+    {
+      "path": "upgrade",
+      "status": 200,
+      "result": {
+        "passed": true,
+        "schemaVersion": 12,
+        "schemaFingerprint": "d5f53c6229d5b5c318060c26e5e984052aa65cfcf7bc5564f9a52699ca41a77b",
+        "all22HistoricalTablesPreserved": true,
+        "sameJournalAndPriorMarkers": true,
+        "accountingMatchesRawNativeMeta": true,
+        "migrationNativeBatches": [
+          {
+            "binding": "main",
+            "statements": 1,
+            "rowsRead": 145,
+            "rowsWritten": 0,
+            "nativeAttempts": [
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 4,
+            "rowsRead": 34,
+            "rowsWritten": 0,
+            "nativeAttempts": [
+              null,
+              null,
+              null,
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 6,
+            "rowsRead": 3,
+            "rowsWritten": 8,
+            "nativeAttempts": [
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 5,
+            "rowsRead": 189,
+            "rowsWritten": 0,
+            "nativeAttempts": [
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          }
+        ],
+        "reservedRead": 22016,
+        "reservedWritten": 256,
+        "migrationWriteExecution": {
+          "native_attempts": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "provenance": "d1-nonretryable-write-contract-v1"
+        }
+      }
+    },
+    {
+      "path": "mutations",
+      "status": 200,
+      "result": {
+        "passed": true,
+        "productPendingRows": 10,
+        "scalarInserts": 11,
+        "notificationUpdates": 1,
+        "manualRetryDeletes": 1,
+        "commercialHistoryUnchanged": true,
+        "allIndexWritesReserved": true,
+        "reservedWrites": 41,
+        "rawNativeBatches": [
+          {
+            "binding": "main",
+            "statements": 1,
+            "rowsRead": 1,
+            "rowsWritten": 3,
+            "nativeAttempts": [
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 2,
+            "rowsRead": 29,
+            "rowsWritten": 0,
+            "nativeAttempts": [
+              null,
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 1,
+            "rowsRead": 2,
+            "rowsWritten": 3,
+            "nativeAttempts": [
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 2,
+            "rowsRead": 30,
+            "rowsWritten": 0,
+            "nativeAttempts": [
+              null,
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 1,
+            "rowsRead": 3,
+            "rowsWritten": 3,
+            "nativeAttempts": [
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 2,
+            "rowsRead": 31,
+            "rowsWritten": 0,
+            "nativeAttempts": [
+              null,
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 1,
+            "rowsRead": 4,
+            "rowsWritten": 3,
+            "nativeAttempts": [
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 2,
+            "rowsRead": 32,
+            "rowsWritten": 0,
+            "nativeAttempts": [
+              null,
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 1,
+            "rowsRead": 5,
+            "rowsWritten": 3,
+            "nativeAttempts": [
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 2,
+            "rowsRead": 33,
+            "rowsWritten": 0,
+            "nativeAttempts": [
+              null,
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 1,
+            "rowsRead": 6,
+            "rowsWritten": 3,
+            "nativeAttempts": [
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 2,
+            "rowsRead": 34,
+            "rowsWritten": 0,
+            "nativeAttempts": [
+              null,
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 1,
+            "rowsRead": 7,
+            "rowsWritten": 3,
+            "nativeAttempts": [
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 2,
+            "rowsRead": 35,
+            "rowsWritten": 0,
+            "nativeAttempts": [
+              null,
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 1,
+            "rowsRead": 8,
+            "rowsWritten": 3,
+            "nativeAttempts": [
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 2,
+            "rowsRead": 36,
+            "rowsWritten": 0,
+            "nativeAttempts": [
+              null,
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 1,
+            "rowsRead": 9,
+            "rowsWritten": 3,
+            "nativeAttempts": [
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 2,
+            "rowsRead": 37,
+            "rowsWritten": 0,
+            "nativeAttempts": [
+              null,
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 1,
+            "rowsRead": 10,
+            "rowsWritten": 3,
+            "nativeAttempts": [
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 2,
+            "rowsRead": 38,
+            "rowsWritten": 0,
+            "nativeAttempts": [
+              null,
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 1,
+            "rowsRead": 1,
+            "rowsWritten": 3,
+            "nativeAttempts": [
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 2,
+            "rowsRead": 39,
+            "rowsWritten": 0,
+            "nativeAttempts": [
+              null,
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 1,
+            "rowsRead": 2,
+            "rowsWritten": 2,
+            "nativeAttempts": [
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 2,
+            "rowsRead": 39,
+            "rowsWritten": 0,
+            "nativeAttempts": [
+              null,
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 1,
+            "rowsRead": 1,
+            "rowsWritten": 1,
+            "nativeAttempts": [
+              null
+            ]
+          },
+          {
+            "binding": "main",
+            "statements": 2,
+            "rowsRead": 38,
+            "rowsWritten": 0,
+            "nativeAttempts": [
+              null,
+              null
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "path": "restart",
+      "status": 200,
+      "result": {
+        "passed": true,
+        "schemaVersion": 12,
+        "pendingRowsRetained": 10,
+        "sameJournalRestart": true,
+        "upgradeReplayDispatches": 0
+      }
+    },
+    {
+      "path": "rollback",
+      "status": 200,
+      "result": {
+        "passed": true,
+        "schemaVersionRetained": 11,
+        "lateAtomicRollback": true,
+        "allHistoricalRowsRetained": true,
+        "unknownOutcomeStopRetained": true,
+        "reservationRetained": true
+      }
+    },
+    {
+      "path": "rollback-restart",
+      "status": 200,
+      "result": {
+        "passed": true,
+        "schemaVersionRetained": 11,
+        "upgradeReplayDispatches": 0,
+        "fullReservationAndUnknownStopRetained": true
+      }
+    }
+  ],
+  "runtimeStopped": true,
+  "setupAndIntegritySnapshotsOutsideMigrationJournal": true
+}

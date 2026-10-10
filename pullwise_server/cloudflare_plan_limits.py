@@ -71,7 +71,7 @@ _ERRORS = {"plan_project_limit": (403, "PROJECT_LIMIT"),
            "plan_max_required": (403, "JEV_PLAN_REQUIRED"),
            "plan_jev_budget_limit": (429, "JEV_BUDGET_LIMIT")}
 _MUTATION = re.compile(r"^\s*(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM)\s+"
-    r"(ledger_projects|expense_categories|expenses|api_keys|expense_suggestion_budget|expense_suggestion_events|ledger_plan_usage|workspace_members|workspace_invites|workspace_events|workspace_join_requests|ledger_project_repositories|expense_recurring_rules|expense_recurring_occurrences|ledger_activity_events)\b", re.I)
+    r"(ledger_projects|expense_categories|expenses|api_keys|expense_suggestion_budget|expense_suggestion_events|ledger_plan_usage|workspace_members|workspace_invites|workspace_events|workspace_join_requests|ledger_project_repositories|expense_recurring_rules|expense_recurring_occurrences|expense_recurring_pending|ledger_activity_events)\b", re.I)
 _USER_FENCE = re.compile(r"\bu\.name\s*=\s*\?\s+AND\s+u\.payload\s*=\s*\?", re.I)
 
 
@@ -140,7 +140,7 @@ class PlanLimitedD1:
         # Its append/expiry companions do not add a commercial write or disable
         # the original emergency pause/cancel exemptions. The native global
         # meter still accounts every projection row and index entry.
-        mutations = [(item, table) for item, table in mutations if table != "ledger_activity_events"]
+        mutations = [(item, table) for item, table in mutations if table not in {"ledger_activity_events", "expense_recurring_pending"}]
         if any(table == "ledger_plan_usage" for _, table in mutations):
             raise PlanLimitError(503, "USAGE_GUARD_UNAVAILABLE")
         raw = [self.binding.prepare(item.sql).bind(*item.params) for item in statements]

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Pullwise Project Expense Ledger API
-  version: 0.9.0
+  version: 0.10.0
   description: |
     Current ledger contract for Pullwise, the project expense tracker for
     developers and teams at pull-wise.com. Users and authorized API clients
@@ -46,7 +46,16 @@ info:
     generated occurrence uses the current ledger owner's plan and the rule
     saved execution actor's current membership and GitHub access. A rule records one ordinary
     expense per calendar period without making a payment or extending a
-    subscription. Stopping a rule preserves its previously recorded expenses.
+    subscription. Each occurrence is a separate expense record, even when its
+    other values match a previous occurrence; amounts are never accumulated
+    into an existing expense. A start date on or before today in the schedule's
+    timezone records exactly one initial expense on that start date. A future
+    start waits for its scheduled occurrence. Future plans do not count as spent.
+    Capacity failures retain at most ten unresolved occurrences per rule for
+    explicit manual posting and notify the saved execution actor by English
+    email to a usable verified address, otherwise by Pullwise inbox. Later
+    failed occurrences are discarded while ten remain unresolved.
+    Stopping a rule preserves its previously recorded expenses.
     Email verification codes provide independent registration and sign-in.
     GitHub identity and repository connections are optional. Verified email and
     explicit GitHub links preserve the immutable account ID, personal ledger,
@@ -530,6 +539,26 @@ paths:
         '200': {description: "Pending requests with applicant identity, invitation and ledger", content: {application/json: {schema: {type: object, required: [items, hasMore], properties: {items: {type: array, maxItems: 100, items: {allOf: [{$ref: '#/components/schemas/WorkspaceJoinRequest'}, {type: object, required: [invitation, workspace], properties: {invitation: {$ref: '#/components/schemas/WorkspaceInvitation'}, workspace: {$ref: '#/components/schemas/Workspace'}}}]}}, hasMore: {type: boolean}}}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/recurring-expense-notifications:
+    get:
+      operationId: listRecurringExpenseNotifications
+      x-pullwise-scope: account:auth
+      security: [{cookieSession: []}]
+      description: |
+        Read the signed-in account's actionable recurring capacity-failure inbox
+        across currently authorized ledgers, independently of the selected
+        workspace. Bearer API keys and Bearer session tokens are rejected with
+        COOKIE_SESSION_REQUIRED. Returns at most 100 oldest actionable retained
+        failures plus hasMore. Current recipient identity, ledger membership and
+        target access are required; canceled rules and removed targets are
+        excluded. Notifications delivered by email are hidden from this inbox.
+        Pending email delivery and inbox fallback remain visible until the
+        historical occurrence is successfully posted. GET never marks read,
+        posts an expense or changes notification delivery state.
+      responses:
+        '200': {description: Current account's actionable recurring failures, content: {application/json: {schema: {$ref: '#/components/schemas/RecurringExpenseNotificationPage'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {description: COOKIE_SESSION_REQUIRED for Bearer credentials, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /api/v1/workspaces/{workspaceId}/join-requests:
     parameters: [{$ref: '#/components/parameters/WorkspacePath'}]
     get:
@@ -871,7 +900,7 @@ paths:
       operationId: listRecurringExpenseRules
       x-pullwise-scope: expenses:read
       security: [{cookieSession: []}, {bearerKey: []}]
-      description: Current ledger rules excluding canceled entries. Reads never generate expenses. Session and expenses:read key readers use the same DTO; keys see only targets permitted by their current restrictions.
+      description: Current ledger rules excluding canceled entries. Reads never generate expenses or repair financial state. nextOccurrenceOn is the next future business date in the schedule's timezone, or null when none remains. For an overdue legacy rule, awaitingSync identifies a read-only future projection awaiting the next authorized scheduled write. Retained pendingOccurrences remain separately visible. Session and expenses:read key readers use the same DTO; keys see only targets permitted by their current restrictions.
       parameters: [{$ref: '#/components/parameters/Target'}, {$ref: '#/components/parameters/ProjectId'}, {$ref: '#/components/parameters/Limit'}, {$ref: '#/components/parameters/Cursor'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       responses:
         '200': {description: Paginated rules, content: {application/json: {schema: {$ref: '#/components/schemas/RecurringExpensePage'}}}}
@@ -882,8 +911,14 @@ paths:
       x-pullwise-scope: expenses:write
       security: [{cookieSession: []}, {bearerKey: []}]
       description: |
-        Create an automation with an explicit existing active category and a
-        currently authorized project/shared target. The authenticated key issuer
+        Create an automation for a currently authorized project/shared target.
+        categoryId may be omitted for Jev automatic classification when the
+        current Owner's plan, activation, model availability and allowance permit
+        it, just as on ordinary expense creation. Only a confident existing
+        active category is saved; an explicit category is never changed.
+        CATEGORY_REQUIRED preserves the unsaved input for manual selection.
+        Background execution uses that saved category without model calls.
+        The authenticated key issuer
         or session user is initially its execution actor. Session and key tokens
         are never stored in the rule. Key grants retain a credential hash and
         recheck expiration, revocation, expenses:write, ledger binding, membership
@@ -893,11 +928,24 @@ paths:
         replays its original DTO; different input with that key conflicts.
         Creation keys remain scoped to the original creating user even if a
         later authorized edit or resume changes the saved execution actor.
+        A startOn on or before today in the schedule timezone immediately posts
+        exactly one ordinary expense dated startOn, without backfilling every
+        intervening historical period. A future startOn waits for its exact
+        date as the first occurrence; frequency selectors govern later periods.
+        nextOccurrenceOn is strictly after today, or null when no future date
+        remains. Every successful occurrence inserts a separate expense; it
+        never increases another expense's amount. Future plans stay outside
+        spent totals until their expenses have been recorded.
         Generated expenses follow the Owner's current automatic-removal policy.
         At capacity they may atomically replace the globally oldest active
         expense only when the saved actor and current original credential can
         delete that target. Expired or revoked grants never remove expenses;
-        capacity or target denial blocks the pending period without generating it.
+        Capacity failures retain the first ten unresolved frozen occurrences
+        per rule for explicit retry and advance the future schedule. English
+        email notifies the saved execution actor when a usable verified email
+        exists; otherwise Pullwise inbox is used. While ten remain unresolved,
+        later failed occurrences are discarded and do not replace older ones.
+        Authorization, target and category failures still block execution.
       parameters: [{$ref: '#/components/parameters/IdempotencyKey'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RecurringExpenseInput'}}}}
       responses:
@@ -913,6 +961,7 @@ paths:
       x-pullwise-scope: expenses:read
       security: [{cookieSession: []}, {bearerKey: []}]
       parameters: [{$ref: '#/components/parameters/WorkspaceHeader'}]
+      description: Read the authorized rule without generating expenses. nextOccurrenceOn is future-only in the schedule timezone; awaitingSync distinguishes a read-only future projection from persisted scheduled progress. Retained capacity failures appear separately in pendingOccurrences.
       responses:
         '200': {description: Authorized rule, content: {application/json: {schema: {$ref: '#/components/schemas/RecurringExpenseRule'}}}}
         '404': {$ref: '#/components/responses/NotFound'}
@@ -921,19 +970,33 @@ paths:
       x-pullwise-scope: expenses:write
       security: [{cookieSession: []}, {bearerKey: []}]
       description: |
-        Pause or resume with a status-only body, or replace the complete
-        template and calendar. The target is immutable. A complete edit or
+        Pause or resume with a status-only body, replace the complete
+        template and calendar, or manually post one retained occurrence with
+        a retryPeriodKey-only body. All forms require the current If-Match.
+        The target is immutable. A complete edit or
         explicit resume rechecks the current actor's write and project
         access, then makes that actor the saved execution actor and adopts the
         credential used for that write. A session edit/resume removes an old key
         grant; a key edit/resume binds the automation to that key. The original
         creation key and replay response remain immutable.
+        A complete edit may omit categoryId for the same gated Jev automatic
+        classification as create. An explicit category is never changed, and
+        CATEGORY_REQUIRED leaves the saved rule unchanged and preserves input.
         Canceled rules cannot resume. Changes affect future occurrences only;
         after an edit/resume the next occurrence is strictly after the current
         date in the rule's timezone. Pausing remains available when commercial
         write allowances are exhausted, with all role and revision guards.
+        A retry uses the retained occurrence's frozen date, amount, currency,
+        purpose and category, together with current actor, target, category,
+        capacity and credential authorization. Success atomically creates one
+        independent expense and immutable period identity, removes that pending
+        occurrence, and returns the updated rule. It never merges amounts or
+        changes the future schedule. Failed retries retain the occurrence.
+        A settled period retried with the current revision returns the rule
+        without another expense; a stale revision still returns 412. Canceled
+        rules reject historical retries with 409.
       parameters: [{$ref: '#/components/parameters/IfMatch'}, {$ref: '#/components/parameters/WorkspaceHeader'}]
-      requestBody: {required: true, content: {application/json: {schema: {oneOf: [{$ref: '#/components/schemas/RecurringExpenseInput'}, {type: object, additionalProperties: false, required: [status], properties: {status: {type: string, enum: [active, paused]}}}]}}}}
+      requestBody: {required: true, content: {application/json: {schema: {oneOf: [{$ref: '#/components/schemas/RecurringExpenseInput'}, {$ref: '#/components/schemas/RecurringExpenseRetryInput'}, {type: object, additionalProperties: false, required: [status], properties: {status: {type: string, enum: [active, paused]}}}]}}}}
       responses:
         '200': {description: Updated rule, content: {application/json: {schema: {$ref: '#/components/schemas/RecurringExpenseRule'}}}}
         '403': {$ref: '#/components/responses/Forbidden'}
@@ -1076,7 +1139,7 @@ components:
     NotFound: {description: Resource absent or outside the authorized ledger, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
     Conflict: {description: Idempotency conflict or a quota window changed; reload before retrying, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
     PreconditionFailed: {description: Revision does not match If-Match, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
-    InvalidInput: {description: Invalid or missing field. CATEGORY_REQUIRED on create or edit may include top-level assistance when eligible Pro or Max inference is unavailable or cannot confidently select an existing active category. No expense is created or updated in that case., content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    InvalidInput: {description: Invalid or missing field. CATEGORY_REQUIRED on ordinary expense or recurring rule create or complete edit may include top-level assistance when eligible Pro or Max inference is unavailable or cannot confidently select an existing active category. No expense or rule is created or updated in that case., content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
     RateLimited: {description: Runtime request rate or ledger owner write allowance exhausted. Jev budget exhaustion falls back to manual completion for ordinary expense writes and does not block a write with an explicit category., content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   schemas:
     BillingPage:
@@ -1629,12 +1692,16 @@ components:
         February 29 therefore becomes February 28 in a nonleap year.
         The occurrence becomes due at local midnight or the first valid
         instant after a timezone gap. Start and optional end dates are
-        inclusive. Each period posts once; delayed dispatch catches up under
-        a bounded hourly tick without charging a card or polling the client.
+        inclusive. On creation, startOn on or before today in this timezone
+        records exactly one initial expense on startOn; a future start waits for
+        the exact startOn date even when its frequency selector differs.
+        Intervening historical periods are not backfilled on creation. Each
+        future due period creates its own expense; delayed dispatch catches up
+        under a bounded hourly tick without charging a card or polling the client.
       properties:
         frequency: {type: string, enum: [weekly, monthly, quarterly, yearly]}
         timezone: {type: string, minLength: 1, maxLength: 100, description: "Valid IANA zone available to the runtime, for example Asia/Shanghai or UTC"}
-        startOn: {type: string, format: date}
+        startOn: {type: string, format: date, description: "On or before local today records one initial expense dated startOn; a future date waits for scheduled posting"}
         endOn: {type: [string, 'null'], format: date, description: Inclusive last eligible business date; must be on or after startOn}
         weekday: {type: integer, minimum: 1, maximum: 7}
         day: {type: integer, minimum: 1, maximum: 31}
@@ -1651,12 +1718,12 @@ components:
           then: {required: [day, month], not: {anyOf: [{required: [weekday]}, {required: [quarterMonth]}]}}
     RecurringExpenseFields:
       type: object
-      required: [target, amount, currency, categoryId, purpose, schedule]
+      required: [target, amount, currency, purpose, schedule]
       properties:
         target: {$ref: '#/components/schemas/Target'}
         amount: {type: string, pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$', description: Same currency-exponent and integer bounds as an ordinary expense}
         currency: {$ref: '#/components/schemas/CurrencyCode'}
-        categoryId: {type: string, minLength: 1, description: Explicit existing active category; no automatic model selection during background execution}
+        categoryId: {type: [string, 'null'], description: "Required for a Free ledger or unavailable Jev. Omit on create or complete edit for gated automatic classification, like ordinary expenses. Only a confident existing active category is saved; an explicit category is never changed. CATEGORY_REQUIRED preserves the draft. Background execution uses the saved category without model calls."}
         purpose: {type: string, minLength: 1, maxLength: 500}
         note: {type: [string, 'null'], maxLength: 4000}
         quantity: {type: [string, 'null'], maxLength: 40, pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$'}
@@ -1665,18 +1732,42 @@ components:
     RecurringExpenseInput:
       allOf: [{$ref: '#/components/schemas/RecurringExpenseFields'}]
       unevaluatedProperties: false
+    RecurringExpenseRetryInput:
+      type: object
+      additionalProperties: false
+      required: [retryPeriodKey]
+      properties:
+        retryPeriodKey: {type: string, minLength: 1, maxLength: 40, description: Exact periodKey from a retained pendingOccurrences item, examples: [M2026-09]}
+    RecurringExpensePendingOccurrence:
+      type: object
+      additionalProperties: false
+      required: [periodKey, scheduledOn, amount, currency, purpose, categoryId, blockedCode, createdAt]
+      description: Frozen historical values from a capacity failure. Editing the rule affects future expenses and never changes these retained values. At most ten unresolved occurrences are retained per rule; later failures are discarded until space is available.
+      properties:
+        periodKey: {type: string, minLength: 1, maxLength: 40}
+        scheduledOn: {type: string, format: date}
+        amount: {type: string, pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$'}
+        currency: {$ref: '#/components/schemas/CurrencyCode'}
+        purpose: {type: string, minLength: 1, maxLength: 500}
+        categoryId: {type: string, minLength: 1}
+        blockedCode: {type: string, enum: [RECORD_LIMIT, RETENTION_CLEANUP_REQUIRED, RETENTION_TARGET_FORBIDDEN]}
+        createdAt: {type: string, format: date-time}
     RecurringExpenseRule:
       allOf:
         - {$ref: '#/components/schemas/RecurringExpenseFields'}
         - type: object
-          required: [id, status, revision, nextOccurrenceOn, nextRunAt, blockedCode, createdAt, updatedAt]
+          required: [id, categoryId, status, revision, nextOccurrenceOn, nextRunAt, blockedCode, pendingOccurrences, awaitingSync, createdAt, updatedAt]
           properties:
             id: {type: string}
+            categoryId: {type: string, minLength: 1, description: Saved active category selected explicitly or confidently by Jev at create or complete edit}
             status: {type: string, enum: [active, paused, blocked, completed, canceled]}
             revision: {type: integer, minimum: 1, maximum: 9007199254740991}
-            nextOccurrenceOn: {type: [string, 'null'], format: date}
-            nextRunAt: {type: [integer, 'null'], minimum: 0, maximum: 9007199254740991, description: UTC epoch seconds for the next due occurrence}
+            nextOccurrenceOn: {type: [string, 'null'], format: date, description: "Future business date strictly after today in the schedule timezone, or null when none remains. Historical capacity failures are separate pendingOccurrences."}
+            nextRunAt: {type: [integer, 'null'], minimum: 0, maximum: 9007199254740991, description: UTC epoch seconds for the same future occurrence as nextOccurrenceOn; both values are projected together when awaitingSync is true}
             blockedCode: {type: [string, 'null'], maxLength: 80, description: "Current authorization, target, category or plan stop reason; blocked rules do not keep executing automatically"}
+            pendingOccurrences: {type: array, maxItems: 10, items: {$ref: '#/components/schemas/RecurringExpensePendingOccurrence'}}
+            awaitingSync: {type: boolean, description: "An active rule's stored due pointer awaits scheduled synchronization; GET only projects future dates and never creates expenses or repairs state."}
+            assistance: {$ref: '#/components/schemas/ExpenseAssistance'}
             createdAt: {type: string, format: date-time}
             updatedAt: {type: string, format: date-time}
     RecurringExpensePage:
@@ -1685,6 +1776,31 @@ components:
       properties:
         items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/RecurringExpenseRule'}}
         nextCursor: {type: [string, 'null']}
+    RecurringExpenseNotification:
+      type: object
+      additionalProperties: false
+      required: [id, ruleId, periodKey, scheduledOn, workspaceId, workspaceName, target, amount, currency, failedCode, createdAt, purpose]
+      description: Actionable retained failure for the current saved recipient; target and expense values are frozen at the failed occurrence.
+      properties:
+        id: {type: string, description: Rule ID and period key joined by a colon}
+        ruleId: {type: string}
+        periodKey: {type: string, minLength: 1, maxLength: 40}
+        scheduledOn: {type: string, format: date}
+        workspaceId: {type: string}
+        workspaceName: {type: string}
+        target: {$ref: '#/components/schemas/Target'}
+        amount: {type: string, pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$'}
+        currency: {$ref: '#/components/schemas/CurrencyCode'}
+        failedCode: {type: string, enum: [RECORD_LIMIT, RETENTION_CLEANUP_REQUIRED, RETENTION_TARGET_FORBIDDEN]}
+        createdAt: {type: string, format: date-time}
+        purpose: {type: string, minLength: 1, maxLength: 500}
+    RecurringExpenseNotificationPage:
+      type: object
+      additionalProperties: false
+      required: [items, hasMore]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/RecurringExpenseNotification'}}
+        hasMore: {type: boolean}
     ExpensePatchInput:
       allOf:
         - {$ref: '#/components/schemas/ExpenseInput'}

@@ -56,7 +56,7 @@ def test_key_rule_nullable_consumed_period_survives_key_and_cookie_adoption(app,
     assert status == 201
     original_grant = grant(app)
     assert original_grant and "_api_key_hash" not in json.dumps(rule)
-    assert app.tick() == {"scanned": 1, "created": 1, "blocked": 0, "replayed": 0}
+    assert app.tick() == {"scanned": 0, "created": 0, "blocked": 0, "replayed": 0}
     expense, occurrence = app.rows("expenses")[0], app.rows("expense_recurring_occurrences")[0]
     move = {**{name: value for name, value in body.items() if name != "schedule"},
             "target": {"kind": "project", "projectId": "prj_1"},
@@ -112,7 +112,7 @@ def test_key_rule_category_tombstone_blocks_then_replacement_adopts_revocable_me
     owner_key = api_auth(app, scopes=["expenses:read", "expenses:write", "categories:read", "categories:write"])
     editor_key = api_auth(app, actor="editor", suffix="replacement")
     body = draft(schedule={"frequency": "monthly", "day": 1,
-        "timezone": "UTC", "startOn": "2026-10-01"})
+        "timezone": "UTC", "startOn": "2026-10-09"})
     status, rule = rule_call(app, "POST", body=body, headers=owner_key)
     assert status == 201
     original = stored_rule(app)
@@ -126,7 +126,7 @@ def test_key_rule_category_tombstone_blocks_then_replacement_adopts_revocable_me
     status, labels = route(app, "GET", "/api/v1/categories", owner_key,
                            params={"includeRemoved": "true"})
     assert status == 200 and labels[0]["id"] == "cat_1" and labels[0]["removedAt"]
-    assert app.tick() == {"scanned": 1, "created": 0, "blocked": 1, "replayed": 0}
+    assert app.tick(now=day(10, 9)) == {"scanned": 1, "created": 0, "blocked": 1, "replayed": 0}
     blocked = stored_rule(app)
     assert blocked["blocked_code"] == "INVALID_CATEGORY"
     assert blocked["next_occurrence_on"] == original["next_occurrence_on"] and grant(app) == original_grant

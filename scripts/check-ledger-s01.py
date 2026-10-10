@@ -163,7 +163,7 @@ def validate_contract() -> None:
             database.executescript(path.read_text(encoding="utf-8"))
         required = {"ledger_projects", "expenses", "expense_events", "app_state",
                     "api_keys", "billing_webhook_receipts", "billing_public_catalog", "ledger_plan_usage",
-                    "expense_recurring_rules", "expense_recurring_occurrences", "ledger_activity_events"}
+                    "expense_recurring_rules", "expense_recurring_occurrences", "expense_recurring_pending", "ledger_activity_events"}
         actual = {row[0] for row in database.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if not required <= actual:
             raise ValueError("ledger runtime migration tables are missing")
@@ -173,8 +173,8 @@ def validate_contract() -> None:
         from pullwise_server.cloudflare_preview_schema import (
             SCHEMA_VERSION, SCHEMA_SQL, SCHEMA_OBJECTS, SCHEMA_FINGERPRINT, MIGRATIONS,
         )
-        if SCHEMA_VERSION != 11 or len(SCHEMA_SQL) > 64:
-            raise ValueError("business erasure schema authority or fresh batch bound is invalid")
+        if SCHEMA_VERSION != 12 or len(SCHEMA_SQL) > 64:
+            raise ValueError("recurring recovery schema authority or fresh batch bound is invalid")
         def objects(connection):
             return tuple((kind, name, table, " ".join(sql.split()) if sql else None)
                          for kind, name, table, sql in connection.execute(
@@ -182,7 +182,7 @@ def validate_contract() -> None:
         canonical = objects(database)
         if canonical != SCHEMA_OBJECTS or hashlib.sha256(json.dumps(
                 canonical, separators=(",", ":")).encode()).hexdigest() != SCHEMA_FINGERPRINT:
-            raise ValueError("canonical migrations and business erasure schema authority disagree")
+            raise ValueError("canonical migrations and recurring recovery schema authority disagree")
         declared = {item["name"]: item["sha256"] for item in MIGRATIONS}
         if declared != {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in migrations}:
             raise ValueError("canonical migration hashes disagree with packaged authority")
@@ -190,7 +190,7 @@ def validate_contract() -> None:
             for sql in SCHEMA_SQL:
                 compiled.execute(sql)
             if objects(compiled) != canonical:
-                raise ValueError("fresh business erasure schema differs from canonical migrations")
+                raise ValueError("fresh recurring recovery schema differs from canonical migrations")
 
 
 def main() -> int:

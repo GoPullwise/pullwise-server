@@ -198,7 +198,12 @@ def test_scheduled_replacement_and_removed_occurrence_replay_never_create_again(
     app.policy["pro"]["records"] = 1
     old = create(app, expense(date="2026-08-01"), key="old")
     assert preference(app, enabled=True, revision=1)[0] == 200
-    status, rule = app.call("POST", body=draft(start="2026-09-01"))
+    status, rule = app.call("POST", body=draft(start="2026-11-01"))
+    assert status == 201
+    # Reproduce a persisted pre-release due pointer without posting at save.
+    with app.store._immediate() as db:
+        db.execute("UPDATE expense_recurring_rules SET schedule_json=?,next_occurrence_on='2026-09-30',next_period_key='M2026-09',next_run_at=0 WHERE id=?",
+            (json.dumps(draft(start="2026-09-01")["schedule"]), rule["id"]))
     assert status == 201
     pre = app.rows("expense_recurring_rules")[0]
     writes = app.rows("ledger_plan_usage")[0]["writes"]

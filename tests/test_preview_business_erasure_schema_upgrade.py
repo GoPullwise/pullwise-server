@@ -10,8 +10,9 @@ from pathlib import Path
 import pytest
 
 from pullwise_server.cloudflare_preview_schema import (
-    INDEX_COUNTS, MIGRATIONS, PRIMARY_KEYS, SCHEMA_FINGERPRINT, SCHEMA_OBJECTS,
-    SCHEMA_SQL, SCHEMA_VERSION, UPGRADE_V11_SQL, V10_INDEX_COUNTS,
+    V11_INDEX_COUNTS as INDEX_COUNTS, V11_MIGRATIONS as MIGRATIONS, V11_PRIMARY_KEYS as PRIMARY_KEYS,
+    V11_SCHEMA_FINGERPRINT as SCHEMA_FINGERPRINT, V11_SCHEMA_OBJECTS as SCHEMA_OBJECTS,
+    V11_SCHEMA_SQL as SCHEMA_SQL, V11_SCHEMA_VERSION as SCHEMA_VERSION, UPGRADE_V11_SQL, V10_INDEX_COUNTS,
     V10_SCHEMA_FINGERPRINT, V10_SCHEMA_OBJECTS, V10_SCHEMA_SQL, V10_SCHEMA_VERSION,
 )
 from pullwise_server.cloudflare_preview_budget import (
@@ -195,9 +196,9 @@ def test_metered_upgrade_retains_business_identity_markers_counters_and_restarts
     run_upgrade(raw, restarted)
     assert raw.calls == 4 and restarted.snapshot() == after
     ticket = restarted.begin_product(now=13)
-    meter = ProductMeteredD1(raw, restarted, ticket, clock=lambda: 14)
-    asyncio.run(meter.ensure_cardinality())
-    assert raw.calls == 4 and meter.records_integrity_verified is True
+    with pytest.raises(BudgetError, match="SCHEMA_UPGRADE_REQUIRED"):
+        ProductMeteredD1(raw, restarted, ticket, clock=lambda: 14)
+    assert raw.calls == 4
     restarted.finish(ticket, now=15)
 
 
@@ -486,7 +487,8 @@ def test_replay_index_bounds_incoming_expense_fk_probe_and_preserves_primary_key
 
 
 def test_fresh_schema_canonical_migrations_fingerprint_and_frozen_v10_authority_agree():
-    migrations = sorted((ROOT / "cloudflare/server/migrations").glob("*.sql"))
+    migrations = [path for path in sorted((ROOT / "cloudflare/server/migrations").glob("*.sql"))
+                  if int(path.name[:4]) <= 11]
     assert migrations[-1].name == "0011_business_erasure.sql"
     assert SCHEMA_VERSION == 11 and V10_SCHEMA_VERSION == 10
     assert V10_SCHEMA_FINGERPRINT == "4bee32e1b140db6ae7f36f24874f33ec059b15ba5707074a950d597405f07f4e"

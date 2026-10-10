@@ -254,7 +254,7 @@ def test_paid_edit_exhaustion_preserves_automatic_draft_and_allows_explicit_save
     assert updated["assistance"]["categorySource"] == "user" and provider.calls == []
 
 
-def test_expense_edit_contract_and_recurring_inputs_keep_distinct_category_rules():
+def test_expense_and_recurring_save_contracts_share_optional_automatic_category():
     contract = yaml.safe_load((Path(__file__).resolve().parents[1] / "openapi/ledger-v1.yaml").read_text())
     schemas = contract["components"]["schemas"]
     patch = schemas["ExpensePatchInput"]
@@ -262,5 +262,5 @@ def test_expense_edit_contract_and_recurring_inputs_keep_distinct_category_rules
     assert schemas["ExpenseInput"]["allOf"] == [{"$ref": "#/components/schemas/ExpenseFields"}]
     assert schemas["ExpenseInput"]["unevaluatedProperties"] is False
     assert "categoryId" not in schemas["ExpenseFields"]["required"]
-    assert "categoryId" in schemas["RecurringExpenseFields"]["required"]
+    assert "categoryId" not in schemas["RecurringExpenseFields"]["required"]
     assert "explicit" in schemas["RecurringExpenseFields"]["properties"]["categoryId"]["description"].lower()
