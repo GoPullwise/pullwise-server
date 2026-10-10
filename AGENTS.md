@@ -1,5 +1,43 @@
 # Pullwise Server
 
+## Recurring expense posting and recovery (2026-10-10)
+
+The user requests completion, both main pushes and Cloudflare publication of
+this recurring release before starting pagination work. Project and Shared pool
+recurring creation share ordinary expenses' optional Jev category assistance:
+An eligible paid plan, current activation and budget remain required; explicit categories remain
+unchanged and an uncertain/unavailable result requires manual category selection.
+
+A start date on or before the rule's local today records exactly one already
+incurred expense at that start date. Future starts create only a plan. Every
+later occurrence creates its own dated expense row, never adds to an existing
+amount. Project/shared financial records and future plans remain distinct in
+Web layout. GET projects the next future date without writing; execution retains
+calendar period identity, bounded existing catch-up and current actor/member/key,
+Owner/category/project/capacity fences.
+
+At full capacity, disabled oldest-expense removal preserves a frozen failed
+occurrence for manual retry and advances the future plan. Retain at most ten
+unresolved failures per rule, enforced by the atomic application guard and v12
+schema triggers. Keep the first ten until resolved; later full failures advance
+without adding a retained record or notification. A linked verified recipient
+email receives English-only copy; unavailable/failed delivery falls back to the
+recipient's private Pullwise inbox. Delivery claims are durable and never retried
+implicitly. Retry creates one ordinary historical expense and removes only the
+successful pending row; failure keeps it. Notifications/recovery reads preserve
+current membership and target access without exposing key grants.
+
+Migration 0012/v12 adds the pending child table without rewriting financial or
+identity rows. Preserve the original preview DB, singleton namespace/journal,
+prior markers, counters and hourly schedule; production D1 and production cron
+remain paused. Local native schema/accounting acceptance precedes one eligible
+ordinary preview health request through the flagged, pre-reserved upgrade path.
+Never use remote synthetic users, forced ticks, polling, reset or an unknown
+outcome retry. Keep enabled product accounting mode and all current native,
+commercial and input bounds; historical finite-test ceilings do not gate normal
+product use. Current evidence and the exact upgrade reservation are recorded in
+`docs/validation/local-acceptance.md`.
+
 ## Automatic GitHub credential renewal (2026-10-10)
 
 The user explicitly requests automatic renewal of expiring GitHub authorization.

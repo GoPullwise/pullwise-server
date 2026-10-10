@@ -9,8 +9,8 @@
   "fixtureClockStart": 1791547200,
   "fixtureClockAdvanceSeconds": 31968000,
   "canonicalApplicationEntrySha256": "e260ad128e52cffc9524bbc37591e806ccfed984fd9e6f5d29cb6d2578c9bb4e",
-  "canonicalSourceTreeSha256": "7ecbd5f7ddcb1d276f831bbc94a2f31b3b96c7dae77ff37d06faa75622a4586c",
-  "canonicalSourceFileCount": 62,
+  "canonicalSourceTreeSha256": "b6753b9236692855997e44c95adc118f30a3d164ab736638b7d264a11cdaea88",
+  "canonicalSourceFileCount": 63,
   "fixtureEntrySha256": "cc205bb61dca23d2ebf46dae42a55dfbd1a61f22a37d8c30618ffc9c6634c557",
   "sourceSha256": {
     "pullwise_server/__init__.py": "7d9d0b0ef2d8bc885aec331e6917279945ef9cad3f7647c50f965b584996c5e0",
@@ -34,18 +34,19 @@
     "pullwise_server/cloudflare_email_auth.py": "e34f2df3603e34d15af1f4c590e28fb17f9cf2e67d871987e93513fbffa655a8",
     "pullwise_server/cloudflare_email_gateway.py": "0e4ed6a9da10b569d0b30d7a4c405c791b8ad419a6a94b0145716be72bf070bb",
     "pullwise_server/cloudflare_expense_retention.py": "858b4de7ef4f7aad87048e39f212d96b2c13e78dcd337b85cf902be4693fdb9b",
-    "pullwise_server/cloudflare_github_gateway.py": "7576d95b0ad933df92b8c80657a22511bbbb11ddf755e7576a845869237dd55b",
-    "pullwise_server/cloudflare_github_identity_http.py": "d9f84a806c1e4fbc736790c18547694bbfed5b1cabea198b48c9ac8e3683f5e3",
+    "pullwise_server/cloudflare_github_gateway.py": "39bbf035e1247fb8bbfdb748874d720dc130f7065786dc0ace84b7d4eb3837a8",
+    "pullwise_server/cloudflare_github_identity_http.py": "44a85d1a7c4e0b76b8627dfae3595869c735627fb7aa5875d07878b0653a4751",
+    "pullwise_server/cloudflare_github_refresh.py": "44fb113c1a9e65795ae7f6832cd1f5b57568bf891a098ecfaabf8c399d1741d7",
     "pullwise_server/cloudflare_http_contract.py": "989f55c97cd680dfdcd5c23a901ced1b2f5972f359b32a9989711167a67109a1",
     "pullwise_server/cloudflare_jev_gateway.py": "5233cff0ab7bdfff2e2ca941c0ddb4c3c54a68b3ae6de202c7482243903ceffc",
     "pullwise_server/cloudflare_jev_preferences.py": "0ae8780db2dec9757ced98609ff07a284279a4ccc90e4c51318e786705ac67c3",
     "pullwise_server/cloudflare_ledger_activity.py": "4d7594c2f0ef646ac82130f7abee46628ee4bcc86417d4581250404d0e754683",
-    "pullwise_server/cloudflare_ledger_api.py": "7b42f2efc665e987ef5ff36784d8db281f108d9a5db2efa72d2add2fa38e9d72",
+    "pullwise_server/cloudflare_ledger_api.py": "f47ae0287f67571a24b6dc85ed324c9864d0ca4084df57e88a20d6dbf56f2a10",
     "pullwise_server/cloudflare_ledger_auth.py": "7afcbc716e448053e7b2adb14e6dbf3d7d8ea23e757c3509645cccd131a3686e",
     "pullwise_server/cloudflare_ledger_categories.py": "3b768281db66faf909a24e51495db62ca9df3fe8c8947025f6df41f3c76e5019",
     "pullwise_server/cloudflare_ledger_expenses.py": "e29ac29c936cd7ee0415f3a602167c721080fdae437d33980adfe0c3a89f4e8d",
     "pullwise_server/cloudflare_ledger_profile.py": "f3a38f56746431bed7050f2c589d8de78f446fba5aac68bfc080bbccf5b81db7",
-    "pullwise_server/cloudflare_ledger_recurring.py": "92cbe4f7ca5a923953cc68a25842fe381a9ae8995596ddfecd8e65d2063d7a07",
+    "pullwise_server/cloudflare_ledger_recurring.py": "2477a9d210935529cd5e0d92772e77a3ff00ec38645c7ee50c163cdaf313edfb",
     "pullwise_server/cloudflare_ledger_reports.py": "ae7119ce1754c938b5685083f85deab9206f8593c0acbf942fa848d66bcc3890",
     "pullwise_server/cloudflare_ledger_review.py": "42b4f2dbaaba1e58c6a924e154eb01e1d8ae3a7ceddc662481aef1aebcb8c701",
     "pullwise_server/cloudflare_ledger_suggestions.py": "8d8d4e2b2eed47b6e2071754fbf103db3d4ce4e47fbf5e313b0ae668c0d5516b",
@@ -58,7 +59,7 @@
     "pullwise_server/cloudflare_preview_schema.py": "429315695f58e30ed301f9fcf2a3acd64d91b08166c9b7e03cea3227943ec4a0",
     "pullwise_server/cloudflare_principal.py": "d1a8c4c985c11b83f10b3493a07ba9bdd52e637a904a43f7b94db1fae93033fb",
     "pullwise_server/cloudflare_project_erasure.py": "6cd90f4fd4e8c1e6e3d5240895aed13ca56e172f3e41dc59d6279f6399029b8d",
-    "pullwise_server/cloudflare_project_repositories.py": "55da5ea7c8712cc6c42ea40dcce4673fa951c0ae923183bf6b6f407a48d57dff",
+    "pullwise_server/cloudflare_project_repositories.py": "a7310b6721e6976d8424b904a1f0d90c8e52c0ba6ddbf3f1b3e1fd4601cfbf78",
     "pullwise_server/cloudflare_recurring_assistance.py": "8571f43be0aefb45423e6b8f0aa3e969c93165aed36306703749341993537bf3",
     "pullwise_server/cloudflare_recurring_notifications.py": "3b7b41888326701fd0b933fa927b91fc977900bbeb333af0742942277bbb222a",
     "pullwise_server/cloudflare_session_adapter.py": "0043a42082eb45f280782adea7d52a5a85eda597c6cf16af62277a54db3ca79d",
@@ -72,7 +73,7 @@
     "pullwise_server/json_input.py": "3f5699b1eef9ef6a6119edaf735eadb3cee40fbc863982262c5dede1fbc704b8",
     "pullwise_server/ledger_money_totals.py": "552c26b9c14343336f9e858488552e05ce1bd90345e3d2f10422c14634124de1",
     "pullwise_server/ledger_plan_policy.py": "1e515b756600c917e27cf3a7a7ba8a51d2d6ce0cdc689bb1bdfbe95d7b7c3e38",
-    "pullwise_server/ledger_recurrence_calendar.py": "d6b7fc709a29dc8133aa12f96f8cebf117511d1d10a7decc2f1034d0f32e2ccf",
+    "pullwise_server/ledger_recurrence_calendar.py": "21e33ed0fe7c92de453a8839dece749b2a964b0226ef182915843b859234af41",
     "pullwise_server/preview_plan_grants.py": "b6afbdbb860ffdba7a3b71732a8ba1376ad9a62b36ba4684974ac2ec895859db",
     "pullwise_server/typesafe_client.py": "7a18ee3bd21267e6e18b751902ea55561e6074c7c6d9968fff7d173015e7d903"
   },
@@ -129,7 +130,7 @@
       "path": "/api/v1/expense-recurring-rules",
       "status": 201,
       "result": {
-        "id": "rec_1bc001e053c9441087c70ffbbbf979d0",
+        "id": "rec_143319f0ac2e4ac99e0a6fdb7d49be51",
         "target": {
           "kind": "shared"
         },
@@ -165,7 +166,7 @@
       "path": "/api/v1/expense-recurring-rules",
       "status": 201,
       "result": {
-        "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+        "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
         "target": {
           "kind": "shared"
         },
@@ -217,7 +218,7 @@
         "categoryId": "cat_owner",
         "createdAt": "2026-10-09T12:00:00Z",
         "currency": "USD",
-        "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+        "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
         "nextOccurrenceOn": "2026-10-15",
         "nextRunAt": 1791993600,
         "note": null,
@@ -257,7 +258,7 @@
       "path": "/api/v1/expense-recurring-rules",
       "status": 201,
       "result": {
-        "id": "rec_eb2e436db37b4b30b601edb82fa60439",
+        "id": "rec_e3e97d0e3eff4aa79e0b159ffa0818cc",
         "target": {
           "kind": "shared"
         },
@@ -294,8 +295,8 @@
       "result": {
         "items": [
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be:M2026-09",
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12:M2026-09",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-09",
             "scheduledOn": "2026-09-15",
             "workspaceId": "usr_github_790001",
@@ -316,7 +317,7 @@
     {
       "name": "full_retry_preserves_pending",
       "method": "PATCH",
-      "path": "/api/v1/expense-recurring-rules/rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+      "path": "/api/v1/expense-recurring-rules/rec_2725a4e34be04af6b78de5c6ae386d12",
       "status": 403,
       "result": {
         "error": {
@@ -336,10 +337,10 @@
     {
       "name": "legacy_due_projects_future",
       "method": "GET",
-      "path": "/api/v1/expense-recurring-rules/rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+      "path": "/api/v1/expense-recurring-rules/rec_2725a4e34be04af6b78de5c6ae386d12",
       "status": 200,
       "result": {
-        "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+        "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
         "target": {
           "kind": "shared"
         },
@@ -434,10 +435,10 @@
     {
       "name": "first_ten_pending_retained",
       "method": "GET",
-      "path": "/api/v1/expense-recurring-rules/rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+      "path": "/api/v1/expense-recurring-rules/rec_2725a4e34be04af6b78de5c6ae386d12",
       "status": 200,
       "result": {
-        "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+        "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
         "target": {
           "kind": "shared"
         },
@@ -577,10 +578,10 @@
     {
       "name": "manual_retry_records_frozen_period",
       "method": "PATCH",
-      "path": "/api/v1/expense-recurring-rules/rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+      "path": "/api/v1/expense-recurring-rules/rec_2725a4e34be04af6b78de5c6ae386d12",
       "status": 200,
       "result": {
-        "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+        "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
         "target": {
           "kind": "shared"
         },
@@ -703,10 +704,10 @@
     {
       "name": "manual_retry_replay_no_extra_expense",
       "method": "PATCH",
-      "path": "/api/v1/expense-recurring-rules/rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+      "path": "/api/v1/expense-recurring-rules/rec_2725a4e34be04af6b78de5c6ae386d12",
       "status": 200,
       "result": {
-        "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+        "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
         "target": {
           "kind": "shared"
         },
@@ -839,10 +840,10 @@
     {
       "name": "retry_uses_atomic_oldest_replacement",
       "method": "PATCH",
-      "path": "/api/v1/expense-recurring-rules/rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+      "path": "/api/v1/expense-recurring-rules/rec_2725a4e34be04af6b78de5c6ae386d12",
       "status": 200,
       "result": {
-        "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+        "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
         "target": {
           "kind": "shared"
         },
@@ -960,7 +961,7 @@
       "result": {
         "items": [
           {
-            "id": "exp_c9b78c5aa4504d95822759629a3ef225",
+            "id": "exp_069c010e65bf48b2bade8dc05e747a74",
             "target": {
               "kind": "shared"
             },
@@ -978,7 +979,7 @@
             "updatedAt": "2027-10-14T12:00:00Z"
           },
           {
-            "id": "exp_f111354d44fc4bbaadd81de995752d57",
+            "id": "exp_bab42d8536f44dd981b31ecf66c48118",
             "target": {
               "kind": "shared"
             },
@@ -1007,8 +1008,8 @@
       "result": {
         "items": [
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be:M2026-11",
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12:M2026-11",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-11",
             "scheduledOn": "2026-11-15",
             "workspaceId": "usr_github_790001",
@@ -1023,8 +1024,8 @@
             "createdAt": "2027-10-14T12:00:00Z"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be:M2026-12",
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12:M2026-12",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-12",
             "scheduledOn": "2026-12-15",
             "workspaceId": "usr_github_790001",
@@ -1039,8 +1040,8 @@
             "createdAt": "2027-10-14T12:00:00Z"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be:M2027-01",
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12:M2027-01",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-01",
             "scheduledOn": "2027-01-15",
             "workspaceId": "usr_github_790001",
@@ -1055,8 +1056,8 @@
             "createdAt": "2027-10-14T12:00:00Z"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be:M2027-02",
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12:M2027-02",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-02",
             "scheduledOn": "2027-02-15",
             "workspaceId": "usr_github_790001",
@@ -1071,8 +1072,8 @@
             "createdAt": "2027-10-14T12:00:00Z"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be:M2027-03",
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12:M2027-03",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-03",
             "scheduledOn": "2027-03-15",
             "workspaceId": "usr_github_790001",
@@ -1087,8 +1088,8 @@
             "createdAt": "2027-10-14T12:00:00Z"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be:M2027-04",
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12:M2027-04",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-04",
             "scheduledOn": "2027-04-15",
             "workspaceId": "usr_github_790001",
@@ -1103,8 +1104,8 @@
             "createdAt": "2027-10-14T12:00:00Z"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be:M2027-05",
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12:M2027-05",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-05",
             "scheduledOn": "2027-05-15",
             "workspaceId": "usr_github_790001",
@@ -1119,8 +1120,8 @@
             "createdAt": "2027-10-14T12:00:00Z"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be:M2027-06",
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12:M2027-06",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-06",
             "scheduledOn": "2027-06-15",
             "workspaceId": "usr_github_790001",
@@ -1153,7 +1154,7 @@
           "requests": 21,
           "reserved_read": 46685,
           "reserved_written": 839,
-          "actual_read": 3019,
+          "actual_read": 3028,
           "actual_written": 495
         }
       }
@@ -1573,11 +1574,11 @@
           },
           "expenses": {
             "rows": 3,
-            "sha256": "1cb6666511a41a3286b83e4a975c077407abc6d5c04941892d5112f342554859"
+            "sha256": "3f2c096e812ef869692e0bc25081e2ed8200f75434f92a52f33e6154a45c41a7"
           },
           "expense_events": {
             "rows": 1,
-            "sha256": "aac26ed5bd3bfeab774db34d82bcf715bff5149bb9b9754b5e0c53c673818d47"
+            "sha256": "12ff87e30f197fbe23a1b4ce09774ad0c11c3942386ed49a90e87af3a68e7f29"
           },
           "expense_create_idempotency": {
             "rows": 0,
@@ -1585,11 +1586,11 @@
           },
           "expense_recurring_rules": {
             "rows": 1,
-            "sha256": "a6ec351349283b5b895713fd25cda6b3b0807487f77bf519ad21224e713e1aae"
+            "sha256": "910582e9b561ab7a9a9242b191f00523e4ce25d1f2296196deb235c735c9354b"
           },
           "expense_recurring_occurrences": {
             "rows": 1,
-            "sha256": "76c006b0195351670a2264738c7e82c72a46e1d6405998e5b8f83192da6577d0"
+            "sha256": "67f8b491e35d206d56c74df2822b49e7b7850a9df3d4fa75fd6b0de2f39f0891"
           },
           "expense_recurring_pending": {
             "rows": 0,
@@ -1597,7 +1598,7 @@
           },
           "ledger_activity_events": {
             "rows": 2,
-            "sha256": "a27680d19a5ec9e60faa1f278d6f26616b5c6b9b173f67f05cc3781a5383bded"
+            "sha256": "577c6fb513387f8a2a5fc2a8561844c446cf8eb4164cc1edfffea3201a04cc4a"
           },
           "ledger_projects": {
             "rows": 0,
@@ -1645,7 +1646,7 @@
             "deleted": false
           },
           {
-            "id": "exp_f111354d44fc4bbaadd81de995752d57",
+            "id": "exp_bab42d8536f44dd981b31ecf66c48118",
             "owner": "usr_github_790002",
             "date": "2026-09-15",
             "amountMinor": 1234,
@@ -1654,7 +1655,7 @@
         ],
         "rules": [
           {
-            "id": "rec_1bc001e053c9441087c70ffbbbf979d0",
+            "id": "rec_143319f0ac2e4ac99e0a6fdb7d49be51",
             "nextDate": "2027-09-15",
             "status": "active"
           }
@@ -1888,11 +1889,11 @@
           },
           "expenses": {
             "rows": 3,
-            "sha256": "1cb6666511a41a3286b83e4a975c077407abc6d5c04941892d5112f342554859"
+            "sha256": "3f2c096e812ef869692e0bc25081e2ed8200f75434f92a52f33e6154a45c41a7"
           },
           "expense_events": {
             "rows": 1,
-            "sha256": "aac26ed5bd3bfeab774db34d82bcf715bff5149bb9b9754b5e0c53c673818d47"
+            "sha256": "12ff87e30f197fbe23a1b4ce09774ad0c11c3942386ed49a90e87af3a68e7f29"
           },
           "expense_create_idempotency": {
             "rows": 0,
@@ -1900,19 +1901,19 @@
           },
           "expense_recurring_rules": {
             "rows": 2,
-            "sha256": "5c4ec5033671607db1312364d37ef2fec71224bb9551eabb64f7b7ae6170f138"
+            "sha256": "5b5a021880bb103c05aa82d5ea12b63454598157fede85aa28130d3eb8e572ab"
           },
           "expense_recurring_occurrences": {
             "rows": 1,
-            "sha256": "76c006b0195351670a2264738c7e82c72a46e1d6405998e5b8f83192da6577d0"
+            "sha256": "67f8b491e35d206d56c74df2822b49e7b7850a9df3d4fa75fd6b0de2f39f0891"
           },
           "expense_recurring_pending": {
             "rows": 1,
-            "sha256": "5b560beb73712cd893547f7f566f3b8db32cc7393fcc4072b81224e3e199f50c"
+            "sha256": "81ae54612bf17932f1f32ca03e23435f6ce2a6383121addeb6d361a89f4f0a6a"
           },
           "ledger_activity_events": {
             "rows": 3,
-            "sha256": "442e7647cc2aaa8f4d604c724af992bd38434d735166604d210718bbf283d4be"
+            "sha256": "3fd4120652da906bd9d26df65e970e2a46805d135c721a17edef837dd64d235c"
           },
           "ledger_projects": {
             "rows": 0,
@@ -1945,7 +1946,7 @@
         },
         "pending": [
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-09",
             "date": "2026-09-15",
             "notificationState": "inbox"
@@ -1967,7 +1968,7 @@
             "deleted": false
           },
           {
-            "id": "exp_f111354d44fc4bbaadd81de995752d57",
+            "id": "exp_bab42d8536f44dd981b31ecf66c48118",
             "owner": "usr_github_790002",
             "date": "2026-09-15",
             "amountMinor": 1234,
@@ -1976,12 +1977,12 @@
         ],
         "rules": [
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "nextDate": "2026-10-15",
             "status": "active"
           },
           {
-            "id": "rec_1bc001e053c9441087c70ffbbbf979d0",
+            "id": "rec_143319f0ac2e4ac99e0a6fdb7d49be51",
             "nextDate": "2027-09-15",
             "status": "active"
           }
@@ -2071,11 +2072,11 @@
           },
           "expenses": {
             "rows": 3,
-            "sha256": "1cb6666511a41a3286b83e4a975c077407abc6d5c04941892d5112f342554859"
+            "sha256": "3f2c096e812ef869692e0bc25081e2ed8200f75434f92a52f33e6154a45c41a7"
           },
           "expense_events": {
             "rows": 1,
-            "sha256": "aac26ed5bd3bfeab774db34d82bcf715bff5149bb9b9754b5e0c53c673818d47"
+            "sha256": "12ff87e30f197fbe23a1b4ce09774ad0c11c3942386ed49a90e87af3a68e7f29"
           },
           "expense_create_idempotency": {
             "rows": 0,
@@ -2083,19 +2084,19 @@
           },
           "expense_recurring_rules": {
             "rows": 2,
-            "sha256": "5c4ec5033671607db1312364d37ef2fec71224bb9551eabb64f7b7ae6170f138"
+            "sha256": "5b5a021880bb103c05aa82d5ea12b63454598157fede85aa28130d3eb8e572ab"
           },
           "expense_recurring_occurrences": {
             "rows": 1,
-            "sha256": "76c006b0195351670a2264738c7e82c72a46e1d6405998e5b8f83192da6577d0"
+            "sha256": "67f8b491e35d206d56c74df2822b49e7b7850a9df3d4fa75fd6b0de2f39f0891"
           },
           "expense_recurring_pending": {
             "rows": 1,
-            "sha256": "5b560beb73712cd893547f7f566f3b8db32cc7393fcc4072b81224e3e199f50c"
+            "sha256": "81ae54612bf17932f1f32ca03e23435f6ce2a6383121addeb6d361a89f4f0a6a"
           },
           "ledger_activity_events": {
             "rows": 3,
-            "sha256": "442e7647cc2aaa8f4d604c724af992bd38434d735166604d210718bbf283d4be"
+            "sha256": "3fd4120652da906bd9d26df65e970e2a46805d135c721a17edef837dd64d235c"
           },
           "ledger_projects": {
             "rows": 0,
@@ -2128,7 +2129,7 @@
         },
         "pending": [
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-09",
             "date": "2026-09-15",
             "notificationState": "inbox"
@@ -2150,7 +2151,7 @@
             "deleted": false
           },
           {
-            "id": "exp_f111354d44fc4bbaadd81de995752d57",
+            "id": "exp_bab42d8536f44dd981b31ecf66c48118",
             "owner": "usr_github_790002",
             "date": "2026-09-15",
             "amountMinor": 1234,
@@ -2159,12 +2160,12 @@
         ],
         "rules": [
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "nextDate": "2026-10-15",
             "status": "active"
           },
           {
-            "id": "rec_1bc001e053c9441087c70ffbbbf979d0",
+            "id": "rec_143319f0ac2e4ac99e0a6fdb7d49be51",
             "nextDate": "2027-09-15",
             "status": "active"
           }
@@ -2341,11 +2342,11 @@
           },
           "expenses": {
             "rows": 3,
-            "sha256": "1cb6666511a41a3286b83e4a975c077407abc6d5c04941892d5112f342554859"
+            "sha256": "3f2c096e812ef869692e0bc25081e2ed8200f75434f92a52f33e6154a45c41a7"
           },
           "expense_events": {
             "rows": 1,
-            "sha256": "aac26ed5bd3bfeab774db34d82bcf715bff5149bb9b9754b5e0c53c673818d47"
+            "sha256": "12ff87e30f197fbe23a1b4ce09774ad0c11c3942386ed49a90e87af3a68e7f29"
           },
           "expense_create_idempotency": {
             "rows": 0,
@@ -2353,19 +2354,19 @@
           },
           "expense_recurring_rules": {
             "rows": 3,
-            "sha256": "6f5c542bfe21a6d5dd84ca556955a4f286b89fcef8a0d5131145189e4247e20a"
+            "sha256": "e74538c553af0d22c9bd0c4b758f14706b5edce8837954bd24e54fa175f0f722"
           },
           "expense_recurring_occurrences": {
             "rows": 1,
-            "sha256": "76c006b0195351670a2264738c7e82c72a46e1d6405998e5b8f83192da6577d0"
+            "sha256": "67f8b491e35d206d56c74df2822b49e7b7850a9df3d4fa75fd6b0de2f39f0891"
           },
           "expense_recurring_pending": {
             "rows": 1,
-            "sha256": "5b560beb73712cd893547f7f566f3b8db32cc7393fcc4072b81224e3e199f50c"
+            "sha256": "81ae54612bf17932f1f32ca03e23435f6ce2a6383121addeb6d361a89f4f0a6a"
           },
           "ledger_activity_events": {
             "rows": 4,
-            "sha256": "04589b2c041744fea8f8162dcd66067bc33c547e1b8659b2f2e50113583a2f3d"
+            "sha256": "b068c20e2bc7673e09e889831249c6f6b9ed017cb7ec73f3e1cbd9326c138e01"
           },
           "ledger_projects": {
             "rows": 0,
@@ -2398,7 +2399,7 @@
         },
         "pending": [
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-09",
             "date": "2026-09-15",
             "notificationState": "inbox"
@@ -2420,7 +2421,7 @@
             "deleted": false
           },
           {
-            "id": "exp_f111354d44fc4bbaadd81de995752d57",
+            "id": "exp_bab42d8536f44dd981b31ecf66c48118",
             "owner": "usr_github_790002",
             "date": "2026-09-15",
             "amountMinor": 1234,
@@ -2429,17 +2430,17 @@
         ],
         "rules": [
           {
-            "id": "rec_eb2e436db37b4b30b601edb82fa60439",
+            "id": "rec_e3e97d0e3eff4aa79e0b159ffa0818cc",
             "nextDate": "2027-12-01",
             "status": "active"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "nextDate": "2026-10-15",
             "status": "active"
           },
           {
-            "id": "rec_1bc001e053c9441087c70ffbbbf979d0",
+            "id": "rec_143319f0ac2e4ac99e0a6fdb7d49be51",
             "nextDate": "2027-09-15",
             "status": "active"
           }
@@ -2528,11 +2529,11 @@
           },
           "expenses": {
             "rows": 3,
-            "sha256": "1cb6666511a41a3286b83e4a975c077407abc6d5c04941892d5112f342554859"
+            "sha256": "3f2c096e812ef869692e0bc25081e2ed8200f75434f92a52f33e6154a45c41a7"
           },
           "expense_events": {
             "rows": 1,
-            "sha256": "aac26ed5bd3bfeab774db34d82bcf715bff5149bb9b9754b5e0c53c673818d47"
+            "sha256": "12ff87e30f197fbe23a1b4ce09774ad0c11c3942386ed49a90e87af3a68e7f29"
           },
           "expense_create_idempotency": {
             "rows": 0,
@@ -2540,19 +2541,19 @@
           },
           "expense_recurring_rules": {
             "rows": 3,
-            "sha256": "6f5c542bfe21a6d5dd84ca556955a4f286b89fcef8a0d5131145189e4247e20a"
+            "sha256": "e74538c553af0d22c9bd0c4b758f14706b5edce8837954bd24e54fa175f0f722"
           },
           "expense_recurring_occurrences": {
             "rows": 1,
-            "sha256": "76c006b0195351670a2264738c7e82c72a46e1d6405998e5b8f83192da6577d0"
+            "sha256": "67f8b491e35d206d56c74df2822b49e7b7850a9df3d4fa75fd6b0de2f39f0891"
           },
           "expense_recurring_pending": {
             "rows": 1,
-            "sha256": "5b560beb73712cd893547f7f566f3b8db32cc7393fcc4072b81224e3e199f50c"
+            "sha256": "81ae54612bf17932f1f32ca03e23435f6ce2a6383121addeb6d361a89f4f0a6a"
           },
           "ledger_activity_events": {
             "rows": 4,
-            "sha256": "04589b2c041744fea8f8162dcd66067bc33c547e1b8659b2f2e50113583a2f3d"
+            "sha256": "b068c20e2bc7673e09e889831249c6f6b9ed017cb7ec73f3e1cbd9326c138e01"
           },
           "ledger_projects": {
             "rows": 0,
@@ -2585,7 +2586,7 @@
         },
         "pending": [
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-09",
             "date": "2026-09-15",
             "notificationState": "inbox"
@@ -2607,7 +2608,7 @@
             "deleted": false
           },
           {
-            "id": "exp_f111354d44fc4bbaadd81de995752d57",
+            "id": "exp_bab42d8536f44dd981b31ecf66c48118",
             "owner": "usr_github_790002",
             "date": "2026-09-15",
             "amountMinor": 1234,
@@ -2616,17 +2617,17 @@
         ],
         "rules": [
           {
-            "id": "rec_eb2e436db37b4b30b601edb82fa60439",
+            "id": "rec_e3e97d0e3eff4aa79e0b159ffa0818cc",
             "nextDate": "2027-12-01",
             "status": "active"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "nextDate": "2026-10-15",
             "status": "active"
           },
           {
-            "id": "rec_1bc001e053c9441087c70ffbbbf979d0",
+            "id": "rec_143319f0ac2e4ac99e0a6fdb7d49be51",
             "nextDate": "2027-09-15",
             "status": "active"
           }
@@ -2664,7 +2665,7 @@
     },
     {
       "call": 7,
-      "path": "/api/v1/expense-recurring-rules/rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+      "path": "/api/v1/expense-recurring-rules/rec_2725a4e34be04af6b78de5c6ae386d12",
       "method": "PATCH",
       "status": 403,
       "meteredGroups": [
@@ -2744,11 +2745,11 @@
           },
           "expenses": {
             "rows": 3,
-            "sha256": "1cb6666511a41a3286b83e4a975c077407abc6d5c04941892d5112f342554859"
+            "sha256": "3f2c096e812ef869692e0bc25081e2ed8200f75434f92a52f33e6154a45c41a7"
           },
           "expense_events": {
             "rows": 1,
-            "sha256": "aac26ed5bd3bfeab774db34d82bcf715bff5149bb9b9754b5e0c53c673818d47"
+            "sha256": "12ff87e30f197fbe23a1b4ce09774ad0c11c3942386ed49a90e87af3a68e7f29"
           },
           "expense_create_idempotency": {
             "rows": 0,
@@ -2756,19 +2757,19 @@
           },
           "expense_recurring_rules": {
             "rows": 3,
-            "sha256": "6f5c542bfe21a6d5dd84ca556955a4f286b89fcef8a0d5131145189e4247e20a"
+            "sha256": "e74538c553af0d22c9bd0c4b758f14706b5edce8837954bd24e54fa175f0f722"
           },
           "expense_recurring_occurrences": {
             "rows": 1,
-            "sha256": "76c006b0195351670a2264738c7e82c72a46e1d6405998e5b8f83192da6577d0"
+            "sha256": "67f8b491e35d206d56c74df2822b49e7b7850a9df3d4fa75fd6b0de2f39f0891"
           },
           "expense_recurring_pending": {
             "rows": 1,
-            "sha256": "5b560beb73712cd893547f7f566f3b8db32cc7393fcc4072b81224e3e199f50c"
+            "sha256": "81ae54612bf17932f1f32ca03e23435f6ce2a6383121addeb6d361a89f4f0a6a"
           },
           "ledger_activity_events": {
             "rows": 4,
-            "sha256": "04589b2c041744fea8f8162dcd66067bc33c547e1b8659b2f2e50113583a2f3d"
+            "sha256": "b068c20e2bc7673e09e889831249c6f6b9ed017cb7ec73f3e1cbd9326c138e01"
           },
           "ledger_projects": {
             "rows": 0,
@@ -2801,7 +2802,7 @@
         },
         "pending": [
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-09",
             "date": "2026-09-15",
             "notificationState": "inbox"
@@ -2823,7 +2824,7 @@
             "deleted": false
           },
           {
-            "id": "exp_f111354d44fc4bbaadd81de995752d57",
+            "id": "exp_bab42d8536f44dd981b31ecf66c48118",
             "owner": "usr_github_790002",
             "date": "2026-09-15",
             "amountMinor": 1234,
@@ -2832,17 +2833,17 @@
         ],
         "rules": [
           {
-            "id": "rec_eb2e436db37b4b30b601edb82fa60439",
+            "id": "rec_e3e97d0e3eff4aa79e0b159ffa0818cc",
             "nextDate": "2027-12-01",
             "status": "active"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "nextDate": "2026-10-15",
             "status": "active"
           },
           {
-            "id": "rec_1bc001e053c9441087c70ffbbbf979d0",
+            "id": "rec_143319f0ac2e4ac99e0a6fdb7d49be51",
             "nextDate": "2027-09-15",
             "status": "active"
           }
@@ -2900,11 +2901,11 @@
           },
           "expenses": {
             "rows": 3,
-            "sha256": "1cb6666511a41a3286b83e4a975c077407abc6d5c04941892d5112f342554859"
+            "sha256": "3f2c096e812ef869692e0bc25081e2ed8200f75434f92a52f33e6154a45c41a7"
           },
           "expense_events": {
             "rows": 1,
-            "sha256": "aac26ed5bd3bfeab774db34d82bcf715bff5149bb9b9754b5e0c53c673818d47"
+            "sha256": "12ff87e30f197fbe23a1b4ce09774ad0c11c3942386ed49a90e87af3a68e7f29"
           },
           "expense_create_idempotency": {
             "rows": 0,
@@ -2912,19 +2913,19 @@
           },
           "expense_recurring_rules": {
             "rows": 3,
-            "sha256": "6f5c542bfe21a6d5dd84ca556955a4f286b89fcef8a0d5131145189e4247e20a"
+            "sha256": "e74538c553af0d22c9bd0c4b758f14706b5edce8837954bd24e54fa175f0f722"
           },
           "expense_recurring_occurrences": {
             "rows": 1,
-            "sha256": "76c006b0195351670a2264738c7e82c72a46e1d6405998e5b8f83192da6577d0"
+            "sha256": "67f8b491e35d206d56c74df2822b49e7b7850a9df3d4fa75fd6b0de2f39f0891"
           },
           "expense_recurring_pending": {
             "rows": 1,
-            "sha256": "5b560beb73712cd893547f7f566f3b8db32cc7393fcc4072b81224e3e199f50c"
+            "sha256": "81ae54612bf17932f1f32ca03e23435f6ce2a6383121addeb6d361a89f4f0a6a"
           },
           "ledger_activity_events": {
             "rows": 4,
-            "sha256": "04589b2c041744fea8f8162dcd66067bc33c547e1b8659b2f2e50113583a2f3d"
+            "sha256": "b068c20e2bc7673e09e889831249c6f6b9ed017cb7ec73f3e1cbd9326c138e01"
           },
           "ledger_projects": {
             "rows": 0,
@@ -2957,7 +2958,7 @@
         },
         "pending": [
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-09",
             "date": "2026-09-15",
             "notificationState": "inbox"
@@ -2979,7 +2980,7 @@
             "deleted": false
           },
           {
-            "id": "exp_f111354d44fc4bbaadd81de995752d57",
+            "id": "exp_bab42d8536f44dd981b31ecf66c48118",
             "owner": "usr_github_790002",
             "date": "2026-09-15",
             "amountMinor": 1234,
@@ -2988,17 +2989,17 @@
         ],
         "rules": [
           {
-            "id": "rec_eb2e436db37b4b30b601edb82fa60439",
+            "id": "rec_e3e97d0e3eff4aa79e0b159ffa0818cc",
             "nextDate": "2027-12-01",
             "status": "active"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "nextDate": "2026-10-15",
             "status": "active"
           },
           {
-            "id": "rec_1bc001e053c9441087c70ffbbbf979d0",
+            "id": "rec_143319f0ac2e4ac99e0a6fdb7d49be51",
             "nextDate": "2027-09-15",
             "status": "active"
           }
@@ -3036,7 +3037,7 @@
     },
     {
       "call": 9,
-      "path": "/api/v1/expense-recurring-rules/rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+      "path": "/api/v1/expense-recurring-rules/rec_2725a4e34be04af6b78de5c6ae386d12",
       "method": "GET",
       "status": 200,
       "meteredGroups": [
@@ -3097,11 +3098,11 @@
           },
           "expenses": {
             "rows": 3,
-            "sha256": "1cb6666511a41a3286b83e4a975c077407abc6d5c04941892d5112f342554859"
+            "sha256": "3f2c096e812ef869692e0bc25081e2ed8200f75434f92a52f33e6154a45c41a7"
           },
           "expense_events": {
             "rows": 1,
-            "sha256": "aac26ed5bd3bfeab774db34d82bcf715bff5149bb9b9754b5e0c53c673818d47"
+            "sha256": "12ff87e30f197fbe23a1b4ce09774ad0c11c3942386ed49a90e87af3a68e7f29"
           },
           "expense_create_idempotency": {
             "rows": 0,
@@ -3109,19 +3110,19 @@
           },
           "expense_recurring_rules": {
             "rows": 3,
-            "sha256": "6f5c542bfe21a6d5dd84ca556955a4f286b89fcef8a0d5131145189e4247e20a"
+            "sha256": "e74538c553af0d22c9bd0c4b758f14706b5edce8837954bd24e54fa175f0f722"
           },
           "expense_recurring_occurrences": {
             "rows": 1,
-            "sha256": "76c006b0195351670a2264738c7e82c72a46e1d6405998e5b8f83192da6577d0"
+            "sha256": "67f8b491e35d206d56c74df2822b49e7b7850a9df3d4fa75fd6b0de2f39f0891"
           },
           "expense_recurring_pending": {
             "rows": 1,
-            "sha256": "5b560beb73712cd893547f7f566f3b8db32cc7393fcc4072b81224e3e199f50c"
+            "sha256": "81ae54612bf17932f1f32ca03e23435f6ce2a6383121addeb6d361a89f4f0a6a"
           },
           "ledger_activity_events": {
             "rows": 4,
-            "sha256": "04589b2c041744fea8f8162dcd66067bc33c547e1b8659b2f2e50113583a2f3d"
+            "sha256": "b068c20e2bc7673e09e889831249c6f6b9ed017cb7ec73f3e1cbd9326c138e01"
           },
           "ledger_projects": {
             "rows": 0,
@@ -3154,7 +3155,7 @@
         },
         "pending": [
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-09",
             "date": "2026-09-15",
             "notificationState": "inbox"
@@ -3176,7 +3177,7 @@
             "deleted": false
           },
           {
-            "id": "exp_f111354d44fc4bbaadd81de995752d57",
+            "id": "exp_bab42d8536f44dd981b31ecf66c48118",
             "owner": "usr_github_790002",
             "date": "2026-09-15",
             "amountMinor": 1234,
@@ -3185,17 +3186,17 @@
         ],
         "rules": [
           {
-            "id": "rec_eb2e436db37b4b30b601edb82fa60439",
+            "id": "rec_e3e97d0e3eff4aa79e0b159ffa0818cc",
             "nextDate": "2027-12-01",
             "status": "active"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "nextDate": "2026-10-15",
             "status": "active"
           },
           {
-            "id": "rec_1bc001e053c9441087c70ffbbbf979d0",
+            "id": "rec_143319f0ac2e4ac99e0a6fdb7d49be51",
             "nextDate": "2027-09-15",
             "status": "active"
           }
@@ -3271,7 +3272,7 @@
         {
           "phase": "metered",
           "statements": 1,
-          "rowsRead": 3,
+          "rowsRead": 6,
           "rowsWritten": 0,
           "nativeAttempts": [
             null
@@ -3279,19 +3280,11 @@
         },
         {
           "phase": "metered",
-          "statements": 1,
+          "statements": 2,
           "rowsRead": 0,
           "rowsWritten": 0,
           "nativeAttempts": [
-            null
-          ]
-        },
-        {
-          "phase": "metered",
-          "statements": 1,
-          "rowsRead": 0,
-          "rowsWritten": 0,
-          "nativeAttempts": [
+            null,
             null
           ]
         },
@@ -3404,19 +3397,11 @@
         },
         {
           "phase": "metered",
-          "statements": 1,
+          "statements": 2,
           "rowsRead": 0,
           "rowsWritten": 0,
           "nativeAttempts": [
-            null
-          ]
-        },
-        {
-          "phase": "metered",
-          "statements": 1,
-          "rowsRead": 0,
-          "rowsWritten": 0,
-          "nativeAttempts": [
+            null,
             null
           ]
         },
@@ -3529,19 +3514,11 @@
         },
         {
           "phase": "metered",
-          "statements": 1,
+          "statements": 2,
           "rowsRead": 0,
           "rowsWritten": 0,
           "nativeAttempts": [
-            null
-          ]
-        },
-        {
-          "phase": "metered",
-          "statements": 1,
-          "rowsRead": 0,
-          "rowsWritten": 0,
-          "nativeAttempts": [
+            null,
             null
           ]
         },
@@ -3654,19 +3631,11 @@
         },
         {
           "phase": "metered",
-          "statements": 1,
+          "statements": 2,
           "rowsRead": 0,
           "rowsWritten": 0,
           "nativeAttempts": [
-            null
-          ]
-        },
-        {
-          "phase": "metered",
-          "statements": 1,
-          "rowsRead": 0,
-          "rowsWritten": 0,
-          "nativeAttempts": [
+            null,
             null
           ]
         },
@@ -3777,11 +3746,11 @@
           },
           "expenses": {
             "rows": 4,
-            "sha256": "04fce9d83c900fcbbbdeb8929a9f6b29934d1149c5f851c3841e699524c96578"
+            "sha256": "3da5a93ff2d8631c55f0b2033b71877dc6c4338a6f44ed3205903577182e7df1"
           },
           "expense_events": {
             "rows": 2,
-            "sha256": "a78faf5504c8c945d23af98c7056813f95171e10f84cc1e1ae8bd8bc17fc27d2"
+            "sha256": "fdc771c5928119a680e7d900ba28d87e03fcbaa3bca7731dcc2ae5d49d77c0ac"
           },
           "expense_create_idempotency": {
             "rows": 0,
@@ -3789,19 +3758,19 @@
           },
           "expense_recurring_rules": {
             "rows": 3,
-            "sha256": "e8ba0e8a456b41a3ace6e7dcd63aaeb29458256700d0e197cf45d8386f802e52"
+            "sha256": "76df5aeaa886b584d2c3aa0ba788135057a2f3f8ba9696c75ac96bfff9c79c1a"
           },
           "expense_recurring_occurrences": {
             "rows": 2,
-            "sha256": "d41dc40cb364f447b30f4a6719d31b8ab0ad2e5d0335d0a64033595dd0900b3f"
+            "sha256": "2fc07c21d57ebc310ef8eafd27e0103468420925f2e72af6a83f0949823ac0d1"
           },
           "expense_recurring_pending": {
             "rows": 4,
-            "sha256": "c4cd51eb7c8fa9b30f2dfac9104c05faf59003750e0a1b7bafe6a44c2339425e"
+            "sha256": "a7325c6ab56445ed85e948fb706bb76e26e7b1dec5bd62ecf6462d5b04b77c00"
           },
           "ledger_activity_events": {
             "rows": 1,
-            "sha256": "391f405b34f4f8bd4b144092b67757959eb7d90e1428edfdd157bf147a75cb92"
+            "sha256": "60d76d8e51c8666ad3a0e7d70b43176385fe36bad64d1e1e01097e2b4697ca28"
           },
           "ledger_projects": {
             "rows": 0,
@@ -3834,25 +3803,25 @@
         },
         "pending": [
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-09",
             "date": "2026-09-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-10",
             "date": "2026-10-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-11",
             "date": "2026-11-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-12",
             "date": "2026-12-15",
             "notificationState": "inbox"
@@ -3874,14 +3843,14 @@
             "deleted": false
           },
           {
-            "id": "exp_f111354d44fc4bbaadd81de995752d57",
+            "id": "exp_bab42d8536f44dd981b31ecf66c48118",
             "owner": "usr_github_790002",
             "date": "2026-09-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_c9b78c5aa4504d95822759629a3ef225",
+            "id": "exp_069c010e65bf48b2bade8dc05e747a74",
             "owner": "usr_github_790002",
             "date": "2027-09-15",
             "amountMinor": 1234,
@@ -3890,17 +3859,17 @@
         ],
         "rules": [
           {
-            "id": "rec_eb2e436db37b4b30b601edb82fa60439",
+            "id": "rec_e3e97d0e3eff4aa79e0b159ffa0818cc",
             "nextDate": "2027-12-01",
             "status": "active"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "nextDate": "2027-01-15",
             "status": "active"
           },
           {
-            "id": "rec_1bc001e053c9441087c70ffbbbf979d0",
+            "id": "rec_143319f0ac2e4ac99e0a6fdb7d49be51",
             "nextDate": "2028-09-15",
             "status": "active"
           }
@@ -3954,7 +3923,7 @@
         {
           "phase": "metered",
           "statements": 1,
-          "rowsRead": 2,
+          "rowsRead": 4,
           "rowsWritten": 0,
           "nativeAttempts": [
             null
@@ -3962,19 +3931,11 @@
         },
         {
           "phase": "metered",
-          "statements": 1,
+          "statements": 2,
           "rowsRead": 0,
           "rowsWritten": 0,
           "nativeAttempts": [
-            null
-          ]
-        },
-        {
-          "phase": "metered",
-          "statements": 1,
-          "rowsRead": 0,
-          "rowsWritten": 0,
-          "nativeAttempts": [
+            null,
             null
           ]
         },
@@ -4087,19 +4048,11 @@
         },
         {
           "phase": "metered",
-          "statements": 1,
+          "statements": 2,
           "rowsRead": 0,
           "rowsWritten": 0,
           "nativeAttempts": [
-            null
-          ]
-        },
-        {
-          "phase": "metered",
-          "statements": 1,
-          "rowsRead": 0,
-          "rowsWritten": 0,
-          "nativeAttempts": [
+            null,
             null
           ]
         },
@@ -4212,19 +4165,11 @@
         },
         {
           "phase": "metered",
-          "statements": 1,
+          "statements": 2,
           "rowsRead": 0,
           "rowsWritten": 0,
           "nativeAttempts": [
-            null
-          ]
-        },
-        {
-          "phase": "metered",
-          "statements": 1,
-          "rowsRead": 0,
-          "rowsWritten": 0,
-          "nativeAttempts": [
+            null,
             null
           ]
         },
@@ -4352,11 +4297,11 @@
           },
           "expenses": {
             "rows": 4,
-            "sha256": "04fce9d83c900fcbbbdeb8929a9f6b29934d1149c5f851c3841e699524c96578"
+            "sha256": "3da5a93ff2d8631c55f0b2033b71877dc6c4338a6f44ed3205903577182e7df1"
           },
           "expense_events": {
             "rows": 2,
-            "sha256": "a78faf5504c8c945d23af98c7056813f95171e10f84cc1e1ae8bd8bc17fc27d2"
+            "sha256": "fdc771c5928119a680e7d900ba28d87e03fcbaa3bca7731dcc2ae5d49d77c0ac"
           },
           "expense_create_idempotency": {
             "rows": 0,
@@ -4364,19 +4309,19 @@
           },
           "expense_recurring_rules": {
             "rows": 3,
-            "sha256": "b3b44af7ba45bbc6974684b6b73b7f550a161f214a65fa68e5980409046a5750"
+            "sha256": "6adc885a73ffeb3c9eb60b6327da04984a26e87bbf63c9817d54cda74654b58e"
           },
           "expense_recurring_occurrences": {
             "rows": 2,
-            "sha256": "d41dc40cb364f447b30f4a6719d31b8ab0ad2e5d0335d0a64033595dd0900b3f"
+            "sha256": "2fc07c21d57ebc310ef8eafd27e0103468420925f2e72af6a83f0949823ac0d1"
           },
           "expense_recurring_pending": {
             "rows": 7,
-            "sha256": "a7d118fc62763e76167088c27bda744ae2094d7294daeb6615601376aedbdd03"
+            "sha256": "2e23e6ebb58713c6f45f0514a0da14fd5b1f80c520ff2ed82ae0f4cf5adb2bcd"
           },
           "ledger_activity_events": {
             "rows": 1,
-            "sha256": "391f405b34f4f8bd4b144092b67757959eb7d90e1428edfdd157bf147a75cb92"
+            "sha256": "60d76d8e51c8666ad3a0e7d70b43176385fe36bad64d1e1e01097e2b4697ca28"
           },
           "ledger_projects": {
             "rows": 0,
@@ -4409,43 +4354,43 @@
         },
         "pending": [
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-09",
             "date": "2026-09-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-10",
             "date": "2026-10-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-11",
             "date": "2026-11-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-12",
             "date": "2026-12-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-01",
             "date": "2027-01-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-02",
             "date": "2027-02-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-03",
             "date": "2027-03-15",
             "notificationState": "inbox"
@@ -4467,14 +4412,14 @@
             "deleted": false
           },
           {
-            "id": "exp_f111354d44fc4bbaadd81de995752d57",
+            "id": "exp_bab42d8536f44dd981b31ecf66c48118",
             "owner": "usr_github_790002",
             "date": "2026-09-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_c9b78c5aa4504d95822759629a3ef225",
+            "id": "exp_069c010e65bf48b2bade8dc05e747a74",
             "owner": "usr_github_790002",
             "date": "2027-09-15",
             "amountMinor": 1234,
@@ -4483,17 +4428,17 @@
         ],
         "rules": [
           {
-            "id": "rec_eb2e436db37b4b30b601edb82fa60439",
+            "id": "rec_e3e97d0e3eff4aa79e0b159ffa0818cc",
             "nextDate": "2027-12-01",
             "status": "active"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "nextDate": "2027-04-15",
             "status": "active"
           },
           {
-            "id": "rec_1bc001e053c9441087c70ffbbbf979d0",
+            "id": "rec_143319f0ac2e4ac99e0a6fdb7d49be51",
             "nextDate": "2028-09-15",
             "status": "active"
           }
@@ -4547,7 +4492,7 @@
         {
           "phase": "metered",
           "statements": 1,
-          "rowsRead": 2,
+          "rowsRead": 4,
           "rowsWritten": 0,
           "nativeAttempts": [
             null
@@ -4555,19 +4500,11 @@
         },
         {
           "phase": "metered",
-          "statements": 1,
+          "statements": 2,
           "rowsRead": 0,
           "rowsWritten": 0,
           "nativeAttempts": [
-            null
-          ]
-        },
-        {
-          "phase": "metered",
-          "statements": 1,
-          "rowsRead": 0,
-          "rowsWritten": 0,
-          "nativeAttempts": [
+            null,
             null
           ]
         },
@@ -4680,19 +4617,11 @@
         },
         {
           "phase": "metered",
-          "statements": 1,
+          "statements": 2,
           "rowsRead": 0,
           "rowsWritten": 0,
           "nativeAttempts": [
-            null
-          ]
-        },
-        {
-          "phase": "metered",
-          "statements": 1,
-          "rowsRead": 0,
-          "rowsWritten": 0,
-          "nativeAttempts": [
+            null,
             null
           ]
         },
@@ -4805,19 +4734,11 @@
         },
         {
           "phase": "metered",
-          "statements": 1,
+          "statements": 2,
           "rowsRead": 0,
           "rowsWritten": 0,
           "nativeAttempts": [
-            null
-          ]
-        },
-        {
-          "phase": "metered",
-          "statements": 1,
-          "rowsRead": 0,
-          "rowsWritten": 0,
-          "nativeAttempts": [
+            null,
             null
           ]
         },
@@ -4945,11 +4866,11 @@
           },
           "expenses": {
             "rows": 4,
-            "sha256": "04fce9d83c900fcbbbdeb8929a9f6b29934d1149c5f851c3841e699524c96578"
+            "sha256": "3da5a93ff2d8631c55f0b2033b71877dc6c4338a6f44ed3205903577182e7df1"
           },
           "expense_events": {
             "rows": 2,
-            "sha256": "a78faf5504c8c945d23af98c7056813f95171e10f84cc1e1ae8bd8bc17fc27d2"
+            "sha256": "fdc771c5928119a680e7d900ba28d87e03fcbaa3bca7731dcc2ae5d49d77c0ac"
           },
           "expense_create_idempotency": {
             "rows": 0,
@@ -4957,19 +4878,19 @@
           },
           "expense_recurring_rules": {
             "rows": 3,
-            "sha256": "c840ea3b254575859098f19b9648ea273a38fad572a96ab066f2a5f630abc359"
+            "sha256": "0bb3681e3028c1ef3444ba9b2e50872633edacb059a5c36717f4b93c6965d8e0"
           },
           "expense_recurring_occurrences": {
             "rows": 2,
-            "sha256": "d41dc40cb364f447b30f4a6719d31b8ab0ad2e5d0335d0a64033595dd0900b3f"
+            "sha256": "2fc07c21d57ebc310ef8eafd27e0103468420925f2e72af6a83f0949823ac0d1"
           },
           "expense_recurring_pending": {
             "rows": 10,
-            "sha256": "cce77cda22518bd3c398dbde7de50b9a8a3e2a12fff949c825ca4ad8fcff94c5"
+            "sha256": "b093c556308f98ba5501961c9a54c8822b7bd632d0ce8932f3d65b4c2bb1da9c"
           },
           "ledger_activity_events": {
             "rows": 1,
-            "sha256": "391f405b34f4f8bd4b144092b67757959eb7d90e1428edfdd157bf147a75cb92"
+            "sha256": "60d76d8e51c8666ad3a0e7d70b43176385fe36bad64d1e1e01097e2b4697ca28"
           },
           "ledger_projects": {
             "rows": 0,
@@ -5002,61 +4923,61 @@
         },
         "pending": [
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-09",
             "date": "2026-09-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-10",
             "date": "2026-10-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-11",
             "date": "2026-11-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-12",
             "date": "2026-12-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-01",
             "date": "2027-01-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-02",
             "date": "2027-02-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-03",
             "date": "2027-03-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-04",
             "date": "2027-04-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-05",
             "date": "2027-05-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-06",
             "date": "2027-06-15",
             "notificationState": "inbox"
@@ -5078,14 +4999,14 @@
             "deleted": false
           },
           {
-            "id": "exp_f111354d44fc4bbaadd81de995752d57",
+            "id": "exp_bab42d8536f44dd981b31ecf66c48118",
             "owner": "usr_github_790002",
             "date": "2026-09-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_c9b78c5aa4504d95822759629a3ef225",
+            "id": "exp_069c010e65bf48b2bade8dc05e747a74",
             "owner": "usr_github_790002",
             "date": "2027-09-15",
             "amountMinor": 1234,
@@ -5094,17 +5015,17 @@
         ],
         "rules": [
           {
-            "id": "rec_eb2e436db37b4b30b601edb82fa60439",
+            "id": "rec_e3e97d0e3eff4aa79e0b159ffa0818cc",
             "nextDate": "2027-12-01",
             "status": "active"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "nextDate": "2027-07-15",
             "status": "active"
           },
           {
-            "id": "rec_1bc001e053c9441087c70ffbbbf979d0",
+            "id": "rec_143319f0ac2e4ac99e0a6fdb7d49be51",
             "nextDate": "2028-09-15",
             "status": "active"
           }
@@ -5158,7 +5079,7 @@
         {
           "phase": "metered",
           "statements": 1,
-          "rowsRead": 2,
+          "rowsRead": 4,
           "rowsWritten": 0,
           "nativeAttempts": [
             null
@@ -5166,19 +5087,11 @@
         },
         {
           "phase": "metered",
-          "statements": 1,
+          "statements": 2,
           "rowsRead": 0,
           "rowsWritten": 0,
           "nativeAttempts": [
-            null
-          ]
-        },
-        {
-          "phase": "metered",
-          "statements": 1,
-          "rowsRead": 0,
-          "rowsWritten": 0,
-          "nativeAttempts": [
+            null,
             null
           ]
         },
@@ -5242,19 +5155,11 @@
         },
         {
           "phase": "metered",
-          "statements": 1,
+          "statements": 2,
           "rowsRead": 0,
           "rowsWritten": 0,
           "nativeAttempts": [
-            null
-          ]
-        },
-        {
-          "phase": "metered",
-          "statements": 1,
-          "rowsRead": 0,
-          "rowsWritten": 0,
-          "nativeAttempts": [
+            null,
             null
           ]
         },
@@ -5318,19 +5223,11 @@
         },
         {
           "phase": "metered",
-          "statements": 1,
+          "statements": 2,
           "rowsRead": 0,
           "rowsWritten": 0,
           "nativeAttempts": [
-            null
-          ]
-        },
-        {
-          "phase": "metered",
-          "statements": 1,
-          "rowsRead": 0,
-          "rowsWritten": 0,
-          "nativeAttempts": [
+            null,
             null
           ]
         },
@@ -5409,11 +5306,11 @@
           },
           "expenses": {
             "rows": 4,
-            "sha256": "04fce9d83c900fcbbbdeb8929a9f6b29934d1149c5f851c3841e699524c96578"
+            "sha256": "3da5a93ff2d8631c55f0b2033b71877dc6c4338a6f44ed3205903577182e7df1"
           },
           "expense_events": {
             "rows": 2,
-            "sha256": "a78faf5504c8c945d23af98c7056813f95171e10f84cc1e1ae8bd8bc17fc27d2"
+            "sha256": "fdc771c5928119a680e7d900ba28d87e03fcbaa3bca7731dcc2ae5d49d77c0ac"
           },
           "expense_create_idempotency": {
             "rows": 0,
@@ -5421,19 +5318,19 @@
           },
           "expense_recurring_rules": {
             "rows": 3,
-            "sha256": "445fd2416f10c4b6cf3dc63986d152994e75265450b91608693e0b134c39c7dc"
+            "sha256": "ba66db1ea5c1197e1ec95e6ce406620e65c3717e83cc0d6796e52aa7a26d45d8"
           },
           "expense_recurring_occurrences": {
             "rows": 2,
-            "sha256": "d41dc40cb364f447b30f4a6719d31b8ab0ad2e5d0335d0a64033595dd0900b3f"
+            "sha256": "2fc07c21d57ebc310ef8eafd27e0103468420925f2e72af6a83f0949823ac0d1"
           },
           "expense_recurring_pending": {
             "rows": 10,
-            "sha256": "cce77cda22518bd3c398dbde7de50b9a8a3e2a12fff949c825ca4ad8fcff94c5"
+            "sha256": "b093c556308f98ba5501961c9a54c8822b7bd632d0ce8932f3d65b4c2bb1da9c"
           },
           "ledger_activity_events": {
             "rows": 1,
-            "sha256": "391f405b34f4f8bd4b144092b67757959eb7d90e1428edfdd157bf147a75cb92"
+            "sha256": "60d76d8e51c8666ad3a0e7d70b43176385fe36bad64d1e1e01097e2b4697ca28"
           },
           "ledger_projects": {
             "rows": 0,
@@ -5466,61 +5363,61 @@
         },
         "pending": [
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-09",
             "date": "2026-09-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-10",
             "date": "2026-10-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-11",
             "date": "2026-11-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-12",
             "date": "2026-12-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-01",
             "date": "2027-01-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-02",
             "date": "2027-02-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-03",
             "date": "2027-03-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-04",
             "date": "2027-04-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-05",
             "date": "2027-05-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-06",
             "date": "2027-06-15",
             "notificationState": "inbox"
@@ -5542,14 +5439,14 @@
             "deleted": false
           },
           {
-            "id": "exp_f111354d44fc4bbaadd81de995752d57",
+            "id": "exp_bab42d8536f44dd981b31ecf66c48118",
             "owner": "usr_github_790002",
             "date": "2026-09-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_c9b78c5aa4504d95822759629a3ef225",
+            "id": "exp_069c010e65bf48b2bade8dc05e747a74",
             "owner": "usr_github_790002",
             "date": "2027-09-15",
             "amountMinor": 1234,
@@ -5558,17 +5455,17 @@
         ],
         "rules": [
           {
-            "id": "rec_eb2e436db37b4b30b601edb82fa60439",
+            "id": "rec_e3e97d0e3eff4aa79e0b159ffa0818cc",
             "nextDate": "2027-12-01",
             "status": "active"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "nextDate": "2027-10-15",
             "status": "active"
           },
           {
-            "id": "rec_1bc001e053c9441087c70ffbbbf979d0",
+            "id": "rec_143319f0ac2e4ac99e0a6fdb7d49be51",
             "nextDate": "2028-09-15",
             "status": "active"
           }
@@ -5606,7 +5503,7 @@
     },
     {
       "call": 14,
-      "path": "/api/v1/expense-recurring-rules/rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+      "path": "/api/v1/expense-recurring-rules/rec_2725a4e34be04af6b78de5c6ae386d12",
       "method": "GET",
       "status": 200,
       "meteredGroups": [
@@ -5667,11 +5564,11 @@
           },
           "expenses": {
             "rows": 4,
-            "sha256": "04fce9d83c900fcbbbdeb8929a9f6b29934d1149c5f851c3841e699524c96578"
+            "sha256": "3da5a93ff2d8631c55f0b2033b71877dc6c4338a6f44ed3205903577182e7df1"
           },
           "expense_events": {
             "rows": 2,
-            "sha256": "a78faf5504c8c945d23af98c7056813f95171e10f84cc1e1ae8bd8bc17fc27d2"
+            "sha256": "fdc771c5928119a680e7d900ba28d87e03fcbaa3bca7731dcc2ae5d49d77c0ac"
           },
           "expense_create_idempotency": {
             "rows": 0,
@@ -5679,19 +5576,19 @@
           },
           "expense_recurring_rules": {
             "rows": 3,
-            "sha256": "445fd2416f10c4b6cf3dc63986d152994e75265450b91608693e0b134c39c7dc"
+            "sha256": "ba66db1ea5c1197e1ec95e6ce406620e65c3717e83cc0d6796e52aa7a26d45d8"
           },
           "expense_recurring_occurrences": {
             "rows": 2,
-            "sha256": "d41dc40cb364f447b30f4a6719d31b8ab0ad2e5d0335d0a64033595dd0900b3f"
+            "sha256": "2fc07c21d57ebc310ef8eafd27e0103468420925f2e72af6a83f0949823ac0d1"
           },
           "expense_recurring_pending": {
             "rows": 10,
-            "sha256": "cce77cda22518bd3c398dbde7de50b9a8a3e2a12fff949c825ca4ad8fcff94c5"
+            "sha256": "b093c556308f98ba5501961c9a54c8822b7bd632d0ce8932f3d65b4c2bb1da9c"
           },
           "ledger_activity_events": {
             "rows": 1,
-            "sha256": "391f405b34f4f8bd4b144092b67757959eb7d90e1428edfdd157bf147a75cb92"
+            "sha256": "60d76d8e51c8666ad3a0e7d70b43176385fe36bad64d1e1e01097e2b4697ca28"
           },
           "ledger_projects": {
             "rows": 0,
@@ -5724,61 +5621,61 @@
         },
         "pending": [
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-09",
             "date": "2026-09-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-10",
             "date": "2026-10-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-11",
             "date": "2026-11-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-12",
             "date": "2026-12-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-01",
             "date": "2027-01-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-02",
             "date": "2027-02-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-03",
             "date": "2027-03-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-04",
             "date": "2027-04-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-05",
             "date": "2027-05-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-06",
             "date": "2027-06-15",
             "notificationState": "inbox"
@@ -5800,14 +5697,14 @@
             "deleted": false
           },
           {
-            "id": "exp_f111354d44fc4bbaadd81de995752d57",
+            "id": "exp_bab42d8536f44dd981b31ecf66c48118",
             "owner": "usr_github_790002",
             "date": "2026-09-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_c9b78c5aa4504d95822759629a3ef225",
+            "id": "exp_069c010e65bf48b2bade8dc05e747a74",
             "owner": "usr_github_790002",
             "date": "2027-09-15",
             "amountMinor": 1234,
@@ -5816,17 +5713,17 @@
         ],
         "rules": [
           {
-            "id": "rec_eb2e436db37b4b30b601edb82fa60439",
+            "id": "rec_e3e97d0e3eff4aa79e0b159ffa0818cc",
             "nextDate": "2027-12-01",
             "status": "active"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "nextDate": "2027-10-15",
             "status": "active"
           },
           {
-            "id": "rec_1bc001e053c9441087c70ffbbbf979d0",
+            "id": "rec_143319f0ac2e4ac99e0a6fdb7d49be51",
             "nextDate": "2028-09-15",
             "status": "active"
           }
@@ -5977,11 +5874,11 @@
           },
           "expenses": {
             "rows": 4,
-            "sha256": "ce20824492c97f136a56010b7980f69d81e04cdcd3c8c25621070b5fdb5ea41e"
+            "sha256": "8db5a09658f803289836f846866075c85507612a8c4cfc73ad118962e939e832"
           },
           "expense_events": {
             "rows": 3,
-            "sha256": "defc1930f171b9b412e39eab19d0c7838fb36561331848eb6a53e13b431d60e2"
+            "sha256": "0baac5490fc4b056b1511ef626a70bfd712cf5a9b6aad49894c2599f98b7dbd7"
           },
           "expense_create_idempotency": {
             "rows": 0,
@@ -5989,19 +5886,19 @@
           },
           "expense_recurring_rules": {
             "rows": 3,
-            "sha256": "445fd2416f10c4b6cf3dc63986d152994e75265450b91608693e0b134c39c7dc"
+            "sha256": "ba66db1ea5c1197e1ec95e6ce406620e65c3717e83cc0d6796e52aa7a26d45d8"
           },
           "expense_recurring_occurrences": {
             "rows": 2,
-            "sha256": "d41dc40cb364f447b30f4a6719d31b8ab0ad2e5d0335d0a64033595dd0900b3f"
+            "sha256": "2fc07c21d57ebc310ef8eafd27e0103468420925f2e72af6a83f0949823ac0d1"
           },
           "expense_recurring_pending": {
             "rows": 10,
-            "sha256": "cce77cda22518bd3c398dbde7de50b9a8a3e2a12fff949c825ca4ad8fcff94c5"
+            "sha256": "b093c556308f98ba5501961c9a54c8822b7bd632d0ce8932f3d65b4c2bb1da9c"
           },
           "ledger_activity_events": {
             "rows": 2,
-            "sha256": "959f177c6c9672b4ec8cfaeacd0ad896a5c8e013d0097ed1ae8704530fa6ba03"
+            "sha256": "67cada9d3004115e2fddb8ff0a113cd5dd18add6deb9cba3c01f9a2ddb283fa3"
           },
           "ledger_projects": {
             "rows": 0,
@@ -6034,61 +5931,61 @@
         },
         "pending": [
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-09",
             "date": "2026-09-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-10",
             "date": "2026-10-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-11",
             "date": "2026-11-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-12",
             "date": "2026-12-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-01",
             "date": "2027-01-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-02",
             "date": "2027-02-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-03",
             "date": "2027-03-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-04",
             "date": "2027-04-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-05",
             "date": "2027-05-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-06",
             "date": "2027-06-15",
             "notificationState": "inbox"
@@ -6110,14 +6007,14 @@
             "deleted": false
           },
           {
-            "id": "exp_f111354d44fc4bbaadd81de995752d57",
+            "id": "exp_bab42d8536f44dd981b31ecf66c48118",
             "owner": "usr_github_790002",
             "date": "2026-09-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_c9b78c5aa4504d95822759629a3ef225",
+            "id": "exp_069c010e65bf48b2bade8dc05e747a74",
             "owner": "usr_github_790002",
             "date": "2027-09-15",
             "amountMinor": 1234,
@@ -6126,17 +6023,17 @@
         ],
         "rules": [
           {
-            "id": "rec_eb2e436db37b4b30b601edb82fa60439",
+            "id": "rec_e3e97d0e3eff4aa79e0b159ffa0818cc",
             "nextDate": "2027-12-01",
             "status": "active"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "nextDate": "2027-10-15",
             "status": "active"
           },
           {
-            "id": "rec_1bc001e053c9441087c70ffbbbf979d0",
+            "id": "rec_143319f0ac2e4ac99e0a6fdb7d49be51",
             "nextDate": "2028-09-15",
             "status": "active"
           }
@@ -6174,7 +6071,7 @@
     },
     {
       "call": 16,
-      "path": "/api/v1/expense-recurring-rules/rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+      "path": "/api/v1/expense-recurring-rules/rec_2725a4e34be04af6b78de5c6ae386d12",
       "method": "PATCH",
       "status": 200,
       "meteredGroups": [
@@ -6329,11 +6226,11 @@
           },
           "expenses": {
             "rows": 5,
-            "sha256": "3682a35b23bb0b9e93337cb77ccacb914dc5b69be4f2d72f85f47eb482d71699"
+            "sha256": "f5d5ce1350e32ba79275151f951b460d1a7c64f083600d01b597135d568929e3"
           },
           "expense_events": {
             "rows": 4,
-            "sha256": "f06eeb04f9b18dce985632e917246976f0168eb91e6f827fb8305082fe1f52c7"
+            "sha256": "52ea45aa07a2270b7e408e3205914d278ee7a4cbe5d9143a73b069d0adb8ac22"
           },
           "expense_create_idempotency": {
             "rows": 0,
@@ -6341,19 +6238,19 @@
           },
           "expense_recurring_rules": {
             "rows": 3,
-            "sha256": "c4231f5b66cc090eea5e3ff21ef50ca86888467d6355d1e67c46f9a05c6c592f"
+            "sha256": "5e7459dc275a59d8f9b5cc7baea00a9ef1dccfe597667d8095973466f121b1bb"
           },
           "expense_recurring_occurrences": {
             "rows": 3,
-            "sha256": "9d6c1516943cf26be8679a26eb77e483011af9e262fa20a6c1f6559906290c80"
+            "sha256": "b644519917a5f54109cc4761775794784b5f0be5ea8c072512fac617a8a7b9e5"
           },
           "expense_recurring_pending": {
             "rows": 9,
-            "sha256": "dff6bf41de0c6a955acba9bd4a86ad487f813679c2a8b0188eda8dc4716b9fe2"
+            "sha256": "4bd438d9a51ff2ce765fbfab557932ed255c9af34d1af433f54494e246aa4107"
           },
           "ledger_activity_events": {
             "rows": 3,
-            "sha256": "1f836c4279ecde6c7c8278e4f08408d31d1749d0c5943c500fc793085c784894"
+            "sha256": "c35fa8434929835d6b94fddefab528d370d74ed6b9ae6ee6b5dff962c742a5d8"
           },
           "ledger_projects": {
             "rows": 0,
@@ -6386,55 +6283,55 @@
         },
         "pending": [
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-10",
             "date": "2026-10-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-11",
             "date": "2026-11-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-12",
             "date": "2026-12-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-01",
             "date": "2027-01-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-02",
             "date": "2027-02-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-03",
             "date": "2027-03-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-04",
             "date": "2027-04-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-05",
             "date": "2027-05-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-06",
             "date": "2027-06-15",
             "notificationState": "inbox"
@@ -6456,21 +6353,21 @@
             "deleted": false
           },
           {
-            "id": "exp_f111354d44fc4bbaadd81de995752d57",
+            "id": "exp_bab42d8536f44dd981b31ecf66c48118",
             "owner": "usr_github_790002",
             "date": "2026-09-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_c9b78c5aa4504d95822759629a3ef225",
+            "id": "exp_069c010e65bf48b2bade8dc05e747a74",
             "owner": "usr_github_790002",
             "date": "2027-09-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_ed941b6abe4a4fec8b06b0ae1d7cfe12",
+            "id": "exp_8a3d76c15d7b484d810dfa38649387ac",
             "owner": "usr_github_790001",
             "date": "2026-09-15",
             "amountMinor": 1234,
@@ -6479,17 +6376,17 @@
         ],
         "rules": [
           {
-            "id": "rec_eb2e436db37b4b30b601edb82fa60439",
+            "id": "rec_e3e97d0e3eff4aa79e0b159ffa0818cc",
             "nextDate": "2027-12-01",
             "status": "active"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "nextDate": "2027-10-15",
             "status": "active"
           },
           {
-            "id": "rec_1bc001e053c9441087c70ffbbbf979d0",
+            "id": "rec_143319f0ac2e4ac99e0a6fdb7d49be51",
             "nextDate": "2028-09-15",
             "status": "active"
           }
@@ -6527,7 +6424,7 @@
     },
     {
       "call": 17,
-      "path": "/api/v1/expense-recurring-rules/rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+      "path": "/api/v1/expense-recurring-rules/rec_2725a4e34be04af6b78de5c6ae386d12",
       "method": "PATCH",
       "status": 200,
       "meteredGroups": [
@@ -6598,11 +6495,11 @@
           },
           "expenses": {
             "rows": 5,
-            "sha256": "3682a35b23bb0b9e93337cb77ccacb914dc5b69be4f2d72f85f47eb482d71699"
+            "sha256": "f5d5ce1350e32ba79275151f951b460d1a7c64f083600d01b597135d568929e3"
           },
           "expense_events": {
             "rows": 4,
-            "sha256": "f06eeb04f9b18dce985632e917246976f0168eb91e6f827fb8305082fe1f52c7"
+            "sha256": "52ea45aa07a2270b7e408e3205914d278ee7a4cbe5d9143a73b069d0adb8ac22"
           },
           "expense_create_idempotency": {
             "rows": 0,
@@ -6610,19 +6507,19 @@
           },
           "expense_recurring_rules": {
             "rows": 3,
-            "sha256": "c4231f5b66cc090eea5e3ff21ef50ca86888467d6355d1e67c46f9a05c6c592f"
+            "sha256": "5e7459dc275a59d8f9b5cc7baea00a9ef1dccfe597667d8095973466f121b1bb"
           },
           "expense_recurring_occurrences": {
             "rows": 3,
-            "sha256": "9d6c1516943cf26be8679a26eb77e483011af9e262fa20a6c1f6559906290c80"
+            "sha256": "b644519917a5f54109cc4761775794784b5f0be5ea8c072512fac617a8a7b9e5"
           },
           "expense_recurring_pending": {
             "rows": 9,
-            "sha256": "dff6bf41de0c6a955acba9bd4a86ad487f813679c2a8b0188eda8dc4716b9fe2"
+            "sha256": "4bd438d9a51ff2ce765fbfab557932ed255c9af34d1af433f54494e246aa4107"
           },
           "ledger_activity_events": {
             "rows": 3,
-            "sha256": "1f836c4279ecde6c7c8278e4f08408d31d1749d0c5943c500fc793085c784894"
+            "sha256": "c35fa8434929835d6b94fddefab528d370d74ed6b9ae6ee6b5dff962c742a5d8"
           },
           "ledger_projects": {
             "rows": 0,
@@ -6655,55 +6552,55 @@
         },
         "pending": [
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-10",
             "date": "2026-10-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-11",
             "date": "2026-11-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-12",
             "date": "2026-12-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-01",
             "date": "2027-01-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-02",
             "date": "2027-02-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-03",
             "date": "2027-03-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-04",
             "date": "2027-04-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-05",
             "date": "2027-05-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-06",
             "date": "2027-06-15",
             "notificationState": "inbox"
@@ -6725,21 +6622,21 @@
             "deleted": false
           },
           {
-            "id": "exp_f111354d44fc4bbaadd81de995752d57",
+            "id": "exp_bab42d8536f44dd981b31ecf66c48118",
             "owner": "usr_github_790002",
             "date": "2026-09-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_c9b78c5aa4504d95822759629a3ef225",
+            "id": "exp_069c010e65bf48b2bade8dc05e747a74",
             "owner": "usr_github_790002",
             "date": "2027-09-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_ed941b6abe4a4fec8b06b0ae1d7cfe12",
+            "id": "exp_8a3d76c15d7b484d810dfa38649387ac",
             "owner": "usr_github_790001",
             "date": "2026-09-15",
             "amountMinor": 1234,
@@ -6748,17 +6645,17 @@
         ],
         "rules": [
           {
-            "id": "rec_eb2e436db37b4b30b601edb82fa60439",
+            "id": "rec_e3e97d0e3eff4aa79e0b159ffa0818cc",
             "nextDate": "2027-12-01",
             "status": "active"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "nextDate": "2027-10-15",
             "status": "active"
           },
           {
-            "id": "rec_1bc001e053c9441087c70ffbbbf979d0",
+            "id": "rec_143319f0ac2e4ac99e0a6fdb7d49be51",
             "nextDate": "2028-09-15",
             "status": "active"
           }
@@ -6868,11 +6765,11 @@
           },
           "expenses": {
             "rows": 5,
-            "sha256": "3682a35b23bb0b9e93337cb77ccacb914dc5b69be4f2d72f85f47eb482d71699"
+            "sha256": "f5d5ce1350e32ba79275151f951b460d1a7c64f083600d01b597135d568929e3"
           },
           "expense_events": {
             "rows": 4,
-            "sha256": "f06eeb04f9b18dce985632e917246976f0168eb91e6f827fb8305082fe1f52c7"
+            "sha256": "52ea45aa07a2270b7e408e3205914d278ee7a4cbe5d9143a73b069d0adb8ac22"
           },
           "expense_create_idempotency": {
             "rows": 0,
@@ -6880,19 +6777,19 @@
           },
           "expense_recurring_rules": {
             "rows": 3,
-            "sha256": "c4231f5b66cc090eea5e3ff21ef50ca86888467d6355d1e67c46f9a05c6c592f"
+            "sha256": "5e7459dc275a59d8f9b5cc7baea00a9ef1dccfe597667d8095973466f121b1bb"
           },
           "expense_recurring_occurrences": {
             "rows": 3,
-            "sha256": "9d6c1516943cf26be8679a26eb77e483011af9e262fa20a6c1f6559906290c80"
+            "sha256": "b644519917a5f54109cc4761775794784b5f0be5ea8c072512fac617a8a7b9e5"
           },
           "expense_recurring_pending": {
             "rows": 9,
-            "sha256": "dff6bf41de0c6a955acba9bd4a86ad487f813679c2a8b0188eda8dc4716b9fe2"
+            "sha256": "4bd438d9a51ff2ce765fbfab557932ed255c9af34d1af433f54494e246aa4107"
           },
           "ledger_activity_events": {
             "rows": 3,
-            "sha256": "1f836c4279ecde6c7c8278e4f08408d31d1749d0c5943c500fc793085c784894"
+            "sha256": "c35fa8434929835d6b94fddefab528d370d74ed6b9ae6ee6b5dff962c742a5d8"
           },
           "ledger_projects": {
             "rows": 0,
@@ -6925,55 +6822,55 @@
         },
         "pending": [
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-10",
             "date": "2026-10-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-11",
             "date": "2026-11-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-12",
             "date": "2026-12-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-01",
             "date": "2027-01-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-02",
             "date": "2027-02-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-03",
             "date": "2027-03-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-04",
             "date": "2027-04-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-05",
             "date": "2027-05-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-06",
             "date": "2027-06-15",
             "notificationState": "inbox"
@@ -6995,21 +6892,21 @@
             "deleted": false
           },
           {
-            "id": "exp_f111354d44fc4bbaadd81de995752d57",
+            "id": "exp_bab42d8536f44dd981b31ecf66c48118",
             "owner": "usr_github_790002",
             "date": "2026-09-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_c9b78c5aa4504d95822759629a3ef225",
+            "id": "exp_069c010e65bf48b2bade8dc05e747a74",
             "owner": "usr_github_790002",
             "date": "2027-09-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_ed941b6abe4a4fec8b06b0ae1d7cfe12",
+            "id": "exp_8a3d76c15d7b484d810dfa38649387ac",
             "owner": "usr_github_790001",
             "date": "2026-09-15",
             "amountMinor": 1234,
@@ -7018,17 +6915,17 @@
         ],
         "rules": [
           {
-            "id": "rec_eb2e436db37b4b30b601edb82fa60439",
+            "id": "rec_e3e97d0e3eff4aa79e0b159ffa0818cc",
             "nextDate": "2027-12-01",
             "status": "active"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "nextDate": "2027-10-15",
             "status": "active"
           },
           {
-            "id": "rec_1bc001e053c9441087c70ffbbbf979d0",
+            "id": "rec_143319f0ac2e4ac99e0a6fdb7d49be51",
             "nextDate": "2028-09-15",
             "status": "active"
           }
@@ -7066,7 +6963,7 @@
     },
     {
       "call": 19,
-      "path": "/api/v1/expense-recurring-rules/rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+      "path": "/api/v1/expense-recurring-rules/rec_2725a4e34be04af6b78de5c6ae386d12",
       "method": "PATCH",
       "status": 200,
       "meteredGroups": [
@@ -7253,11 +7150,11 @@
           },
           "expenses": {
             "rows": 6,
-            "sha256": "afeddd3e423bb0125e4c02af4a080bd3e3998893ebfee761470fd50f02df073c"
+            "sha256": "3da225f791ba35397c962af17df862a7c1a578654678511fb205a06cb7d135ee"
           },
           "expense_events": {
             "rows": 6,
-            "sha256": "fe40928e0a3461aa77eb5088ae9260d84e48b61f325253981feeae8c4b224567"
+            "sha256": "6e9a0111e530baf2bb6098218e88c5e1252395c1ba657f37186478cef3398bec"
           },
           "expense_create_idempotency": {
             "rows": 0,
@@ -7265,19 +7162,19 @@
           },
           "expense_recurring_rules": {
             "rows": 3,
-            "sha256": "2b347de82837f73e143649d11ee8ee1a69ce3eae146908b1e7a6a775c56bbf75"
+            "sha256": "635a9b7fd4dd1caff530e2d949e2f5d16824986d2adebc5faafacd09a732a827"
           },
           "expense_recurring_occurrences": {
             "rows": 4,
-            "sha256": "af5f4e21f67cec9f1b4ec32e1084efd7ad1c5aa73b155a9341732e39246e7422"
+            "sha256": "0c074f098f6390d96415f85421c595f62f07fef5017fc3318dd124eaefa490b6"
           },
           "expense_recurring_pending": {
             "rows": 8,
-            "sha256": "346954024d27ac6cf388ed79cba0dbaa0c9f06f13c9279f02c99518ace75ddca"
+            "sha256": "0d9560b5ccb06de530c4ad27fb733199ff7f784d54be8be1ca21c181621ae0c5"
           },
           "ledger_activity_events": {
             "rows": 5,
-            "sha256": "42d8feaeafc24ac4acf3a668ff65f712ea2ffadf7f804660bb4db6ae9015231f"
+            "sha256": "ea9e6c271bcb0b73a065d2b9ff5ba64f824439bd72f4e5a7c0bf02aa76c66ba3"
           },
           "ledger_projects": {
             "rows": 0,
@@ -7310,49 +7207,49 @@
         },
         "pending": [
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-11",
             "date": "2026-11-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-12",
             "date": "2026-12-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-01",
             "date": "2027-01-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-02",
             "date": "2027-02-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-03",
             "date": "2027-03-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-04",
             "date": "2027-04-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-05",
             "date": "2027-05-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-06",
             "date": "2027-06-15",
             "notificationState": "inbox"
@@ -7374,28 +7271,28 @@
             "deleted": true
           },
           {
-            "id": "exp_f111354d44fc4bbaadd81de995752d57",
+            "id": "exp_bab42d8536f44dd981b31ecf66c48118",
             "owner": "usr_github_790002",
             "date": "2026-09-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_c9b78c5aa4504d95822759629a3ef225",
+            "id": "exp_069c010e65bf48b2bade8dc05e747a74",
             "owner": "usr_github_790002",
             "date": "2027-09-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_c36f409b136143e3af14e80224dfcf8f",
+            "id": "exp_879ec3627bd840b4983e0f78f691145a",
             "owner": "usr_github_790001",
             "date": "2026-10-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_ed941b6abe4a4fec8b06b0ae1d7cfe12",
+            "id": "exp_8a3d76c15d7b484d810dfa38649387ac",
             "owner": "usr_github_790001",
             "date": "2026-09-15",
             "amountMinor": 1234,
@@ -7404,17 +7301,17 @@
         ],
         "rules": [
           {
-            "id": "rec_eb2e436db37b4b30b601edb82fa60439",
+            "id": "rec_e3e97d0e3eff4aa79e0b159ffa0818cc",
             "nextDate": "2027-12-01",
             "status": "active"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "nextDate": "2027-10-15",
             "status": "active"
           },
           {
-            "id": "rec_1bc001e053c9441087c70ffbbbf979d0",
+            "id": "rec_143319f0ac2e4ac99e0a6fdb7d49be51",
             "nextDate": "2028-09-15",
             "status": "active"
           }
@@ -7503,11 +7400,11 @@
           },
           "expenses": {
             "rows": 6,
-            "sha256": "afeddd3e423bb0125e4c02af4a080bd3e3998893ebfee761470fd50f02df073c"
+            "sha256": "3da225f791ba35397c962af17df862a7c1a578654678511fb205a06cb7d135ee"
           },
           "expense_events": {
             "rows": 6,
-            "sha256": "fe40928e0a3461aa77eb5088ae9260d84e48b61f325253981feeae8c4b224567"
+            "sha256": "6e9a0111e530baf2bb6098218e88c5e1252395c1ba657f37186478cef3398bec"
           },
           "expense_create_idempotency": {
             "rows": 0,
@@ -7515,19 +7412,19 @@
           },
           "expense_recurring_rules": {
             "rows": 3,
-            "sha256": "2b347de82837f73e143649d11ee8ee1a69ce3eae146908b1e7a6a775c56bbf75"
+            "sha256": "635a9b7fd4dd1caff530e2d949e2f5d16824986d2adebc5faafacd09a732a827"
           },
           "expense_recurring_occurrences": {
             "rows": 4,
-            "sha256": "af5f4e21f67cec9f1b4ec32e1084efd7ad1c5aa73b155a9341732e39246e7422"
+            "sha256": "0c074f098f6390d96415f85421c595f62f07fef5017fc3318dd124eaefa490b6"
           },
           "expense_recurring_pending": {
             "rows": 8,
-            "sha256": "346954024d27ac6cf388ed79cba0dbaa0c9f06f13c9279f02c99518ace75ddca"
+            "sha256": "0d9560b5ccb06de530c4ad27fb733199ff7f784d54be8be1ca21c181621ae0c5"
           },
           "ledger_activity_events": {
             "rows": 5,
-            "sha256": "42d8feaeafc24ac4acf3a668ff65f712ea2ffadf7f804660bb4db6ae9015231f"
+            "sha256": "ea9e6c271bcb0b73a065d2b9ff5ba64f824439bd72f4e5a7c0bf02aa76c66ba3"
           },
           "ledger_projects": {
             "rows": 0,
@@ -7560,49 +7457,49 @@
         },
         "pending": [
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-11",
             "date": "2026-11-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-12",
             "date": "2026-12-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-01",
             "date": "2027-01-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-02",
             "date": "2027-02-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-03",
             "date": "2027-03-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-04",
             "date": "2027-04-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-05",
             "date": "2027-05-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-06",
             "date": "2027-06-15",
             "notificationState": "inbox"
@@ -7624,28 +7521,28 @@
             "deleted": true
           },
           {
-            "id": "exp_f111354d44fc4bbaadd81de995752d57",
+            "id": "exp_bab42d8536f44dd981b31ecf66c48118",
             "owner": "usr_github_790002",
             "date": "2026-09-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_c9b78c5aa4504d95822759629a3ef225",
+            "id": "exp_069c010e65bf48b2bade8dc05e747a74",
             "owner": "usr_github_790002",
             "date": "2027-09-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_c36f409b136143e3af14e80224dfcf8f",
+            "id": "exp_879ec3627bd840b4983e0f78f691145a",
             "owner": "usr_github_790001",
             "date": "2026-10-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_ed941b6abe4a4fec8b06b0ae1d7cfe12",
+            "id": "exp_8a3d76c15d7b484d810dfa38649387ac",
             "owner": "usr_github_790001",
             "date": "2026-09-15",
             "amountMinor": 1234,
@@ -7654,17 +7551,17 @@
         ],
         "rules": [
           {
-            "id": "rec_eb2e436db37b4b30b601edb82fa60439",
+            "id": "rec_e3e97d0e3eff4aa79e0b159ffa0818cc",
             "nextDate": "2027-12-01",
             "status": "active"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "nextDate": "2027-10-15",
             "status": "active"
           },
           {
-            "id": "rec_1bc001e053c9441087c70ffbbbf979d0",
+            "id": "rec_143319f0ac2e4ac99e0a6fdb7d49be51",
             "nextDate": "2028-09-15",
             "status": "active"
           }
@@ -7753,11 +7650,11 @@
           },
           "expenses": {
             "rows": 6,
-            "sha256": "afeddd3e423bb0125e4c02af4a080bd3e3998893ebfee761470fd50f02df073c"
+            "sha256": "3da225f791ba35397c962af17df862a7c1a578654678511fb205a06cb7d135ee"
           },
           "expense_events": {
             "rows": 6,
-            "sha256": "fe40928e0a3461aa77eb5088ae9260d84e48b61f325253981feeae8c4b224567"
+            "sha256": "6e9a0111e530baf2bb6098218e88c5e1252395c1ba657f37186478cef3398bec"
           },
           "expense_create_idempotency": {
             "rows": 0,
@@ -7765,19 +7662,19 @@
           },
           "expense_recurring_rules": {
             "rows": 3,
-            "sha256": "2b347de82837f73e143649d11ee8ee1a69ce3eae146908b1e7a6a775c56bbf75"
+            "sha256": "635a9b7fd4dd1caff530e2d949e2f5d16824986d2adebc5faafacd09a732a827"
           },
           "expense_recurring_occurrences": {
             "rows": 4,
-            "sha256": "af5f4e21f67cec9f1b4ec32e1084efd7ad1c5aa73b155a9341732e39246e7422"
+            "sha256": "0c074f098f6390d96415f85421c595f62f07fef5017fc3318dd124eaefa490b6"
           },
           "expense_recurring_pending": {
             "rows": 8,
-            "sha256": "346954024d27ac6cf388ed79cba0dbaa0c9f06f13c9279f02c99518ace75ddca"
+            "sha256": "0d9560b5ccb06de530c4ad27fb733199ff7f784d54be8be1ca21c181621ae0c5"
           },
           "ledger_activity_events": {
             "rows": 5,
-            "sha256": "42d8feaeafc24ac4acf3a668ff65f712ea2ffadf7f804660bb4db6ae9015231f"
+            "sha256": "ea9e6c271bcb0b73a065d2b9ff5ba64f824439bd72f4e5a7c0bf02aa76c66ba3"
           },
           "ledger_projects": {
             "rows": 0,
@@ -7810,49 +7707,49 @@
         },
         "pending": [
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-11",
             "date": "2026-11-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-12",
             "date": "2026-12-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-01",
             "date": "2027-01-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-02",
             "date": "2027-02-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-03",
             "date": "2027-03-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-04",
             "date": "2027-04-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-05",
             "date": "2027-05-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-06",
             "date": "2027-06-15",
             "notificationState": "inbox"
@@ -7874,28 +7771,28 @@
             "deleted": true
           },
           {
-            "id": "exp_f111354d44fc4bbaadd81de995752d57",
+            "id": "exp_bab42d8536f44dd981b31ecf66c48118",
             "owner": "usr_github_790002",
             "date": "2026-09-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_c9b78c5aa4504d95822759629a3ef225",
+            "id": "exp_069c010e65bf48b2bade8dc05e747a74",
             "owner": "usr_github_790002",
             "date": "2027-09-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_c36f409b136143e3af14e80224dfcf8f",
+            "id": "exp_879ec3627bd840b4983e0f78f691145a",
             "owner": "usr_github_790001",
             "date": "2026-10-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_ed941b6abe4a4fec8b06b0ae1d7cfe12",
+            "id": "exp_8a3d76c15d7b484d810dfa38649387ac",
             "owner": "usr_github_790001",
             "date": "2026-09-15",
             "amountMinor": 1234,
@@ -7904,17 +7801,17 @@
         ],
         "rules": [
           {
-            "id": "rec_eb2e436db37b4b30b601edb82fa60439",
+            "id": "rec_e3e97d0e3eff4aa79e0b159ffa0818cc",
             "nextDate": "2027-12-01",
             "status": "active"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "nextDate": "2027-10-15",
             "status": "active"
           },
           {
-            "id": "rec_1bc001e053c9441087c70ffbbbf979d0",
+            "id": "rec_143319f0ac2e4ac99e0a6fdb7d49be51",
             "nextDate": "2028-09-15",
             "status": "active"
           }
@@ -7972,11 +7869,11 @@
           },
           "expenses": {
             "rows": 6,
-            "sha256": "afeddd3e423bb0125e4c02af4a080bd3e3998893ebfee761470fd50f02df073c"
+            "sha256": "3da225f791ba35397c962af17df862a7c1a578654678511fb205a06cb7d135ee"
           },
           "expense_events": {
             "rows": 6,
-            "sha256": "fe40928e0a3461aa77eb5088ae9260d84e48b61f325253981feeae8c4b224567"
+            "sha256": "6e9a0111e530baf2bb6098218e88c5e1252395c1ba657f37186478cef3398bec"
           },
           "expense_create_idempotency": {
             "rows": 0,
@@ -7984,19 +7881,19 @@
           },
           "expense_recurring_rules": {
             "rows": 3,
-            "sha256": "2b347de82837f73e143649d11ee8ee1a69ce3eae146908b1e7a6a775c56bbf75"
+            "sha256": "635a9b7fd4dd1caff530e2d949e2f5d16824986d2adebc5faafacd09a732a827"
           },
           "expense_recurring_occurrences": {
             "rows": 4,
-            "sha256": "af5f4e21f67cec9f1b4ec32e1084efd7ad1c5aa73b155a9341732e39246e7422"
+            "sha256": "0c074f098f6390d96415f85421c595f62f07fef5017fc3318dd124eaefa490b6"
           },
           "expense_recurring_pending": {
             "rows": 8,
-            "sha256": "346954024d27ac6cf388ed79cba0dbaa0c9f06f13c9279f02c99518ace75ddca"
+            "sha256": "0d9560b5ccb06de530c4ad27fb733199ff7f784d54be8be1ca21c181621ae0c5"
           },
           "ledger_activity_events": {
             "rows": 5,
-            "sha256": "42d8feaeafc24ac4acf3a668ff65f712ea2ffadf7f804660bb4db6ae9015231f"
+            "sha256": "ea9e6c271bcb0b73a065d2b9ff5ba64f824439bd72f4e5a7c0bf02aa76c66ba3"
           },
           "ledger_projects": {
             "rows": 0,
@@ -8029,49 +7926,49 @@
         },
         "pending": [
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-11",
             "date": "2026-11-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2026-12",
             "date": "2026-12-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-01",
             "date": "2027-01-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-02",
             "date": "2027-02-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-03",
             "date": "2027-03-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-04",
             "date": "2027-04-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-05",
             "date": "2027-05-15",
             "notificationState": "inbox"
           },
           {
-            "ruleId": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "ruleId": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "periodKey": "M2027-06",
             "date": "2027-06-15",
             "notificationState": "inbox"
@@ -8093,28 +7990,28 @@
             "deleted": true
           },
           {
-            "id": "exp_f111354d44fc4bbaadd81de995752d57",
+            "id": "exp_bab42d8536f44dd981b31ecf66c48118",
             "owner": "usr_github_790002",
             "date": "2026-09-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_c9b78c5aa4504d95822759629a3ef225",
+            "id": "exp_069c010e65bf48b2bade8dc05e747a74",
             "owner": "usr_github_790002",
             "date": "2027-09-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_c36f409b136143e3af14e80224dfcf8f",
+            "id": "exp_879ec3627bd840b4983e0f78f691145a",
             "owner": "usr_github_790001",
             "date": "2026-10-15",
             "amountMinor": 1234,
             "deleted": false
           },
           {
-            "id": "exp_ed941b6abe4a4fec8b06b0ae1d7cfe12",
+            "id": "exp_8a3d76c15d7b484d810dfa38649387ac",
             "owner": "usr_github_790001",
             "date": "2026-09-15",
             "amountMinor": 1234,
@@ -8123,17 +8020,17 @@
         ],
         "rules": [
           {
-            "id": "rec_eb2e436db37b4b30b601edb82fa60439",
+            "id": "rec_e3e97d0e3eff4aa79e0b159ffa0818cc",
             "nextDate": "2027-12-01",
             "status": "active"
           },
           {
-            "id": "rec_f0cc8caf78f54f0d9e3a3f75720b89be",
+            "id": "rec_2725a4e34be04af6b78de5c6ae386d12",
             "nextDate": "2027-10-15",
             "status": "active"
           },
           {
-            "id": "rec_1bc001e053c9441087c70ffbbbf979d0",
+            "id": "rec_143319f0ac2e4ac99e0a6fdb7d49be51",
             "nextDate": "2028-09-15",
             "status": "active"
           }
@@ -8171,7 +8068,7 @@
     }
   ],
   "nativeStatements": 950,
-  "meteredNativeRowsRead": 3019,
+  "meteredNativeRowsRead": 3028,
   "meteredNativeRowsWritten": 495,
   "integrityProbeNativeRowsRead": 875,
   "nativeAttemptsObserved": [

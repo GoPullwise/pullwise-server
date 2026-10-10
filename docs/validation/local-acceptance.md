@@ -6,6 +6,84 @@ and preserved database, journal, hourly schedule and production D1 pause. No
 remote business mutation, forced tick, provider call or real payment is performed
 by this publication check. Local fixture acceptance is recorded separately below.
 
+## Recurring category assistance, dated posting and recovery (2026-10-10)
+
+The final merged Server passes the complete **2,504 Python 3.10.12 tests and 62
+subtests**. Project and Shared pool recurring creation now use the same optional
+Jev category selection as ordinary expenses, retaining paid-plan eligibility,
+activation/reservation limits, confident active-category selection and manual
+fallback. An explicit category remains unchanged. Existing period identity,
+Cookie/key/member/revision, target/category, Owner capacity, audit and commercial
+write fences cover creation and every occurrence.
+
+A local start date on or before today posts one incurred expense at that date;
+a future start saves only the plan. Each later occurrence adds a separate dated
+expense, without accumulating amounts. The next displayed date is future-only;
+GET performs no catch-up or repair writes. Failed capacity creates commit no
+partial financial row. They advance the plan and retain its frozen historical
+occurrence for manual retry. Atomic guards plus schema triggers cap unresolved
+failures at ten per rule, preserving the first ten; further full failures are
+discarded without another retained notification. Successful retry creates one
+expense and removes its pending row; failed/replayed retries preserve financial
+identity. English-only email targets the frozen actor's currently verified
+linked address, with durable delivery claims and private inbox fallback for
+unavailable/failed delivery. No automatic delivery retry or key-grant disclosure
+is introduced. Web's recorded-expense and future-plan layout has separate
+acceptance in its repository.
+
+[Native schema evidence](recurring-pending-schema-native-2026-10-10.json) passes
+**six finite local requests**, three isolated D1 bindings and two real process
+restarts. The v11-to-v12 upgrade preserves every stored field in all **22
+historical tables**, prior markers and the original journal. Native probes prove
+the ten-row insert/reparent cap, frozen JSON validation, late atomic rollback
+and persistent unknown-outcome stop. Across **902 result statements**, fixture
+setup, integrity and mutation work observes **5,506 reads / 688 writes**. The
+upgrade itself observes **371 reads / 8 writes**, inside its **22,016 / 256**
+reservation. Scalar pending inserts/updates/deletes reserve all index effects;
+no native attempt metadata is fabricated.
+
+[Native REST evidence](recurring-pending-native-local-2026-10-10.json) passes
+**22 fixed local HTTP requests** through the canonical Python application,
+NativeD1 and original-scope metered coordinator. It proves historical-start
+posting, independent period rows, the first ten pending failures and overflow
+discard, private inbox fallback, manual retry/replay, oldest replacement and
+read-only future-date projection. It observes **950 native statements**,
+**3,028 metered reads / 495 writes** with retained finite reservations,
+and **875** separate read-only integrity-probe reads; accounting matches raw
+native metadata and the journal stays healthy. Both receipts preserve their
+exact tested source snapshots; the REST journey uses the merged credential-renewal
+source. The subsequent email-only four-decimal fix has gateway regression coverage
+and whole-suite verification. These are local synthetic fixtures, without remote D1,
+real provider delivery, real accounts, payments or forced remote ticks.
+
+The reviewed release path preserves the preview DB, coordinator namespace and
+cumulative journal, keeps `0 * * * *`, and retains production D1/cron pause.
+With `PULLWISE_PREVIEW_SCHEMA_V12_UPGRADE_ENABLED=1`, one deliberate ordinary
+preview `GET /health` admits the additive upgrade under the existing lock when
+the stored schema is healthy v11/storage1. The same runtime admission can occur
+on another permitted product request; this is not a public migration endpoint.
+The scheduler never upgrades schemas. There is no configured business clear or
+plan grant. Read the DO-only `GET /_preview/budget` once before and once after;
+these status reads use **zero D1 rows**. Do not retry an incomplete/unknown upgrade
+or issue a remote forced tick.
+
+The compiler reserves all **four upgrade batches / 16 statements** before any
+D1 dispatch. For verified v11 counts, let `S` be the sum of its 22 table row
+counts and `A` the `app_state` count: upgrade reservation is
+`reads = 128*S + 384*A + 16,896`, `writes = 256`. Read-only batches include all
+three possible native attempts; the six-statement atomic DDL batch admits only
+the nonretryable write contract. The following health catalog query adds at most
+**576 reserved reads / zero writes**, with no extra cardinality scan after the
+upgrade's strict proof. Under the existing one-million-row per-table operator
+cap and empty guard, the combined reservation is at most **3,072,017,472 reads /
+256 writes**; the actual request reserves the exact smaller journal-derived
+bound. Enabled product mode keeps cumulative accounting without restoring
+historical finite-test ceilings as normal-use gates. Concurrent existing product
+traffic/hourly execution can affect before/after counter deltas; publication
+must not attribute the entire interval to migration or claim remote feature
+acceptance from health alone. The publication receipt is recorded separately
+once readback is complete.
+
 ## Automatic GitHub credential renewal (2026-10-10)
 
 [Preview publication receipt](github-refresh-preview-release-2026-10-10.json) records

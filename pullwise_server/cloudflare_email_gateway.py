@@ -66,7 +66,7 @@ class WorkerEmailGateway:
                 or not isinstance(scheduled_on, str) or not re.fullmatch(
                     r"[0-9]{4}-[0-9]{2}-[0-9]{2}", scheduled_on)
                 or not isinstance(amount, str) or not re.fullmatch(
-                    r"[0-9]{1,16}(?:\.[0-9]{1,3})?", amount)
+                    r"[0-9]{1,16}(?:\.[0-9]{1,4})?", amount)
                 or not isinstance(currency, str) or not re.fullmatch(r"[A-Z]{3}", currency)):
             raise EmailDeliveryError()
         try:

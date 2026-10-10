@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from pullwise_server.cloudflare_email_gateway import EmailDeliveryError, WorkerEmailGateway
+from pullwise_server.cloudflare_ledger_expenses import _decimal_amount
 
 
 def gateway(**changes):
@@ -82,11 +83,25 @@ def test_recurring_failure_mail_is_english_and_preserves_the_manual_action():
     mail.binding.send.assert_awaited_once()
 
 
+@pytest.mark.parametrize("currency", ["CLF", "UYW"])
+def test_recurring_failure_mail_preserves_supported_four_decimal_currencies(currency):
+    mail = gateway()
+    amount = _decimal_amount(123456, currency)
+    assert amount == "12.3456"
+    asyncio.run(mail.send_recurring_failure("user@example.com",
+        scheduled_on="2026-10-01", amount=amount, currency=currency))
+    body = mail.binding.send.await_args.args[0]
+    assert f"{currency} 12.3456" in body["text"]
+    assert f"{currency} 12.3456" in body["html"]
+    assert all(body[field].isascii() for field in ("subject", "text", "html"))
+    mail.binding.send.assert_awaited_once()
+
+
 @pytest.mark.parametrize("field,value", [
     ("email", "recipient@example.com\r\nBcc: victim@example.com"),
     ("email", "not-an-email"), ("scheduled_on", "2026-02-30"),
     ("scheduled_on", "<script>"), ("amount", "12<script>"),
-    ("amount", 12), ("currency", "USD<script>"),
+    ("amount", 12), ("amount", "12.34567"), ("currency", "USD<script>"),
 ])
 def test_recurring_failure_rejects_unsafe_fields_before_provider_call(field, value):
     mail = gateway()
