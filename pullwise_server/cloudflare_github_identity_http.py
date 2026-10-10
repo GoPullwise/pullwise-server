@@ -551,7 +551,8 @@ async def handle_identity_request(*, binding: Any, gateway: Any, now: int,
             result = {"github": {"connected": result["githubAccess"] == "authorized",
                                  "authorizationPending": False, "mode": "github-app" if access else None,
                                  "repositories": [item["fullName"] for item in result["items"]]},
-                      "items": [], **({"githubRefreshRequired": True} if refresh else {})}
+                      "items": [], "githubAccess": result["githubAccess"],
+                      **({"githubRefreshRequired": True} if refresh else {})}
             result["items"] = [result["github"]]
         return 200, result, no_store
     return 404, {"error": {"code": "NOT_FOUND"}}, no_store

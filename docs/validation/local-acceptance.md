@@ -1,5 +1,34 @@
 # Current local acceptance
 
+## GitHub account and repository recovery (2026-10-10)
+
+The browser compatibility `GET /integrations` response now keeps the same
+top-level `githubAccess` state as the repository read: `authorized`,
+`not_connected`, `lost`, or `reauthorization_required`. Its existing `github`
+object and `items` projection stay compatible, and `githubRefreshRequired`
+remains present only when the actual account has usable saved refresh facts.
+A rejected legacy token without refresh credentials therefore still identifies
+the required account reconnection instead of looking like missing App repository
+installation. Reads retain no rejected partial/cached grants and never write
+credentials or change the selected ledger's Owner identity.
+
+OAuth linking and installation callbacks continue to bind the actual cookie
+account and session. Existing numeric GitHub identity conflicts still return
+HTTP 409 without merging accounts, switching users, or writing linked identity
+facts. Web owns browser callback error presentation; the Server JSON API
+contract stays intact.
+
+Python 3.10.12 runs the full Server suite with **2,549 tests and 62 subtests
+passing**; its sole failure is the sandbox denying creation of a loopback socket.
+The exact transport test then passes with socket permission, giving **2,550
+validated tests and 62 subtests** in total. The identity/refresh subset passes
+122 tests, including all four integration states, legacy rejected tokens without
+refresh credentials, read-only behavior and actual-account isolation from the
+workspace selector. S01, synchronized Worker mirror, deployment-shell syntax
+and diff whitespace checks pass. All validation for this repair is local and
+synthetic; there is no real OAuth/provider request, remote D1 access, push or
+deployment.
+
 [Jev/overview preview publication](jev-overview-preview-release-2026-10-10.json)
 records both main runtime commits and 100%-active preview versions. The original
 Server database, coordinator namespace, inherited bindings, hourly schedule and

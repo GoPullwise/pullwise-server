@@ -713,6 +713,56 @@ def test_rejected_github_token_keeps_verified_email_session_but_hides_repository
     assert asyncio.run(_user(binding, original["id"])) == linked
 
 
+@pytest.mark.parametrize("state,provider_failure", [
+    ("authorized", None), ("not_connected", None),
+    ("lost", "GITHUB_PERMISSION_DENIED"),
+    ("reauthorization_required", "GITHUB_REAUTHORIZATION_REQUIRED"),
+])
+def test_integrations_keeps_actual_account_recovery_state_without_refresh_or_read_writes(
+        tmp_path, state, provider_failure):
+    from pullwise_server.cloudflare_github_gateway import GitHubFailure
+    fixture, _, _ = seed(tmp_path / "integration-recovery.db")
+    original, _, headers = email_account(fixture)
+    user = original if state == "not_connected" else {
+        **original, "providers": ["email", "github"], "githubId": "77", "githubLogin": "alice",
+        "githubAccessToken": "sealed:synthetic-access-token",
+        "githubRepositoryAccess": {"status": "authorized", "repositoryItems": [
+            {"fullName": "private/stale-cache"}]},
+    }
+    binding = D1ShapedSQLite(fixture.store)
+    if user != original:
+        asyncio.run(_write_user(binding, user, fixture.now, original))
+
+    class CurrentGrants(GitHubStub):
+        async def installations(self, token):
+            assert state != "not_connected", "Email-only accounts must not call GitHub"
+            if provider_failure:
+                raise GitHubFailure(provider_failure)
+            return await super().installations(token)
+
+    class ReadOnly(D1ShapedSQLite):
+        def prepare(self, sql):
+            assert sql.lstrip().upper().startswith("SELECT"), sql
+            return super().prepare(sql)
+
+    with fixture.store.connect() as db:
+        before = list(db.iterdump())
+    status, payload, response_headers = call(ReadOnly(fixture.store), CurrentGrants(), fixture.now + 1,
+        "GET", "/integrations", headers={**headers, "X-Pullwise-Workspace": "usr_shared_owner"})
+    assert status == 200 and payload["githubAccess"] == state
+    assert payload["github"] == {
+        "connected": state == "authorized", "authorizationPending": False,
+        "mode": None if state == "not_connected" else "github-app",
+        "repositories": ["alice/project"] if state == "authorized" else [],
+    }
+    assert payload["items"] == [payload["github"]]
+    assert "githubRefreshRequired" not in payload
+    assert response_headers["Cache-Control"] == "no-store"
+    assert "private/stale-cache" not in json.dumps(payload) and "sealed:" not in json.dumps(payload)
+    with fixture.store.connect() as db:
+        assert list(db.iterdump()) == before
+
+
 class GitHubIdentityHttpTests(unittest.TestCase):
     def _run(self, check):
         with tempfile.TemporaryDirectory() as directory:

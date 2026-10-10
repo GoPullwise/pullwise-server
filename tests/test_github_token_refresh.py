@@ -289,6 +289,7 @@ def test_eight_hour_expiry_reads_signal_refresh_without_writes_or_provider_calls
     status, payload, headers = call(ReadOnly(fixture.store), gateway, expiry, method, path,
         headers={"Cookie": cookie, "Origin": ORIGIN})
     assert status == 200 and payload["githubRefreshRequired"] is True
+    assert payload["githubAccess"] == "reauthorization_required"
     assert headers["Cache-Control"] == "no-store"
     assert_no_credentials(payload)
     assert not gateway.refresh_calls and not gateway.repository_calls
