@@ -1,5 +1,13 @@
 # Current local acceptance
 
+[Recurring preview publication](recurring-expenses-preview-release-2026-10-10.json)
+records both main source commits and deployed versions, healthy schema v12/storage1,
+the unchanged database/coordinator/hourly schedule, production pause, and exact
+homepage/three-asset readback. The single ordinary health request admits the
+additive upgrade; there are no remote synthetic users, business mutations, forced
+ticks or real provider-delivery acceptance. Counter deltas include concurrent
+traffic. All recurring changes are published before starting the pagination follow-up.
+
 [Final preview publication receipt](rest-capacity-and-retention-preview-release-2026-10-09.json) records the released Web/Server
 versions, exact three-asset/static-homepage readback, configured plan capacities
 and preserved database, journal, hourly schedule and production D1 pause. No

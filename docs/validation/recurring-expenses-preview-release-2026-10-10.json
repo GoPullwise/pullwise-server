@@ -1,0 +1,835 @@
+{
+  "date": "2026-10-10",
+  "passed": true,
+  "scope": "Recurring preview additive upgrade and static publication only",
+  "serverOrdinaryHealthRequests": 1,
+  "budgetD1Rows": 0,
+  "webHomepageRequests": 1,
+  "webHashedAssetRequests": 3,
+  "clientRetries": 0,
+  "remoteSyntheticAccounts": 0,
+  "remoteBusinessMutations": 0,
+  "forcedTicks": 0,
+  "realProviderDeliveryAcceptance": false,
+  "budgetBefore": {
+    "productOperationMode": true,
+    "limits": {
+      "rowsRead": null,
+      "rowsWritten": null
+    },
+    "historicalCeilings": {
+      "rowsRead": 100000,
+      "rowsWritten": 1000
+    },
+    "reserved": {
+      "rowsRead": 492262,
+      "rowsWritten": 7415
+    },
+    "observed": {
+      "rowsRead": 123404,
+      "rowsWritten": 3625
+    },
+    "schemaReady": true,
+    "schemaVersion": 11,
+    "stateStorageVersion": 1,
+    "businessClear": {
+      "actionId": "preview-ledger-business-clear-2026-10-09-v1",
+      "complete": true,
+      "schemaVersion": 11,
+      "request": 4320,
+      "remainingBusinessRows": {
+        "total": 0,
+        "tables": {
+          "expense_suggestion_events": 0,
+          "ledger_activity_events": 0,
+          "expense_events": 0,
+          "expense_create_idempotency": 0,
+          "expense_recurring_occurrences": 0,
+          "expense_recurring_rules": 0,
+          "expenses": 0,
+          "ledger_project_repositories": 0,
+          "ledger_projects": 0,
+          "expense_categories": 0
+        }
+      },
+      "nonzeroCapacityRows": 0,
+      "reservedRead": 54528,
+      "reservedWritten": 539,
+      "observedRead": 961,
+      "observedWritten": 146
+    },
+    "stopped": null
+  },
+  "budgetAfter": {
+    "productOperationMode": true,
+    "limits": {
+      "rowsRead": null,
+      "rowsWritten": null
+    },
+    "historicalCeilings": {
+      "rowsRead": 100000,
+      "rowsWritten": 1000
+    },
+    "reserved": {
+      "rowsRead": 538859,
+      "rowsWritten": 7675
+    },
+    "observed": {
+      "rowsRead": 124372,
+      "rowsWritten": 3636
+    },
+    "schemaReady": true,
+    "schemaVersion": 12,
+    "stateStorageVersion": 1,
+    "businessClear": {
+      "actionId": "preview-ledger-business-clear-2026-10-09-v1",
+      "complete": false,
+      "schemaVersion": 12,
+      "request": 4320
+    },
+    "stopped": null
+  },
+  "health": {
+    "request": {
+      "status": 200,
+      "url": "https://preview-api.pull-wise.com/health",
+      "contentType": "application/json",
+      "robots": null,
+      "bytes": 90,
+      "sha256": "a66e46c07f6b1598ad752020c7c8d165307ca87cadc2445fae38401dfcaef949"
+    },
+    "body": {
+      "ok": true,
+      "service": "pullwise-server",
+      "database": {
+        "type": "d1",
+        "configured": true
+      }
+    }
+  },
+  "budgetAfterRequest": {
+    "status": 200,
+    "url": "https://preview-api.pull-wise.com/_preview/budget",
+    "contentType": "application/json",
+    "robots": null,
+    "bytes": 476,
+    "sha256": "a1fbbd5bb32ef8a2d84efbb920cc1e6a038bed040d06b580fd27d83e131c30e4"
+  },
+  "homepage": {
+    "status": 200,
+    "url": "https://preview.pull-wise.com/",
+    "contentType": "text/html",
+    "robots": "noindex, nofollow",
+    "bytes": 4732,
+    "sha256": "c45a847ae35ebe1cc308f48f230a833b97823544d5e7d9f837c0fe9aa84a7666"
+  },
+  "assets": [
+    {
+      "status": 200,
+      "url": "https://preview.pull-wise.com/assets/index-DuoMODX_.js",
+      "contentType": "text/javascript",
+      "robots": null,
+      "bytes": 99870,
+      "sha256": "664212a16589bdbca61ae696cdf016cdbbba112df5a82b14f6a2b70714a4f393",
+      "matchesBuiltBytes": true
+    },
+    {
+      "status": 200,
+      "url": "https://preview.pull-wise.com/assets/ledger-screen-D3Z1jFOr.js",
+      "contentType": "text/javascript",
+      "robots": null,
+      "bytes": 161217,
+      "sha256": "c7a06e0408d172ef3416f0f10e838c2c8501c0c22a043dd4e56b3671333575d5",
+      "matchesBuiltBytes": true
+    },
+    {
+      "status": 200,
+      "url": "https://preview.pull-wise.com/assets/index-BxzhodQq.css",
+      "contentType": "text/css",
+      "robots": null,
+      "bytes": 92627,
+      "sha256": "75f5dcf16adf64034de96e12504c8d3210c7504c173e9556b9ed9dc9c4983b21",
+      "matchesBuiltBytes": true
+    }
+  ],
+  "accountingIntervalIncludesConcurrentTraffic": true,
+  "serverSourceCommit": "a64f17c822229f42e6aa99d2aa36462d69200747",
+  "webSourceCommit": "38fac2137c4e6e8db4875f485edcc0d5f4fe300a",
+  "serverVersion": "90489949-62c5-4de8-84ea-92916bbad18b",
+  "webVersion": "de5c0808-23dd-422c-b257-987f80d15ddb",
+  "checks": {
+    "serverTests": 2504,
+    "serverSubtests": 62,
+    "webTestFiles": 68,
+    "webTests": 1358,
+    "chromiumDateStates": 258,
+    "chromiumMobileStates": 187,
+    "lint": true,
+    "build": true,
+    "workerConfig": true,
+    "serverMirror": true,
+    "previewProductionStatic": true,
+    "frozenPythonWorkerDryRun": true,
+    "webWorkerDryRun": true
+  },
+  "managementBefore": [
+    {
+      "name": "pullwise-server-preview",
+      "success": true,
+      "status": [
+        200,
+        200
+      ],
+      "settings": {
+        "compatibility_date": "2026-09-23",
+        "compatibility_flags": [
+          "python_workers"
+        ],
+        "bindings": [
+          {
+            "name": "DB",
+            "type": "d1",
+            "id": "e9dc3b89-f81f-4fce-87ef-d8797d879fb4"
+          },
+          {
+            "name": "EMAIL",
+            "type": "send_email",
+            "allowed_sender_addresses": [
+              "login@auth.pull-wise.com"
+            ]
+          },
+          {
+            "name": "PULLWISE_ALLOWED_ORIGINS",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_APP_URL",
+            "type": "plain_text",
+            "text": "https://preview.pull-wise.com"
+          },
+          {
+            "name": "PULLWISE_COOKIE_SAME_SITE",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_API_BASE_URL",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_API_KEY",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_PRODUCT_IDS_JSON",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_WEBHOOK_SECRET",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_D1_ACCESS_ENABLED",
+            "type": "plain_text",
+            "text": "1"
+          },
+          {
+            "name": "PULLWISE_EMAIL_AUTH_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_EMAIL_CODE_SECRET",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_EMAIL_FROM",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_APP_SLUG",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_CALLBACK_URL",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_CLIENT_ID",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_CLIENT_SECRET",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_TOKEN_KEY",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_JEV_SUGGESTIONS_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_JEV_SUGGESTIONS_EVALUATED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_MODE",
+            "type": "plain_text",
+            "text": "preview"
+          },
+          {
+            "name": "PULLWISE_PLAN_LIMITS_JSON",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_BUSINESS_CLEAR_ID",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_BUSINESS_CLEAR_MANIFEST",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_PRODUCT_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V10_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V11_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V6_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V7_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V8_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V9_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_RECURRING_EXPENSES_ENABLED",
+            "type": "plain_text",
+            "text": "1"
+          },
+          {
+            "name": "TYPESAFE_API_KEY",
+            "type": "secret_text"
+          },
+          {
+            "name": "VALIDATION_BUDGET",
+            "type": "durable_object_namespace",
+            "namespace_id": "0e0ce4946c5e4d5f81c606273ba94b5d",
+            "class_name": "ValidationBudget"
+          }
+        ]
+      },
+      "schedules": [
+        {
+          "cron": "0 * * * *",
+          "created_on": "2026-10-08T12:53:34.804419Z",
+          "modified_on": "2026-10-10T02:48:33.793243Z"
+        }
+      ]
+    },
+    {
+      "name": "pullwise-web-preview",
+      "success": true,
+      "status": [
+        200,
+        200
+      ],
+      "settings": {
+        "compatibility_date": "2026-05-25",
+        "compatibility_flags": [],
+        "bindings": [
+          {
+            "name": "ASSETS",
+            "type": "assets"
+          },
+          {
+            "name": "PULLWISE_API_ORIGIN",
+            "type": "plain_text",
+            "text": "https://preview-api.pull-wise.com"
+          },
+          {
+            "name": "PULLWISE_MODE",
+            "type": "plain_text",
+            "text": "preview"
+          },
+          {
+            "name": "PULLWISE_SERVER",
+            "type": "service",
+            "service": "pullwise-server-preview",
+            "environment": "production"
+          }
+        ]
+      },
+      "schedules": []
+    },
+    {
+      "name": "pullwise-server-production",
+      "success": true,
+      "status": [
+        200,
+        200
+      ],
+      "settings": {
+        "compatibility_date": "2026-09-23",
+        "compatibility_flags": [
+          "python_workers"
+        ],
+        "bindings": [
+          {
+            "name": "DB",
+            "type": "d1",
+            "id": "80a29a0d-5699-449f-9541-a01dc461ca9d"
+          },
+          {
+            "name": "PULLWISE_ALLOWED_ORIGINS",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_APP_URL",
+            "type": "plain_text",
+            "text": "https://pull-wise.com"
+          },
+          {
+            "name": "PULLWISE_COOKIE_SAME_SITE",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_API_BASE_URL",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_API_KEY",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_PRODUCT_IDS_JSON",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_WEBHOOK_SECRET",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_D1_ACCESS_ENABLED",
+            "type": "plain_text",
+            "text": "0"
+          },
+          {
+            "name": "PULLWISE_EMAIL_AUTH_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_APP_SLUG",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_CALLBACK_URL",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_CLIENT_ID",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_CLIENT_SECRET",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_TOKEN_KEY",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_JEV_SUGGESTIONS_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_JEV_SUGGESTIONS_EVALUATED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_MODE",
+            "type": "plain_text",
+            "text": "production"
+          },
+          {
+            "name": "PULLWISE_PLAN_LIMITS_JSON",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_BUSINESS_CLEAR_ID",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_BUSINESS_CLEAR_MANIFEST",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V11_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "TYPESAFE_API_KEY",
+            "type": "secret_text"
+          }
+        ]
+      },
+      "schedules": []
+    }
+  ],
+  "managementAfter": [
+    {
+      "name": "pullwise-server-preview",
+      "success": true,
+      "status": [
+        200,
+        200
+      ],
+      "settings": {
+        "compatibility_date": "2026-09-23",
+        "compatibility_flags": [
+          "python_workers"
+        ],
+        "bindings": [
+          {
+            "name": "DB",
+            "type": "d1",
+            "id": "e9dc3b89-f81f-4fce-87ef-d8797d879fb4"
+          },
+          {
+            "name": "EMAIL",
+            "type": "send_email",
+            "allowed_sender_addresses": [
+              "login@auth.pull-wise.com"
+            ]
+          },
+          {
+            "name": "PULLWISE_ALLOWED_ORIGINS",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_APP_URL",
+            "type": "plain_text",
+            "text": "https://preview.pull-wise.com"
+          },
+          {
+            "name": "PULLWISE_COOKIE_SAME_SITE",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_API_BASE_URL",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_API_KEY",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_PRODUCT_IDS_JSON",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_WEBHOOK_SECRET",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_D1_ACCESS_ENABLED",
+            "type": "plain_text",
+            "text": "1"
+          },
+          {
+            "name": "PULLWISE_EMAIL_AUTH_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_EMAIL_CODE_SECRET",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_EMAIL_FROM",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_APP_SLUG",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_CALLBACK_URL",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_CLIENT_ID",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_CLIENT_SECRET",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_TOKEN_KEY",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_JEV_SUGGESTIONS_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_JEV_SUGGESTIONS_EVALUATED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_MODE",
+            "type": "plain_text",
+            "text": "preview"
+          },
+          {
+            "name": "PULLWISE_PLAN_LIMITS_JSON",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_BUSINESS_CLEAR_ID",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_BUSINESS_CLEAR_MANIFEST",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_PRODUCT_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V10_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V11_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V12_UPGRADE_ENABLED",
+            "type": "plain_text",
+            "text": "1"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V6_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V7_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V8_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V9_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_RECURRING_EXPENSES_ENABLED",
+            "type": "plain_text",
+            "text": "1"
+          },
+          {
+            "name": "TYPESAFE_API_KEY",
+            "type": "secret_text"
+          },
+          {
+            "name": "VALIDATION_BUDGET",
+            "type": "durable_object_namespace",
+            "namespace_id": "0e0ce4946c5e4d5f81c606273ba94b5d",
+            "class_name": "ValidationBudget"
+          }
+        ]
+      },
+      "schedules": [
+        {
+          "cron": "0 * * * *",
+          "created_on": "2026-10-08T12:53:34.804419Z",
+          "modified_on": "2026-10-10T03:58:54.777705Z"
+        }
+      ]
+    },
+    {
+      "name": "pullwise-web-preview",
+      "success": true,
+      "status": [
+        200,
+        200
+      ],
+      "settings": {
+        "compatibility_date": "2026-05-25",
+        "compatibility_flags": [],
+        "bindings": [
+          {
+            "name": "ASSETS",
+            "type": "assets"
+          },
+          {
+            "name": "PULLWISE_API_ORIGIN",
+            "type": "plain_text",
+            "text": "https://preview-api.pull-wise.com"
+          },
+          {
+            "name": "PULLWISE_MODE",
+            "type": "plain_text",
+            "text": "preview"
+          },
+          {
+            "name": "PULLWISE_SERVER",
+            "type": "service",
+            "service": "pullwise-server-preview",
+            "environment": "production"
+          }
+        ]
+      },
+      "schedules": []
+    },
+    {
+      "name": "pullwise-server-production",
+      "success": true,
+      "status": [
+        200,
+        200
+      ],
+      "settings": {
+        "compatibility_date": "2026-09-23",
+        "compatibility_flags": [
+          "python_workers"
+        ],
+        "bindings": [
+          {
+            "name": "DB",
+            "type": "d1",
+            "id": "80a29a0d-5699-449f-9541-a01dc461ca9d"
+          },
+          {
+            "name": "PULLWISE_ALLOWED_ORIGINS",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_APP_URL",
+            "type": "plain_text",
+            "text": "https://pull-wise.com"
+          },
+          {
+            "name": "PULLWISE_COOKIE_SAME_SITE",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_API_BASE_URL",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_API_KEY",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_PRODUCT_IDS_JSON",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_CREEM_WEBHOOK_SECRET",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_D1_ACCESS_ENABLED",
+            "type": "plain_text",
+            "text": "0"
+          },
+          {
+            "name": "PULLWISE_EMAIL_AUTH_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_APP_SLUG",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_CALLBACK_URL",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_CLIENT_ID",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_CLIENT_SECRET",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_GITHUB_TOKEN_KEY",
+            "type": "secret_text"
+          },
+          {
+            "name": "PULLWISE_JEV_SUGGESTIONS_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_JEV_SUGGESTIONS_EVALUATED",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_MODE",
+            "type": "plain_text",
+            "text": "production"
+          },
+          {
+            "name": "PULLWISE_PLAN_LIMITS_JSON",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_BUSINESS_CLEAR_ID",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_BUSINESS_CLEAR_MANIFEST",
+            "type": "plain_text"
+          },
+          {
+            "name": "PULLWISE_PREVIEW_SCHEMA_V11_UPGRADE_ENABLED",
+            "type": "plain_text"
+          },
+          {
+            "name": "TYPESAFE_API_KEY",
+            "type": "secret_text"
+          }
+        ]
+      },
+      "schedules": []
+    }
+  ],
+  "databaseAndNamespacePreserved": true,
+  "originalHourlySchedulePreserved": true,
+  "productionD1Paused": true,
+  "contractSourceSha256": "4ff3f1c8a518d009157edb687ccbcf5b85b601c002899d492f44229c82ee6611",
+  "localEvidenceSha256": {
+    "recurring-pending-schema-native-2026-10-10.json": "a813b47929487b866f7411fb4209bd79116417abff2bdb2614a7d298158a9aa7",
+    "recurring-pending-native-local-2026-10-10.json": "025580d7fbfa6afeac42219c42e16695c786674dbd1b17d7c326333039bda7b8",
+    "recurring-browser-local-2026-10-10.json": "63ad1fb45cdd9b332b7238f571d37a78ab7478c7499fb178f62f4681f179dc12"
+  }
+}
